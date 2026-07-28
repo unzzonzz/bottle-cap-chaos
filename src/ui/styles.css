@@ -1,0 +1,55 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  /* The void. Everything outside the 4:3 frame is this. */
+  background: #000000;
+  color: #cfcfcf;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  overscroll-behavior: none;
+}
+
+body {
+  overflow: hidden;
+}
+
+/* The canvas is letterboxed to a fixed 4:3 by Viewport, so it is centred rather
+   than stretched to the window. */
+#app {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#view {
+  display: block;
+
+  /* The drawing buffer is CSS-pixel sized (pixelRatio = 1) and the scene is
+     rendered into a 320x240 target first, so the shader owns the upscale. This
+     stops the compositor from smoothing it again on a HiDPI screen. */
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+
+  /* The orbit controller needs the raw pointer stream. */
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  cursor: grab;
+}
+
+#view.is-dragging {
+  cursor: grabbing;
+}
+
+.lil-gui {
+  --width: 310px;
+  z-index: 10;
+}
