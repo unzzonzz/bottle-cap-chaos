@@ -28,9 +28,15 @@ ColorManagement.enabled = false;
 export const DISPLAY_ASPECT = 4 / 3;
 
 /**
- * Internal render resolutions, as the hardware had them. 320x240 is the default
- * and the one the spec calls for; the others exist so the debug panel can prove
- * the pipeline is resolution-driven rather than hardcoded.
+ * Internal render resolutions.
+ *
+ * The first five are as the hardware had them; 320x240 is the authentic one.
+ * The two above 640x480 are NOT period-correct and are here for the physics
+ * prototype: a cap is 84 columns around, so at 320x240 its wireframe is finer
+ * than the pixel grid and collapses into a solid blob — which makes the one view
+ * the core-feel work has to be judged in the least legible one available. They
+ * keep every other part of the chain (snapping, dither, 15-bit quantiser) intact
+ * and only give it more grid to work on.
  */
 export const RENDER_MODES = {
   '256x224': [256, 224],
@@ -38,6 +44,8 @@ export const RENDER_MODES = {
   '384x288': [384, 288],
   '512x384': [512, 384],
   '640x480': [640, 480],
+  '800x600': [800, 600],
+  '960x720': [960, 720],
 };
 
 /**

@@ -63,30 +63,55 @@ export const CAP_DEFAULTS = {
   teeth: 21,
   /** Across the flute CRESTS at the hem — the widest point of the object. */
   capDiameter: 32.0,
-  /** The flat panel on top. Narrower than the cap; that is what a crown is. */
-  topDiameter: 26.4,
+  /**
+   * The flat panel on top.
+   *
+   * Measured off a real cap rather than guessed: the crimped ring outside the
+   * panel is about 2.3 mm wide, not the 2.8 mm a 26.4 mm panel implies. That
+   * half millimetre is most of what makes the top read right — it is the
+   * difference between a disc with a wide featureless band around it and a disc
+   * whose flutes start almost at its edge.
+   */
+  topDiameter: 27.4,
   /** Hem to panel. */
   skirtHeight: 6.0,
-  /** How far a trough cuts in below the crest, halved. Peak-to-trough is 2x. */
-  toothDepth: 0.9,
+  /**
+   * How far a trough cuts in below the crest, halved. Peak-to-trough is 2x.
+   *
+   * Seen from above, this IS the top's outline: the ring of tabs around the
+   * panel is the only thing between a crown cap and a plain disc. At 0.9 the
+   * scallop was 5.6% of the diameter and the outline read as a soft wave from
+   * anywhere but a low angle; a real one is nearer 7%, deep enough that the
+   * notches reach the panel's own edge.
+   */
+  toothDepth: 1.15,
   /**
    * How the flute opens up on the way down, as an exponent on the ramp.
-   * 1 is a straight taper; above 1 holds the crimp tight under the panel and
-   * spreads it near the hem, which is what a real one does.
+   *
+   * Linear. Above 1 the crimp is still nearly flat a fifth of the way down the
+   * skirt, which leaves a smooth band under the panel that a real cap does not
+   * have — on one the fold marks run right up to the panel's edge. The flutes
+   * still open downward, just from the first row rather than the second.
    */
-  toothCurve: 1.4,
-  /** How far the hem's envelope kicks out past the waist of the skirt. */
-  flare: 0.55,
+  toothCurve: 1.0,
+  /**
+   * How far the hem's envelope kicks out past the waist of the skirt.
+   *
+   * The hem is the last thing a crimp does and it does not stop straight; the
+   * lip of the skirt turns out as it leaves the die.
+   */
+  flare: 0.7,
   /** Sagitta of the panel dome. Nearly flat on purpose. */
   domeRise: 0.35,
   /**
    * Vertical extent of the rolled corner between panel and skirt.
    *
-   * Generous, because on a real cap this corner is where nearly all of the
-   * radial distance between the panel and the skirt gets covered — about 2.2 mm
-   * of it. Shrink it and the shoulder becomes a horizontal flange.
+   * Enough to be a fold and no more. This corner has about 1.6 mm of radius to
+   * cover, and spending 2 mm of a 6 mm skirt getting there turns the fold into a
+   * dome: the whole top of the cap becomes one soft curve with the flutes on its
+   * outer edge, instead of a flat panel that bends once and is done.
    */
-  shoulder: 2.0,
+  shoulder: 1.3,
 
   // ── the inside ───────────────────────────────────────────────────────────
   /** Build the interior. Off for gameplay, on for the customiser. */
@@ -123,7 +148,7 @@ export const CAP_DEFAULTS = {
  * fillet short leaves the shoulder still climbing at about 14 degrees where the
  * panel leaves at 3, and that ~11 degree crease is what reads as the rim.
  */
-const SHOULDER_ARC = 0.78;
+const SHOULDER_ARC = 0.68;
 
 /**
  * Exponent on the flare.
@@ -131,8 +156,12 @@ const SHOULDER_ARC = 0.78;
  * A linear flare over the whole skirt is a cone, and a cone reads as a plant pot.
  * Squaring it holds the wall near-vertical for most of its height and kicks it
  * out only in the last millimetre, which is the shape a crimped hem actually has.
+ *
+ * Eased off slightly from a straight square: at 2.2 the turn happens so late
+ * that with only three rows up the wall it lands between rows and the hem reads
+ * as a sharp corner instead of a curve.
  */
-const FLARE_CURVE = 2.2;
+const FLARE_CURVE = 1.9;
 
 /**
  * The ring the bottle's lip presses into the liner: where its centre sits and
@@ -153,6 +182,41 @@ const SEAL_WIDTH = 0.08;
 const SEAL_PRESS = 0.55;
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+
+/**
+ * The two radii anything drawing ON a cap has to tell apart.
+ *
+ * `outer` is the silhouette — what a cap measures across, and what
+ * `userData.radius` has always reported. `panel` is the flat top, which is
+ * SMALLER: a crown cap spends its outermost couple of millimetres on the
+ * crimped ring, and the panel is what is left inside it.
+ *
+ * The panel's UVs are a planar projection over the PANEL's bounding square —
+ * `0.5 + r*cos/(2*topR)` below — so a mark texture's inscribed circle lands on
+ * the panel, not on the cap. Code that sizes a boundary, a guide ring or a
+ * thumbnail against the cap's outer radius is off by this ratio, and the error
+ * looks like a margin nobody asked for. `MarkEditor`'s guide ring had exactly
+ * that bug: drawn at `outer * boundary` while paint stopped at `panel * boundary`.
+ *
+ * Pure, and used by `buildCapGeometry` itself, so the two cannot drift.
+ *
+ * @param {Partial<typeof CAP_DEFAULTS>} [params]
+ */
+export function capRadii(params = {}) {
+  const p = { ...CAP_DEFAULTS, ...params };
+  const outer = Math.max(0.2, p.capDiameter * 0.5 * MM);
+  const waistR = outer - clamp(p.flare * MM, 0, outer * 0.2);
+  return {
+    outer,
+    panel: clamp(p.topDiameter * 0.5 * MM, outer * 0.2, waistR - 0.15 * MM),
+  };
+}
+
+/** Panel radius over outer radius, for the stock cap. Around 0.856. */
+export const CAP_PANEL_RATIO = (() => {
+  const r = capRadii();
+  return r.panel / r.outer;
+})();
 
 /**
  * @param {Partial<typeof CAP_DEFAULTS>} [params]
@@ -179,15 +243,40 @@ export function buildCapGeometry(params = {}) {
   /** Outer silhouette where the skirt meets the shoulder. */
   const waistR = capR - flare;
   /** The panel. Kept clear of the waist or the shoulder inverts. */
-  const topR = clamp(p.topDiameter * 0.5 * MM, capR * 0.2, waistR - 0.15 * MM);
+  const topR = capRadii(p).panel;
 
   const skirtH = Math.max(0.05 * MM, p.skirtHeight * MM);
   const shoulderH = clamp(p.shoulder * MM, 0.02 * MM, skirtH * 0.6);
   const domeRise = Math.max(0, p.domeRise * MM);
 
-  // The wall has to stay thin relative to the trough depth. A sheet thicker than
-  // the crimp is deep would push the inner wall's crests through its own troughs.
-  const wall = clamp(p.wallThickness * MM, 0.01 * MM, Math.min(topR * 0.25, skirtH * 0.2));
+  // The shoulder fillet, needed here as well as below: its tightest curvature is
+  // the hard ceiling on how thick the sheet may be.
+  const arc = SHOULDER_ARC * Math.PI * 0.5;
+  const dR = (waistR - topR) / (1 - Math.cos(arc));
+
+  /**
+   * The tightest bend anywhere on the cap.
+   *
+   * The fillet is an ellipse with semi-axes dR across and shoulderH up, and an
+   * ellipse is tightest at the end of its major axis, where its radius of
+   * curvature is shoulderH^2 / dR. Offset a surface inward by more than its own
+   * radius of curvature and it passes through itself and comes out inside out —
+   * which is exactly what the inner wall did when the shoulder was shortened
+   * with the sheet slider at the top of its range: one whole row of the inner
+   * skirt inverted, silently, while the mesh stayed watertight.
+   *
+   * Sheet metal has the same limit for the same reason. You cannot fold stock
+   * tighter than it is thick.
+   */
+  const foldLimit = (shoulderH * shoulderH) / Math.max(dR, 1e-6);
+
+  // Thin relative to the trough depth as well: a sheet thicker than the crimp is
+  // deep would push the inner wall's crests through its own troughs.
+  const wall = clamp(
+    p.wallThickness * MM,
+    0.01 * MM,
+    Math.min(topR * 0.25, skirtH * 0.2, foldLimit * 0.8),
+  );
 
   /** Where the straight wall stops and the shoulder starts. */
   const yWaist = skirtH - shoulderH;
@@ -205,8 +294,7 @@ export function buildCapGeometry(params = {}) {
 
   // Elliptical fillet: vertical tangent where it leaves the wall, so the wall
   // and the shoulder are one continuous surface with no crease between them.
-  const arc = SHOULDER_ARC * Math.PI * 0.5;
-  const dR = (waistR - topR) / (1 - Math.cos(arc));
+  // `arc` and `dR` are set above, where the sheet thickness needs them.
   for (let i = 1; i <= shoulderSeg; i++) {
     const a = (i / shoulderSeg) * arc;
     pts.push({
@@ -616,6 +704,8 @@ export function buildCapGeometry(params = {}) {
   geometry.userData.shellTriangles = shellTris;
   geometry.userData.height = domeY(0);
   geometry.userData.radius = capR;
+  /** The flat top's radius — see `capRadii`. Smaller than `radius`. */
+  geometry.userData.panelRadius = topR;
 
   return geometry;
 }

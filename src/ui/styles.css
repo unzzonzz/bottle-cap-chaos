@@ -39,17 +39,133 @@ body {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 
-  /* The orbit controller needs the raw pointer stream. */
+  /* The pointer router needs the raw stream: no scrolling, no pinch-to-zoom
+     handed to the browser, no double-tap gestures. */
   touch-action: none;
   -webkit-tap-highlight-color: transparent;
+
+  /* The default press moves the camera, so the default cursor says so. The
+     three states below are the other half of "지금 누르면 발사인지 카메라인지
+     미리 알 수 있어야 한다" — the ring the overlay draws is the half that
+     survives on a touch screen, where there is no hover at all. */
   cursor: grab;
+}
+
+/* Over one of your own caps: this press draws a shot. */
+#view.is-over-cap {
+  cursor: crosshair;
 }
 
 #view.is-dragging {
   cursor: grabbing;
 }
 
+/* The cards are meshes inside the canvas now, so the cursor is the one piece of
+   feedback they cannot provide for themselves — the element under the pointer
+   is the same canvas wherever it is. It wins over `.is-over-cap` because the
+   press does: cards are tested first. */
+#view.is-over-card,
+#view.is-over-card.is-over-cap {
+  cursor: grab;
+}
+
+#view.is-dragging-card,
+#view.is-dragging-card.is-over-card {
+  cursor: grabbing;
+}
+
+/* The menu's plates are meshes inside the canvas, so the cursor is the one
+   piece of feedback they cannot give themselves — the element under the
+   pointer is the same canvas wherever it is. */
+#view.is-over-item {
+  cursor: pointer;
+}
+
+#view.is-aiming,
+#view.is-aiming.is-over-cap {
+  cursor: crosshair;
+}
+
+/* The HUD is meshes inside the canvas now, so like the cards it cannot provide
+   its own cursor — the element under the pointer is the same canvas wherever it
+   is. It wins over `.is-over-cap` because the press does: the HUD is tested
+   before the caps. */
+#view.is-over-ui,
+#view.is-over-ui.is-over-cap {
+  cursor: pointer;
+}
+
+/* ── the menu page, where `grab` is a lie ───────────────────────────────────
+   The rule at the top of this file says `grab` because on the GAME page the
+   default press moves the camera. The menu shares this stylesheet and the same
+   `#view` canvas, and nothing on it is draggable: the main menu, 설정 and 내 마크
+   all run entirely on presses, and the one drag in the whole page is the mark
+   editor's turntable. So the base said "you can drag this" over four screens
+   where you cannot, and since the plates cover very little of the frame, most of
+   the menu was a grab cursor over dead space.
+
+   `.is-menu` goes on once at boot and turns the default back to an arrow;
+   the three below are opt-INS, set one at a time by `refreshHover`. Each is one
+   class more specific than the base, so which one applies never depends on the
+   order they appear in here. */
+#view.is-menu {
+  cursor: default;
+}
+
+/* The editor's turntable: press and drag to roll the cap. The only drag here. */
+#view.is-menu.is-turntable {
+  cursor: grab;
+}
+
+#view.is-menu.is-dragging {
+  cursor: grabbing;
+}
+
+/* The cap in draw mode is a drawing surface, so it gets the brush's cursor —
+   the same crosshair aiming a shot uses on the game page, for the same reason:
+   the press lands on a point and the point needs to be visible. */
+#view.is-menu.is-over-cap {
+  cursor: crosshair;
+}
+
+#view.is-menu.is-over-item {
+  cursor: pointer;
+}
+
 .lil-gui {
   --width: 310px;
   z-index: 10;
+}
+
+/* Leaving a match for the menu. The brief asks for a short fade rather than the
+   cap wipe on the way BACK — see the note on the button in HudLayer.js. Over
+   everything, letterbox included, because the whole page is going away. */
+.page-fade {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: #000000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s linear;
+}
+
+.page-fade.is-on {
+  opacity: 1;
+}
+
+
+/* The WASM either loads or it does not, and a black canvas says neither. */
+.boot-error {
+  position: fixed;
+  inset: 24px;
+  z-index: 20;
+  margin: 0;
+  padding: 18px;
+  overflow: auto;
+  background: rgba(20, 6, 6, 0.94);
+  border: 1px solid #7a2a20;
+  color: #f0a090;
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
 }

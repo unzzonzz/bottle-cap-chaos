@@ -3,13 +3,14 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "Battle Cap Chaos — procedural crown-cap viewer, PS1 render pipeline",
+  "description": "Bottle Cap Chaos — procedural crown-cap viewer, PS1 render pipeline",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.19.3",
     "lil-gui": "^0.21.0",
     "three": "^0.185.1"
   },

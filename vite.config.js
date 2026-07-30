@@ -7,13 +7,16 @@ export default defineConfig({
   server: { port: Number(process.env.PORT) || 5173 },
   build: {
     target: 'es2020',
-    // three is one deliberate vendor chunk; the default 500 kB warning fires on
-    // its uncompressed size and is just noise.
-    chunkSizeWarningLimit: 700,
+    // three and rapier are deliberate vendor chunks; the default 500 kB warning
+    // fires on their uncompressed size and is just noise. Rapier is the larger
+    // of the two because the `-compat` build carries its WebAssembly module
+    // inlined as base64 — the cost of not needing a wasm loader in the config.
+    chunkSizeWarningLimit: 2400,
     rollupOptions: {
       output: {
         manualChunks(id) {
           if (id.includes('node_modules/three')) return 'three';
+          if (id.includes('node_modules/@dimforge')) return 'rapier';
         },
       },
     },

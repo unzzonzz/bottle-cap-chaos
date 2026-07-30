@@ -23,6 +23,7 @@ const VERT = /* glsl */ `
   uniform vec2  uTargetRes;
   uniform float uSnapAmount;
   uniform float uSnapGrid;
+  uniform float uSnapScale;
   uniform vec3  uLightDir;      // world space, pointing towards the light
   uniform vec3  uLightColor;
   uniform vec3  uFillDir;
@@ -49,14 +50,23 @@ const VERT = /* glsl */ `
     // ── 1. vertex snapping ────────────────────────────────────────────────
     // The w guard is not optional: vertices behind the camera have w <= 0 and
     // dividing by it throws them to infinity, which tears the whole mesh apart.
-    if (clip.w > 0.0001) {
+    // uSnapScale is this surface's share of the global switch, the same way
+    // uGlossScale is. It exists for one case: a large flat FLOOR. The wobble is
+    // per-vertex, so an object made of many spans across the screen has each of
+    // its vertices land on a different pixel boundary and the spans shear
+    // against each other — on a ground plane that reads as the whole surface
+    // swimming, measured at ten times the pixel churn of the same scene with the
+    // snap off. On an object it is the character of the thing; on the floor
+    // under it, it is just noise.
+    float snap = uSnapAmount * uSnapScale;
+    if (clip.w > 0.0001 && snap > 0.0) {
       // uSnapGrid = 1.0 snaps to the render target's own pixel grid, which is
       // the authentic setting but is only really visible in motion. Below 1.0
       // the grid gets coarser than the framebuffer and the wobble becomes
       // obvious on a still frame — useful for judging it while tuning.
       vec2 grid = uTargetRes * 0.5 * uSnapGrid;
       vec3 ndc = clip.xyz / clip.w;
-      ndc.xy = mix(ndc.xy, floor(ndc.xy * grid) / grid, uSnapAmount);
+      ndc.xy = mix(ndc.xy, floor(ndc.xy * grid) / grid, snap);
       clip.xyz = ndc * clip.w;   // z round-trips unchanged
     }
     gl_Position = clip;
@@ -217,6 +227,8 @@ export class RetroMaterials {
    * @param {boolean} [opts.doubleSided]
    * @param {number}  [opts.gloss]  this surface's share of the global gloss;
    *   the switch is shared, how shiny each material is under it is not
+   * @param {number}  [opts.snap]  the same, for the vertex wobble. 1 everywhere
+   *   except large flat floors — see the note in the vertex shader
    * @param {[number, number]} [opts.uvScale]
    * @param {[number, number]} [opts.uvOffset]
    */
@@ -226,6 +238,7 @@ export class RetroMaterials {
       color = '#ffffff',
       doubleSided = false,
       gloss = 1,
+      snap = 1,
       uvScale = [1, 1],
       uvOffset = [0, 0],
     } = opts;
@@ -243,6 +256,7 @@ export class RetroMaterials {
         uColor: { value: new Color(color) },
         uMap: { value: map },
         uGlossScale: { value: gloss },
+        uSnapScale: { value: snap },
         uUvScale: { value: new Vector2().fromArray(uvScale) },
         uUvOffset: { value: new Vector2().fromArray(uvOffset) },
       },

@@ -20,7 +20,7 @@ import { CAP_COLOR } from './Cap.js';
 const TRI_BUDGET = 1500;
 
 export function bootDebug({ cap, orbit, retro, retroPass, viewport }) {
-  const gui = new GUI({ title: 'BATTLE CAP CHAOS' });
+  const gui = new GUI({ title: 'BOTTLE CAP CHAOS' });
 
   const stats = { tris: '' };
   // Pushed rather than `.listen()`ed: listen polls on its own rAF for a value
