@@ -6,7 +6,7 @@ import { createSky } from '../core/sky.js';
 import { setTextureRenderer } from '../core/textures.js';
 import { DISPLAY_ASPECT, Viewport } from '../core/Viewport.js';
 import { SceneComposer } from '../core/Composer.js';
-import { BOARD_ASPECT, FRAME } from '../core/frame.js';
+import { BOARD_ASPECT, FRAME, MAX_FRAME_WIDTH } from '../core/frame.js';
 import { aimedLaunchDirection, Bottle, CAP_COLOR } from './Bottle.js';
 import { PALETTE, withAlpha } from '../core/palette.js';
 import { whenFontsReady } from '../ui/fonts.js';
@@ -190,6 +190,9 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
     floorY: cfg.bottle.floorY,
     columnX: cfg.items.columnX,
     columnY: cfg.items.columnY,
+    plateWidth: cfg.items.plateWidth,
+    plateHeight: cfg.items.plateHeight,
+    pitch: cfg.items.pitch,
   };
 
   /**
@@ -205,16 +208,42 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
    * bottle keeps its distance from its own floor pool — shifting one without the
    * other would leave it hovering over a light that stayed behind.
    */
+  /**
+   * 항목 열은 프레임에 비례한다. 640 에서 저술한 값을 그 비율로 줄인다.
+   *
+   * ── 실측: 판이 화면 밖으로 나가고 있었다 ────────────────────────────────
+   * `plateWidth` 256, `columnX` 132 은 640 폭 프레임 기준이다. 그 프레임의 반폭은
+   * 320 이라 판은 x 4..260 을 쓰고 넉넉히 들어간다. 그런데 800x459 창의 프레임은
+   * 421 폭이고 반폭은 210 이다 — 판의 오른쪽 50 픽셀이 화면 밖이었다.
+   *
+   * 각진 흰 판일 때는 오른쪽 가장자리가 원래 안 보여서 티가 안 났다. 젤 버튼은
+   * 모서리가 둥글어서 그게 없어진 것이 바로 보인다.
+   *
+   * 비례로 줄이면 판은 어느 프레임에서나 폭의 같은 비율(40%)을 차지한다. 화면
+   * CSS 픽셀로 치면 늘 같은 크기라는 뜻이고, 그게 메뉴가 원하는 것이다. "텍셀
+   * 하나가 픽셀 하나" 라는 옛 제약은 이제 없다 — 밉맵과 선형 필터가 켜져 있고
+   * 알파 이진화는 PHASE 1 에 사라졌다. 대신 `PLATE_TEXEL_SCALE` 로 판 자체를 두
+   * 배 해상도로 굽는다.
+   */
+  function scaleColumn() {
+    const k = Math.min(1, FRAME.width / MAX_FRAME_WIDTH);
+    cfg.items.plateWidth = Math.round(LANDSCAPE_POSE.plateWidth * k);
+    cfg.items.plateHeight = Math.round(LANDSCAPE_POSE.plateHeight * k);
+    cfg.items.pitch = Math.round(LANDSCAPE_POSE.pitch * k);
+    return k;
+  }
+
   function applyArrangement(u) {
     const tall = FRAME.tall;
+    const k = scaleColumn();
     if (!tall) {
       Object.assign(cfg.bottle, {
         originX: LANDSCAPE_POSE.originX,
         originY: LANDSCAPE_POSE.originY,
         floorY: LANDSCAPE_POSE.floorY,
       });
-      cfg.items.columnX = LANDSCAPE_POSE.columnX;
-      cfg.items.columnY = LANDSCAPE_POSE.columnY;
+      cfg.items.columnX = Math.round(LANDSCAPE_POSE.columnX * k);
+      cfg.items.columnY = Math.round(LANDSCAPE_POSE.columnY * k);
       return;
     }
     // Both centred horizontally; the bottle in the upper third, the column under
@@ -414,6 +443,17 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
     const u = unitsPerPixel();
     applyArrangement(u);
     items.layout(u);
+    /**
+     * 하위 화면들도 다시 배치한다.
+     *
+     * 이 넷은 필요할 때 만들어지고 만들어질 때의 프레임에 맞춰 배치된다. 그 뒤에
+     * 창이 바뀌면 — 폰을 돌리면 — 판 크기와 간격이 둘 다 달라져야 하는데,
+     * 예전에는 아무도 말해 주지 않아서 옛 프레임의 배치가 그대로 남았다. 지금은
+     * 설정 화면만 `layout` 을 갖고 있으므로 선택적으로 부른다.
+     */
+    for (const scene of [settings, opponent, online, marks, editor]) {
+      scene?.layout?.(u);
+    }
     // The pool goes under the BOTTLE, not under the middle of the frame. It is
     // the one light in the room and the bottle is what it is lighting.
     // The pool is a fixed-size quad in world units. Pulling the camera back

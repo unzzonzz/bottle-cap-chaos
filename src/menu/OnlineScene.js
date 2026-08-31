@@ -4,6 +4,7 @@ import { menuPlateTexture, titleTexture } from './menuTextures.js';
 import { OnlineSession, SESSION_PHASE } from '../net/OnlineSession.js';
 import { defaultServerUrl } from '../net/Transport.js';
 import { ERR, isValidCode, normaliseCode } from '../net/protocol.js';
+import { PLATE_TEXEL_SCALE, solveColumn } from './columnLayout.js';
 
 /**
  * Finding somebody to play.
@@ -31,14 +32,13 @@ import { ERR, isValidCode, normaliseCode } from '../net/protocol.js';
  */
 
 const L = {
-  titleY: 168,
-  plate: { width: 256, height: 52 },
+  titleHeight: 72,
   rows: [
-    { id: 'status', y: 74, kind: 'readout' },
-    { id: 'create', y: 8 },
-    { id: 'join', y: -50 },
-    { id: 'random', y: -108 },
-    { id: 'back', y: -174 },
+    { id: 'status', kind: 'readout' },
+    { id: 'create' },
+    { id: 'join' },
+    { id: 'random' },
+    { id: 'back' },
   ],
 };
 
@@ -84,14 +84,12 @@ export class OnlineScene {
 
     this.title = new Mesh(
       new PlaneGeometry(1, 1),
-      createSpriteMaterial(retro, { map: titleTexture('온라인', this.modeName) }),
+      createSpriteMaterial(retro, { map: null }),
     );
-    this.title.scale.set(256 * u, 80 * u, 1);
-    this.title.position.set(0, L.titleY * u, 0);
     this.root.add(this.title);
-    this._titleText = `온라인|${this.modeName}`;
 
     this.items = L.rows.map((row) => this._plate(row));
+    this.layout(u);
 
     this._ray = new Raycaster();
     this._ndc = new Vector2();
@@ -122,12 +120,48 @@ export class OnlineScene {
   }
 
   _plate(def) {
-    const u = this._u;
     const mesh = new Mesh(new PlaneGeometry(1, 1), createSpriteMaterial(this._retro, { map: null }));
-    mesh.scale.set(L.plate.width * u, L.plate.height * u, 1);
-    mesh.position.set(0, def.y * u, 0);
     this.root.add(mesh);
-    return { ...def, mesh, maps: {}, label: null };
+    return { ...def, mesh, maps: {}, label: null, size: null };
+  }
+
+  /**
+   * 제목과 다섯 줄을 하나의 열로 쌓는다. `columnLayout.js` 가 푼다.
+   *
+   * 예전에는 y 가 168 / 74 / 8 / -50 / -108 / -174 로 고정이었고, 316 짜리
+   * 프레임에서는 제목과 마지막 줄이 화면 밖이었다 — 대기열에 들어간 뒤 상태 줄과
+   * "◀ 뒤로" 를 동시에 볼 수 없다는 뜻이다.
+   */
+  layout(unitsPerPixel) {
+    const u = unitsPerPixel ?? this._u;
+    this._u = u;
+
+    const box = solveColumn([
+      { id: '#title', h: L.titleHeight },
+      ...L.rows.map((r) => ({ id: r.id })),
+    ]);
+    this._box = box;
+    const at = (id) => box.rows.find((r) => r.id === id);
+
+    const title = at('#title');
+    this.title.scale.set(box.plate.width * u, title.h * u, 1);
+    this.title.position.set(0, title.y * u, 0);
+    this._titleHeight = title.h;
+
+    for (const item of this.items) {
+      const row = at(item.id);
+      item.size = { width: box.plate.width, height: row.h, scale: PLATE_TEXEL_SCALE };
+      item.mesh.scale.set(box.plate.width * u, row.h * u, 1);
+      item.mesh.position.set(0, row.y * u, 0);
+    }
+
+    const key = `${box.plate.width}x${box.plate.height}`;
+    if (key !== this._plateKey) {
+      this._plateKey = key;
+      for (const item of this.items) item.label = null;
+      this._titleText = null;
+    }
+    this.refresh();
   }
 
   // ── the session ──────────────────────────────────────────────────────────
@@ -233,8 +267,12 @@ export class OnlineScene {
         : `온라인|${this.modeName}`;
     if (wantTitle !== this._titleText) {
       const [t, s] = wantTitle.split('|');
-      this.title.material.uniforms.uMap.value.dispose();
-      this.title.material.uniforms.uMap.value = titleTexture(t, s);
+      this.title.material.uniforms.uMap.value?.dispose();
+      this.title.material.uniforms.uMap.value = titleTexture(t, s, {
+        width: this._box.plate.width,
+        height: this._titleHeight,
+        scale: PLATE_TEXEL_SCALE,
+      });
       this._titleText = wantTitle;
     }
 
@@ -244,12 +282,12 @@ export class OnlineScene {
         item.maps.idle?.dispose();
         item.maps.hover?.dispose();
         item.maps.disabled?.dispose();
-        item.maps.idle = menuPlateTexture(label, 'idle', L.plate);
-        item.maps.hover = menuPlateTexture(label, 'hover', L.plate);
+        item.maps.idle = menuPlateTexture(label, 'idle', item.size);
+        item.maps.hover = menuPlateTexture(label, 'hover', item.size);
         // `dimmed`, not `disabled`: these rows are unavailable for a moment
         // because a room or a queue is already pending, which is not the same
         // claim as "준비 중" — see the skin table in `menuTextures`.
-        item.maps.disabled = menuPlateTexture(label, 'dimmed', L.plate);
+        item.maps.disabled = menuPlateTexture(label, 'dimmed', item.size);
         item.label = label;
       }
       const dead = this._deadFor(item.id);
@@ -379,7 +417,7 @@ export class OnlineScene {
     this._unsubs = [];
     this.session.dispose();
     this.title.geometry.dispose();
-    this.title.material.uniforms.uMap.value.dispose();
+    this.title.material.uniforms.uMap.value?.dispose();
     this.title.material.dispose();
     for (const item of this.items) {
       item.mesh.geometry.dispose();

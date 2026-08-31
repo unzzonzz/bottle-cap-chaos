@@ -1,5 +1,14 @@
 import { CanvasTexture, ClampToEdgeWrapping, LinearFilter, LinearMipmapLinearFilter, RepeatWrapping, SRGBColorSpace } from 'three';
 import { PALETTE, withAlpha } from '../core/palette.js';
+import { ELEVATION, RADIUS, SPACE, TYPE } from '../core/tokens.js';
+import {
+  applyTracking,
+  fitText,
+  fontSpec,
+  gelButton,
+  glassPanel,
+  skinFor,
+} from '../ui/glass.js';
 
 /**
  * Every pixel the menu needs, drawn at runtime. No image files, same as
@@ -518,92 +527,126 @@ export function burstSheet() {
 }
 
 /**
- * A menu item's plate.
+ * 메뉴 항목의 판. 젤 버튼이다.
  *
- * Drawn at one texel per frame pixel and used at that size, which is the whole
- * reason the text on it is legible at 320x240: any other scale resamples type
- * that has just been thresholded specifically so it would not be resampled.
+ * ── 왼쪽 세로 막대가 없어졌다 ───────────────────────────────────────────────
+ * 예전 판은 각진 사각형에 2px 테두리, 왼쪽 가장자리에 상태를 알리는 세로 막대가
+ * 있었다. 막대의 근거는 "글씨보다 멀리서 읽힌다" 였고 각진 판에서는 맞았지만,
+ * 젤 버튼은 몸통 전체가 상태에 따라 밝아지므로 같은 일을 더 크게 한다. 라운드
+ * 카드에 색 레일을 붙인 모양은 지금 어디서나 보이는 기본값이기도 하다.
+ *
+ * 라벨은 가운데다. 왼쪽 정렬은 막대가 있을 때 그 옆에 붙는 것이었고, 막대가
+ * 사라지면 왼쪽에 이유 없는 여백만 남는다.
  *
  * @param {string} label
- * @param {'idle'|'hover'|'disabled'} state
+ * @param {'idle'|'hover'|'pressed'|'selected'|'disabled'|'dimmed'} state
  */
-export function menuPlateTexture(label, state, { width = 256, height = 52 } = {}) {
-  const { canvas, ctx } = makeCanvas(width, height);
-  const scratch = makeCanvas(width, height);
-  /** Everything below is authored against a 256-wide plate and scaled. */
-  const u = width / 256;
+export function menuPlateTexture(label, state, { width = 256, height = 52, scale = 1 } = {}) {
+  /**
+   * `scale` 는 텍셀 배수다. 좌표는 프레임 픽셀 그대로 두고 캔버스만 키운다.
+   *
+   * 예전에는 텍셀 하나가 프레임 픽셀 하나여야 했다 — 알파 이진화된 글자가
+   * 리샘플되면 안 됐기 때문이다. 이진화도, 저해상도 타겟도, 5비트 양자화도 없으므로
+   * 그 제약은 사라졌고, 남은 것은 반대다: 레티나에서 텍셀 하나는 화면 픽셀 두 개를
+   * 덮으므로 그만큼 흐리다.
+   */
+  const { canvas, ctx } = makeCanvas(Math.round(width * scale), Math.round(height * scale));
+  ctx.scale(scale, scale);
 
   /**
-   * `dimmed` is `disabled` without the verdict.
+   * `dimmed` 는 판정이 빠진 `disabled` 다.
    *
-   * ── two different sentences wore one skin ──────────────────────────────
-   * `disabled` stamps "준비 중" on the right, which says a FEATURE is not built
-   * yet — correct for a mode with no AI, and false for a row that is merely
-   * unavailable at this moment. The online screen greys 방 만들기 / 코드로 참가
-   * / 랜덤 매칭 while you are already in a queue, and all three announced
-   * themselves as unfinished features.
+   * ── 두 문장이 한 껍데기를 입고 있었다 ─────────────────────────────────
+   * `disabled` 는 오른쪽에 "준비 중"을 찍는다. 그건 **기능이 아직 없다**는 말이고,
+   * AI 없는 모드에는 맞지만 지금 이 순간만 못 누르는 줄에는 틀리다. 온라인 화면은
+   * 이미 대기열에 들어간 동안 방 만들기 / 코드로 참가 / 랜덤 매칭 셋을 흐리는데,
+   * 셋 다 자기가 미완성 기능이라고 말하고 있었다.
    *
-   * Same colours, no stamp. The caller picks the sentence.
+   * 같은 색, 도장 없음. 어느 문장인지는 호출부가 고른다.
    */
-  const SKINS = PALETTE.button;
-  const skin = SKINS[state] ?? SKINS.idle;
-  const px = (n) => Math.max(1, Math.round(n * u));
-
-  ctx.fillStyle = skin.bg;
-  ctx.fillRect(0, 0, width, height);
-  ctx.strokeStyle = skin.edge;
-  ctx.lineWidth = px(2);
-  ctx.strokeRect(px(1), px(1), width - px(2), height - px(2));
-
-  // The marker down the left edge. It is what the hover state brightens, and it
-  // reads at a glance from further away than the type does.
-  ctx.fillStyle = skin.bar;
-  ctx.fillRect(px(6), px(6), px(6), height - px(12));
-
   /**
-   * Sized to FIT, exactly as `titleTexture` below already is.
+   * 호출부의 상태 이름을 `skinFor` 의 어휘로 옮긴다.
    *
-   * ── the same bug, in the sibling function ─────────────────────────────
-   * That one's comment records "BOTTLE CAP CHAOS" arriving on screen as
-   * "BOTTLE CAP CHA". This one was never given the same treatment and had the
-   * same defect waiting: at a fixed 24px a label simply ran off the right edge,
-   * silently, with no ellipsis and nothing to indicate anything was missing.
-   *
-   * It surfaced on the matchmaking screen, where the status row says
-   * "상대를 찾는 중  0:12" — and the elapsed time, the one part of that line
-   * that changes, was entirely off the plate. Reported as "시간이 다 짤려서
-   * 하나도 안보여".
-   *
-   * The floor is 14px rather than the title's 12: this is body-weight type on a
-   * shorter plate, and below 14 the alpha threshold starts eating 받침 strokes.
-   * A label that cannot fit even at 14 is too long for a plate and wants
-   * shortening at the call site — but it will now be small rather than absent.
+   * 메뉴는 `active` 와 `dimmed` 라는 이름을 쓰고 `skinFor` 는 `pressed` 와
+   * `disabled` 를 안다. 이 표가 없으면 둘 다 `default` 로 떨어져 idle 로 그려진다 —
+   * 눌러도 반응이 없고 흐려져야 할 줄이 멀쩡해 보이는데, 어느 쪽도 오류를 내지
+   * 않으므로 화면을 봐야만 안다.
    */
-  const room = width - px(24) - px(10);
-  let size = px(24);
-  while (size > px(14)) {
-    ctx.font = `bold ${size}px ui-monospace, Menlo, monospace`;
-    if (ctx.measureText(label).width <= room) break;
-    size -= 1;
-  }
+  const SKIN_STATE = { active: 'pressed', dimmed: 'disabled' };
+  const skinState = SKIN_STATE[state] ?? state;
+  const skin = skinFor(skinState, PALETTE.accent.sky);
 
-  drawText(ctx, {
-    text: label,
-    x: px(24),
-    y: Math.round(height / 2 + px(9)),
-    font: `bold ${size}px ui-monospace, Menlo, monospace`,
-    color: skin.text,
+  gelButton(ctx, {
+    x: 0,
+    y: 0,
+    w: width,
+    h: height,
+    radius: RADIUS.panel,
+    state: skinState,
+    accent: PALETTE.accent.sky,
   });
 
-  if (state === 'disabled') {
+  /**
+   * 라벨은 판에 **맞춰** 줄어든다.
+   *
+   * ── 형제 함수에 있던 것과 같은 결함 ──────────────────────────────────
+   * `titleTexture` 의 주석에 "BOTTLE CAP CHAOS" 가 화면에 "BOTTLE CAP CHA" 로
+   * 도착했다는 기록이 있다. 이쪽에는 같은 처리가 없어서 같은 결함이 대기하고
+   * 있었다: 고정 크기 라벨이 오른쪽 가장자리 밖으로 조용히 흘러나갔고, 말줄임도
+   * 없고 뭔가 빠졌다는 표시도 없었다.
+   *
+   * 매칭 화면에서 드러났다. 상태 줄이 "상대를 찾는 중  0:12" 인데 그 줄에서
+   * 유일하게 변하는 부분인 경과 시간이 통째로 판 밖에 있었다. "시간이 다 짤려서
+   * 하나도 안보여" 로 보고됐다.
+   *
+   * `fitText` 가 크기를 줄이고, 그래도 안 되면 자른다. 판정 도장이 있는 줄은
+   * 그만큼 자리를 덜 쓴다.
+   */
+  const stamp = state === 'disabled' ? '준비 중' : '';
+  const probe = makeCanvas(8, 8);
+  applyTracking(probe.ctx, TYPE.label.tracking);
+  let stampW = 0;
+  if (stamp) {
+    probe.ctx.font = fontSpec(TYPE.caption);
+    stampW = probe.ctx.measureText(stamp).width + SPACE.md;
+  }
+  /**
+   * 좌우 여백. 알약이므로 높이에 비례한다.
+   *
+   * `SPACE.lg * 2` 를 고정으로 쓰면 640 프레임의 256 폭 판에서는 28% 지만 421
+   * 프레임의 168 폭 판에서는 43% 다 — 실제로 "마스터 볼륨   70%" 가 "마스터 볼륨
+   * 7..." 이 됐다. 둥근 끝이 먹는 공간은 폭이 아니라 **높이**를 따라가므로, 여백도
+   * 높이를 따라가는 것이 맞다.
+   */
+  const pad = Math.max(SPACE.sm, height * 0.45);
+  const room = width - pad * 2 - stampW;
+  const fitted = fitText(probe.ctx, label, TYPE.label, room);
+
+  ctx.save();
+  ctx.font = fitted.font;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  applyTracking(ctx, TYPE.label.tracking);
+  const cx = (width - stampW) / 2;
+  // 타입 밑의 1픽셀 흰 그림자. `gelButton` 이 자기 라벨에 쓰는 것과 같은 엠보스다.
+  ctx.fillStyle = withAlpha(PALETTE.ui.glossHi, 0.35);
+  ctx.fillText(fitted.text, cx, height / 2 + 1);
+  ctx.fillStyle = skin.text;
+  ctx.fillText(fitted.text, cx, height / 2);
+  applyTracking(ctx, 0);
+  ctx.restore();
+
+  if (stamp) {
+    applyTracking(ctx, TYPE.caption.tracking);
     drawText(ctx, {
-      text: '준비 중',
-      x: width - px(14),
-      y: Math.round(height / 2 + px(8)),
-      font: `${px(19)}px ui-monospace, Menlo, monospace`,
+      text: stamp,
+      x: width - pad,
+      y: height / 2 + TYPE.caption.size * 0.36,
+      font: fontSpec(TYPE.caption),
       color: PALETTE.ui.disabledText,
       align: 'right',
     });
+    applyTracking(ctx, 0);
   }
 
   const tex = toTexture(canvas);
@@ -611,51 +654,116 @@ export function menuPlateTexture(label, state, { width = 256, height = 52 } = {}
   return tex;
 }
 
-/** The title plate above the menu column, and the settings scene's heading. */
-export function titleTexture(text, sub, { width = 256, height = 80 } = {}) {
-  const { canvas, ctx } = makeCanvas(width, height);
-  const scratch = makeCanvas(width, height);
-  const u = width / 256;
-  const px = (n) => Math.max(1, Math.round(n * u));
 
-  ctx.clearRect(0, 0, width, height);
+/**
+ * 한 줄에 안 들어가는 제목을 최대 `maxRows` 줄로 접는다.
+ *
+ * 단어 경계에서만 접는다 — 한 단어를 잘라 넘기면 그건 접은 것이 아니라 부순 것이다.
+ * `maxRows` 줄로도 안 들어가면 `fitText` 에 넘겨 크기를 줄이고, 그래도 안 되면 자른다.
+ *
+ * @returns {{rows: string[], font: string, size: number}}
+ */
+function wrapToFit(ctx, text, type, maxWidth, maxRows) {
+  const measure = (t, size) => {
+    ctx.font = fontSpec({ ...type, size });
+    return ctx.measureText(t).width;
+  };
 
-  // Sized to FIT rather than set at a fixed size and hoped for. The heading is
-  // whatever the caller passes; picked by hand, "BOTTLE CAP CHAOS" overran the
-  // plate and arrived on screen as "BOTTLE CAP CHA".
-  let size = px(29);
-  while (size > px(12)) {
-    ctx.font = `bold ${size}px ui-monospace, Menlo, monospace`;
-    if (ctx.measureText(text).width <= width - px(12)) break;
-    size -= 1;
+  for (let size = type.size; size >= Math.round(type.size * 0.76); size -= 1) {
+    const rows = [];
+    let line = '';
+    let ok = true;
+    for (const word of String(text).split(' ')) {
+      const next = line ? `${line} ${word}` : word;
+      if (measure(next, size) <= maxWidth || !line) {
+        // 단어 하나가 이미 넘치면 접을 곳이 없다. 다음 크기로.
+        if (!line && measure(next, size) > maxWidth) { ok = false; break; }
+        line = next;
+      } else {
+        rows.push(line);
+        line = word;
+      }
+    }
+    if (!ok) continue;
+    if (line) rows.push(line);
+    if (rows.length <= maxRows) return { rows, font: fontSpec({ ...type, size }), size };
   }
 
-  drawText(ctx, {
-    text,
-    x: px(4),
-    y: px(32),
-    font: `bold ${size}px ui-monospace, Menlo, monospace`,
-    color: PALETTE.ui.textOnAccent,
+  const fitted = fitText(ctx, text, type, maxWidth);
+  return { rows: [fitted.text], font: fitted.font, size: fitted.size };
+}
+
+/**
+ * 메뉴 열 위의 제목판, 그리고 설정 화면의 머리글.
+ *
+ * ── 유리판이 생겼다 ────────────────────────────────────────────────────────
+ * 예전에는 `clearRect` 로 투명하게 두고 흰 글씨를 배경 위에 얹었다. 판이 없으니
+ * 잉크가 흰색일 수밖에 없었고, 그 아래 빨간 줄 하나가 유일한 구조였다. 이제 판이
+ * 있으므로 두 줄 다 `ui.text` 로 돌아간다 — 이 함수의 옛 주석이 PHASE 6 에서
+ * 그렇게 될 것이라고 적어 둔 그대로다.
+ */
+export function titleTexture(text, sub, { width = 256, height = 80, scale = 1 } = {}) {
+  const { canvas, ctx } = makeCanvas(Math.round(width * scale), Math.round(height * scale));
+  ctx.scale(scale, scale);
+
+  glassPanel(ctx, {
+    x: 0,
+    y: 0,
+    w: width,
+    h: height,
+    radius: RADIUS.panel,
+    accent: PALETTE.accent.cyan,
+    elevation: ELEVATION.raised,
   });
-  ctx.fillStyle = PALETTE.menu.labelRed;
-  ctx.fillRect(px(4), px(42), width - px(24), px(4));
-  if (sub) {
+
+  /**
+   * 머리글은 줄이기 전에 **접는다**.
+   *
+   * ── 실측 ────────────────────────────────────────────────────────────────
+   * 판이 168 폭일 때 안쪽 여백을 빼면 124 가 남는다. "BOTTLE CAP CHAOS" 는 26px
+   * 에서 255, 최소 크기인 20px 에서도 196 이라 한 줄로는 어떤 크기에서도 안
+   * 들어간다 — `fitText` 만 쓰면 "BOTTLE..." 이 된다.
+   *
+   * 두 줄로 접으면 "BOTTLE CAP" 이 20px 에서 121 로 들어간다. 제목은 스캔하는
+   * 것이 아니라 한 번 읽는 것이므로, 작은 한 줄보다 온전한 두 줄이 낫다.
+   * 단어 경계에서만 접고, 두 줄로도 안 되면 그때 `fitText` 가 줄이거나 자른다.
+   */
+  const probe = makeCanvas(8, 8);
+  const room = width - Math.max(SPACE.sm, height * 0.22) * 2;
+  const lines = wrapToFit(probe.ctx, text, TYPE.title, room, 2);
+
+  const headSize = lines.size;
+  const gap = Math.round(headSize * 0.18);
+  const headBlock = lines.rows.length * headSize + (lines.rows.length - 1) * gap;
+  const subH = sub ? TYPE.caption.size + SPACE.xs : 0;
+  let y = Math.round((height - headBlock - subH) / 2 + headSize * 0.82);
+
+  applyTracking(ctx, TYPE.title.tracking);
+  for (const row of lines.rows) {
     drawText(ctx, {
-      text: sub,
-      x: px(4),
-      y: px(68),
-      font: `${px(19)}px ui-monospace, Menlo, monospace`,
-      /**
-       * White, like the heading above it, because this plate is TRANSPARENT —
-       * `clearRect` at the top of this function — so both lines are type on the
-       * backdrop rather than type on a plate. See the note on `PALETTE.ui.text`
-       * for why that changes which ink is legal. Size carries the hierarchy.
-       *
-       * PHASE 6 gives this heading a glass panel, at which point both lines go
-       * back to `ui.text`.
-       */
-      color: PALETTE.ui.textOnAccent,
+      text: row,
+      x: width / 2,
+      y,
+      font: lines.font,
+      color: PALETTE.ui.text,
+      align: 'center',
     });
+    y += headSize + gap;
+  }
+  applyTracking(ctx, 0);
+
+  if (sub) {
+    const line = fitText(probe.ctx, sub, TYPE.caption, room);
+    applyTracking(ctx, TYPE.caption.tracking);
+    drawText(ctx, {
+      text: line.text,
+      x: width / 2,
+      y: y - gap + SPACE.xs,
+      font: line.font,
+      color: PALETTE.ui.textMuted,
+      align: 'center',
+    });
+    applyTracking(ctx, 0);
   }
 
   const tex = toTexture(canvas);

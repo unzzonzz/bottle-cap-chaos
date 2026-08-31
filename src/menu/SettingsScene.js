@@ -3,6 +3,8 @@ import { createSpriteMaterial } from './menuMaterials.js';
 import { menuPlateTexture, titleTexture } from './menuTextures.js';
 import { toMarkTexture } from '../marks/markTextures.js';
 import { PALETTE } from '../core/palette.js';
+import { PLATE_TEXEL_SCALE, solveColumn } from './columnLayout.js';
+import { gelButton, roundRectPath } from '../ui/glass.js';
 
 /**
  * 설정 — a heading, the things it holds, and a way back.
@@ -46,16 +48,19 @@ import { PALETTE } from '../core/palette.js';
  * player's instruction. Its absence is why the two link rows moved up.
  */
 
-/** Frame pixels. The whole layout, in one place. */
+/**
+ * 이 화면만의 크기. 세로 배치는 `columnLayout.solveColumn` 이 푼다.
+ *
+ * ── 좌표가 아니라 순서를 저술한다 ───────────────────────────────────────────
+ * 예전에는 titleY 176, 행 y 가 124 / 22 / -36 / -94 / -152 / -210 이었다. 위에서
+ * 아래까지 452 픽셀이고 480 짜리 프레임에서는 들어간다. 800x459 창의 프레임은
+ * 316 이라 제목도 마지막 두 줄도 화면 밖이었다. 이유와 해법은 `columnLayout.js`
+ * 머리말에 있다.
+ */
 const L = {
-  titleY: 176,
-  /** 58 is the plate height plus a six-pixel gutter. */
-  pitch: 58,
-  plate: { width: 256, height: 52 },
-  /** The volume chips, and the row they sit on. */
   chip: { width: 22, height: 22, gap: 5 },
-  chipY: 70,
   steps: 10,
+  titleHeight: 64,
 };
 
 /**
@@ -67,14 +72,30 @@ const L = {
  * no audio model still has a name.
  */
 const ROWS = [
-  { id: 'volume', kind: 'readout', y: 124 },
-  // The chip row lives between these two; see `chipY`.
-  { id: 'mute', kind: 'toggle', y: 22 },
-  { id: 'nickname', kind: 'action', y: -36 },
-  { id: 'server', kind: 'action', y: -94 },
-  { id: 'marks', kind: 'link', y: -152 },
-  { id: 'back', kind: 'link', y: -210 },
+  { id: 'volume', kind: 'readout' },
+  // 칩 줄은 이 바로 아래에 들어간다. `_place` 를 보라.
+  { id: 'mute', kind: 'toggle' },
+  { id: 'nickname', kind: 'action' },
+  /**
+   * 서버 주소는 `?debug=1` 뒤로 접었다 (PHASE 5 승인 항목 3).
+   *
+   * LAN 개발용이다 — 비워 두면 이 페이지가 온 곳에서 주소를 유도하고, 그게 같은
+   * 네트워크의 두 기기가 아무것도 입력하지 않고 붙는 이유다. 그러니 평소에는
+   * 고를 것이 없는 줄이고, 세로 화면에서는 그 한 줄 때문에 다른 줄이 잘렸다.
+   */
+  { id: 'server', kind: 'action', debugOnly: true },
+  { id: 'marks', kind: 'link' },
+  { id: 'back', kind: 'link' },
 ];
+
+/** `?debug=1` 인가. 모듈 로드 시 한 번. */
+const DEBUG = (() => {
+  try {
+    return new URLSearchParams(location.search).get('debug') === '1';
+  } catch {
+    return false;
+  }
+})();
 
 export class SettingsScene {
   /**
@@ -102,13 +123,14 @@ export class SettingsScene {
     this._u = u;
     this._retro = retro;
 
+    /** 이번 프레임에서 푼 배치. `layout()` 이 채운다. */
+    this._box = null;
+    this._chip = L.chip;
+
     this.title = new Mesh(
       new PlaneGeometry(1, 1),
-      createSpriteMaterial(retro, { map: titleTexture('설정', '') }),
+      createSpriteMaterial(retro, { map: null }),
     );
-    // Same 1:1 texel-to-pixel rule as the menu's plates — see `MenuItems`.
-    this.title.scale.set(256 * u, 80 * u, 1);
-    this.title.position.set(0, L.titleY * u, 0);
     this.root.add(this.title);
 
     /** @type {Array<{id: string, kind: string, mesh: object, maps: object, label: string}>} */
@@ -119,12 +141,14 @@ export class SettingsScene {
       // Both profile rows need a model behind them, the same way the audio rows
       // need theirs.
       if ((def.id === 'nickname' || def.id === 'server') && !profile) continue;
+      if (def.debugOnly && !DEBUG) continue;
       this.items.push(this._buildRow(def));
     }
 
     /** @type {Array<{index: number, mesh: object}>} */
     this.chips = [];
     if (audioSettings) this._buildChips();
+    this.layout(u);
 
     this._ray = new Raycaster();
     this._ndc = new Vector2();
@@ -142,8 +166,6 @@ export class SettingsScene {
       new PlaneGeometry(1, 1),
       createSpriteMaterial(this._retro, { map: null }),
     );
-    mesh.scale.set(L.plate.width * u, L.plate.height * u, 1);
-    mesh.position.set(0, def.y * u, 0);
     this.root.add(mesh);
     return { ...def, mesh, maps, label: null };
   }
@@ -157,19 +179,75 @@ export class SettingsScene {
    * state, which is how they end up disagreeing.
    */
   _buildChips() {
-    const u = this._u;
-    const span = L.steps * L.chip.width + (L.steps - 1) * L.chip.gap;
     for (let i = 0; i < L.steps; i++) {
-      const x = -span / 2 + L.chip.width / 2 + i * (L.chip.width + L.chip.gap);
       const mesh = new Mesh(
         new PlaneGeometry(1, 1),
-        createSpriteMaterial(this._retro, { map: chipTexture(false, 'idle') }),
+        createSpriteMaterial(this._retro, { map: null }),
       );
-      mesh.scale.set(L.chip.width * u, L.chip.height * u, 1);
-      mesh.position.set(x * u, L.chipY * u, 0);
       this.root.add(mesh);
       this.chips.push({ index: i, mesh });
     }
+  }
+
+  /**
+   * 제목 · 행 · 칩 줄을 위에서 아래로 쌓고, 덩어리를 프레임 세로 가운데에 놓는다.
+   *
+   * ── 좌표가 아니라 순서가 저술된 이유 ────────────────────────────────────
+   * 행 하나가 사라질 수 있다: 오디오 모델이 없으면 볼륨과 음소거가 없고, 프로필이
+   * 없으면 닉네임이 없고, `?debug=1` 이 아니면 서버 줄이 없다. 좌표를 손으로
+   * 적어 두면 그 조합마다 구멍이 생긴다. 쌓으면 어떤 조합이든 붙어서 내려온다.
+   *
+   * 리사이즈에도 다시 불린다 — 프레임이 바뀌면 판 크기와 간격이 둘 다 바뀐다.
+   */
+  layout(unitsPerPixel) {
+    const u = unitsPerPixel ?? this._u;
+    this._u = u;
+    const hasChips = this.chips.length > 0;
+
+    const slots = [{ id: '#title', h: L.titleHeight }];
+    for (const item of this.items) {
+      slots.push({ id: item.id });
+      if (hasChips && item.id === 'volume') slots.push({ id: '#chips', h: L.chip.height });
+    }
+
+    const box = solveColumn(slots);
+    this._box = box;
+    const at = (id) => box.rows.find((r) => r.id === id);
+
+    const title = at('#title');
+    this.title.scale.set(box.plate.width * u, title.h * u, 1);
+    this.title.position.set(0, title.y * u, 0);
+    this._titleHeight = title.h;
+
+    for (const item of this.items) {
+      const row = at(item.id);
+      item.mesh.scale.set(box.plate.width * u, row.h * u, 1);
+      item.mesh.position.set(0, row.y * u, 0);
+    }
+
+    if (hasChips) {
+      const row = at('#chips');
+      const cw = Math.round(L.chip.width * box.k);
+      const cg = Math.round(L.chip.gap * box.k);
+      const span = L.steps * cw + (L.steps - 1) * cg;
+      this._chip = { width: cw, height: Math.min(row.h, cw), gap: cg };
+      this.chips.forEach((chip, i) => {
+        const x = -span / 2 + cw / 2 + i * (cw + cg);
+        chip.mesh.scale.set(this._chip.width * u, this._chip.height * u, 1);
+        chip.mesh.position.set(x * u, row.y * u, 0);
+      });
+    }
+
+    // 판 크기가 바뀌었으면 텍스처를 다시 굽는다. `refresh` 는 라벨이 같으면
+    // 건너뛰므로, 라벨을 지워서 강제한다.
+    const key = `${box.plate.width}x${box.plate.height}`;
+    if (key !== this._plateKey) {
+      this._plateKey = key;
+      for (const item of this.items) item.label = null;
+      this._titleKey = null;
+      chipCache.clear();
+    }
+    this.refresh();
   }
 
   // ── state ─────────────────────────────────────────────────────────────────
@@ -217,13 +295,27 @@ export class SettingsScene {
    * one. A row whose text did not change is left entirely alone.
    */
   refresh() {
+    const box = this._box;
+    const size = { width: box.plate.width, height: box.plate.height, scale: PLATE_TEXEL_SCALE };
+
+    if (this._titleKey !== `${box.plate.width}x${this._titleHeight}`) {
+      this._titleKey = `${box.plate.width}x${this._titleHeight}`;
+      const old = this.title.material.uniforms.uMap.value;
+      this.title.material.uniforms.uMap.value = titleTexture('설정', '', {
+        width: box.plate.width,
+        height: this._titleHeight,
+        scale: PLATE_TEXEL_SCALE,
+      });
+      old?.dispose();
+    }
+
     for (const item of this.items) {
       const label = this._labelFor(item.id);
       if (label !== item.label) {
         item.maps.idle?.dispose();
         item.maps.hover?.dispose();
-        item.maps.idle = menuPlateTexture(label, 'idle', L.plate);
-        item.maps.hover = menuPlateTexture(label, 'hover', L.plate);
+        item.maps.idle = menuPlateTexture(label, 'idle', size);
+        item.maps.hover = menuPlateTexture(label, 'hover', size);
         item.label = label;
       }
       const hot = this._hovered === item.id;
@@ -237,7 +329,7 @@ export class SettingsScene {
       // same rule `MarkEditor`'s swatches follow.
       const filled = !muted && volume >= (chip.index + 1) / L.steps - 1e-6;
       const hot = this._hovered === `vol:${chip.index}`;
-      chip.mesh.material.uniforms.uMap.value = chipTexture(filled, hot ? 'hover' : 'idle');
+      chip.mesh.material.uniforms.uMap.value = chipTexture(filled, hot ? 'hover' : 'idle', this._chip);
     }
   }
 
@@ -404,42 +496,53 @@ export class SettingsScene {
 }
 
 /**
- * One volume chip, cached.
+ * 볼륨 칩 하나. 캐시된다.
  *
- * Module-private with its own map, which is the pattern `MarkEditor.swatchTexture`
- * sets: a screen owns its one-off control art rather than adding a one-screen
- * entry to the shared `markIcons` module — where `clearIconCache()` would
- * dispose it out from under this screen.
+ * 모듈 사설 캐시를 쓰는 것은 `MarkEditor.swatchTexture` 가 세운 패턴이다: 한
+ * 화면에서만 쓰는 컨트롤 그림은 그 화면이 들고 있는다. 공용 `markIcons` 에 넣으면
+ * `clearIconCache()` 가 이 화면 아래에서 그걸 없애 버린다.
  *
- * The palette is `markIcons`' SKINS, quoted rather than re-invented. Two colours
- * closer than about a thirty-second apart on every channel arrive identical
- * through the 5-bit quantiser, so a new accent is not free.
+ * ── 각진 사각형에서 알약으로 ────────────────────────────────────────────────
+ * 예전에는 1픽셀 테두리 사각형에 안쪽 사각형을 채운 것이었고, 밖으로 필터가 꺼져
+ * 있었다("`imageSmoothingEnabled = false`"). 이 화면에서 유일하게 각진 것이었고,
+ * 열 개가 나란히 있으니 유일하다는 사실이 눈에 띄었다.
+ *
+ * 이제 알약이다. 채워진 칩은 젤 버튼의 `selected` 상태를, 빈 칩은 유리의
+ * 가라앉은 바탕을 쓴다 — 같은 어휘라 볼륨 줄이 이 화면의 다른 컨트롤과 한 벌로
+ * 읽힌다.
  */
 const chipCache = new Map();
 
-function chipTexture(filled, state) {
-  const key = `${filled}:${state}`;
+function chipTexture(filled, state, size = L.chip) {
+  const w = Math.max(4, Math.round(size.width));
+  const h = Math.max(4, Math.round(size.height));
+  const key = `${filled}:${state}:${w}x${h}`;
   const hit = chipCache.get(key);
   if (hit) return hit;
 
-  const skin = filled
-    ? { bg: PALETTE.button.active.bg, edge: PALETTE.button.active.edge }
-    : state === 'hover'
-      ? { bg: PALETTE.button.hover.bg, edge: PALETTE.button.hover.edge }
-      : { bg: PALETTE.button.idle.bg, edge: PALETTE.button.idle.edge };
-
+  const scale = 3;
   const canvas = document.createElement('canvas');
-  canvas.width = L.chip.width;
-  canvas.height = L.chip.height;
+  canvas.width = w * scale;
+  canvas.height = h * scale;
   const ctx = canvas.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
-  ctx.fillStyle = skin.edge;
-  ctx.fillRect(0, 0, L.chip.width, L.chip.height);
-  ctx.fillStyle = skin.bg;
-  ctx.fillRect(1, 1, L.chip.width - 2, L.chip.height - 2);
+  ctx.imageSmoothingEnabled = true;
+  ctx.scale(scale, scale);
+
+  gelButton(ctx, {
+    x: 0,
+    y: 0,
+    w,
+    h,
+    radius: Math.min(w, h) / 2,
+    state: filled ? 'selected' : state === 'hover' ? 'hover' : 'idle',
+    accent: PALETTE.menu.meterOn,
+  });
+
   if (filled) {
+    // 채워진 칩의 알맹이. 젤의 광택 아래에서 보여야 하므로 판보다 진하다.
     ctx.fillStyle = PALETTE.menu.meterOn;
-    ctx.fillRect(4, 4, L.chip.width - 8, L.chip.height - 8);
+    roundRectPath(ctx, w * 0.22, h * 0.22, w * 0.56, h * 0.56, w * 0.28);
+    ctx.fill();
   }
 
   const tex = toMarkTexture(canvas);

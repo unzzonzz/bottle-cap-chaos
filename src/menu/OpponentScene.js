@@ -5,6 +5,8 @@ import { menuPlateTexture, titleTexture } from './menuTextures.js';
 import { MarkTextures } from '../marks/markTextures.js';
 import { PLAYER_COLORS } from '../render/playerColors.js';
 import { PALETTE } from '../core/palette.js';
+import { FRAME } from '../core/frame.js';
+import { PLATE_TEXEL_SCALE, solveColumn } from './columnLayout.js';
 
 /**
  * 상대 선택 — two caps facing each other, and who is behind the far one.
@@ -63,19 +65,19 @@ import { PALETTE } from '../core/palette.js';
  * the third row needed. 메뉴로 now sits at −212, whose plate bottom is −238.
  */
 const L = {
-  titleY: 182,
-  capY: 100,
-  /** How far out from the middle each cap sits. */
-  capX: 84,
+  /** 카드 두 장이 마주 보는 줄. 판 높이의 배수로 잡는다. */
+  capRow: 100,
+  /** How far out from the middle each cap sits, as a share of the frame width. */
+  capXShare: 0.19,
   /** Cap width in frame pixels. The two are the same — it is a match. */
   capWidth: 72,
-  plate: { width: 256, height: 52 },
+  titleHeight: 72,
   rows: [
-    { id: 'human', y: 20 },
-    { id: 'ai', y: -38 },
-    { id: 'online', y: -96 },
-    { id: 'start', y: -154 },
-    { id: 'back', y: -212 },
+    { id: 'human' },
+    { id: 'ai' },
+    { id: 'online' },
+    { id: 'start' },
+    { id: 'back' },
   ],
 };
 
@@ -112,12 +114,11 @@ export class OpponentScene {
      */
     this.choice = 'human';
 
+    this._modeName = modeName ?? '';
     this.title = new Mesh(
       new PlaneGeometry(1, 1),
-      createSpriteMaterial(retro, { map: titleTexture('상대 선택', modeName ?? '') }),
+      createSpriteMaterial(retro, { map: null }),
     );
-    this.title.scale.set(256 * u, 80 * u, 1);
-    this.title.position.set(0, L.titleY * u, 0);
     this.root.add(this.title);
 
     /**
@@ -138,8 +139,7 @@ export class OpponentScene {
     });
 
     this._geometry = buildCapGeometry({ ...CAP_DEFAULTS, shell: true });
-    const capR = this._geometry.userData.radius ?? 1.6;
-    const perCapUnit = (L.capWidth / (capR * 2)) * u;
+    this._capRadius = this._geometry.userData.radius ?? 1.6;
 
     /** @type {Mesh[]} index is the player. */
     this.caps = [0, 1].map((player) => {
@@ -152,8 +152,6 @@ export class OpponentScene {
       materials[CAP_GROUP.LINER] = retro.create({ color: PALETTE.metal.liner, preset: 'plastic' });
 
       const pivot = new Group();
-      pivot.position.set((player === 0 ? -L.capX : L.capX) * u, L.capY * u, 0);
-      pivot.scale.setScalar(perCapUnit);
 
       /**
        * Turned toward the middle, on the PIVOT rather than on the cap.
@@ -180,7 +178,8 @@ export class OpponentScene {
     });
 
     /** @type {{id: string, mesh: Mesh, maps: object, label: string|null}[]} */
-    this.items = L.rows.map((row) => this._plate(row.id, row.y, L.plate));
+    this.items = L.rows.map((row) => this._plate(row.id));
+    this.layout(u);
 
     this._ray = new Raycaster();
     this._ndc = new Vector2();
@@ -188,13 +187,65 @@ export class OpponentScene {
     this.refresh();
   }
 
-  _plate(id, y, size) {
-    const u = this._u;
+  _plate(id) {
     const mesh = new Mesh(new PlaneGeometry(1, 1), createSpriteMaterial(this._retro, { map: null }));
-    mesh.scale.set(size.width * u, size.height * u, 1);
-    mesh.position.set(0, y * u, 0);
     this.root.add(mesh);
-    return { id, mesh, maps: { idle: null, hover: null }, label: null, size };
+    return { id, mesh, maps: { idle: null, hover: null }, label: null, size: null };
+  }
+
+  /**
+   * 제목 · 뚜껑 두 개 · 다섯 줄을 하나의 열로 쌓는다.
+   *
+   * 뚜껑 줄도 슬롯 하나로 참여한다. 예전에는 `capY: 100` 으로 따로 고정돼 있었고,
+   * 316 짜리 프레임에서는 제목과 겹쳤다. 열에 넣으면 어떤 프레임에서도 제목 아래,
+   * 첫 줄 위에 있다.
+   */
+  layout(unitsPerPixel) {
+    const u = unitsPerPixel ?? this._u;
+    this._u = u;
+
+    const box = solveColumn([
+      { id: '#title', h: L.titleHeight },
+      { id: '#caps', h: L.capRow },
+      ...L.rows.map((r) => ({ id: r.id })),
+    ]);
+    this._box = box;
+    const at = (id) => box.rows.find((r) => r.id === id);
+
+    const title = at('#title');
+    this.title.scale.set(box.plate.width * u, title.h * u, 1);
+    this.title.position.set(0, title.y * u, 0);
+    this._titleHeight = title.h;
+
+    const caps = at('#caps');
+    const capWidth = Math.min(L.capWidth * box.k, caps.h * 0.72);
+    const capX = FRAME.width * L.capXShare;
+    const perCapUnit = (capWidth / (this._capRadius * 2)) * u;
+    this.caps.forEach((pivot, player) => {
+      pivot.position.set((player === 0 ? -capX : capX) * u, caps.y * u, 0);
+      pivot.scale.setScalar(perCapUnit);
+    });
+
+    for (const item of this.items) {
+      const row = at(item.id);
+      item.size = { width: box.plate.width, height: row.h, scale: PLATE_TEXEL_SCALE };
+      item.mesh.scale.set(box.plate.width * u, row.h * u, 1);
+      item.mesh.position.set(0, row.y * u, 0);
+    }
+
+    const key = `${box.plate.width}x${box.plate.height}`;
+    if (key !== this._plateKey) {
+      this._plateKey = key;
+      for (const item of this.items) item.label = null;
+      const old = this.title.material.uniforms.uMap.value;
+      this.title.material.uniforms.uMap.value = titleTexture('상대 선택', this._modeName, {
+        width: box.plate.width,
+        height: this._titleHeight,
+        scale: PLATE_TEXEL_SCALE,
+      });
+      old?.dispose();
+    }
+    this.refresh();
   }
 
   /**

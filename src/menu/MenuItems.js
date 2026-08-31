@@ -1,6 +1,8 @@
 import { Group, Mesh, PlaneGeometry, Raycaster, Vector2 } from 'three';
 import { createSpriteMaterial } from './menuMaterials.js';
 import { menuPlateTexture, titleTexture } from './menuTextures.js';
+import { FRAME } from '../core/frame.js';
+import { SPACE } from '../core/tokens.js';
 
 /**
  * The four items, as flat plates standing in the scene.
@@ -31,6 +33,15 @@ import { menuPlateTexture, titleTexture } from './menuTextures.js';
  * dither and the same five bits — it is unlit, not unfiltered.
  */
 
+/**
+ * 메뉴 판 텍스처의 텍셀 배수.
+ *
+ * 게임 쪽 `config.ui.textureScale` 과 같은 일을 하지만, 메뉴는 별도 문서라 그
+ * 설정을 읽지 않는다. 2 인 이유는 레티나(DPR 2)에서 텍셀 하나가 화면 픽셀 하나가
+ * 되는 지점이기 때문이고, 그 위는 메뉴 판 열두 장에 쓰기엔 낭비다.
+ */
+const PLATE_TEXEL_SCALE = 2;
+
 /** Frame pixels to world units at the plates' depth. Filled in by `layout`. */
 const DEFAULT_ITEMS = [
   { id: 'knockout', label: '서바이벌' },
@@ -50,20 +61,20 @@ export class MenuItems {
 
     this.title = new Mesh(
       new PlaneGeometry(1, 1),
-      createSpriteMaterial(retro, { map: titleTexture('BOTTLE CAP CHAOS', '메인 메뉴') }),
+      createSpriteMaterial(retro, {
+        map: titleTexture('BOTTLE CAP CHAOS', '메인 메뉴', {
+          width: Math.round(tuning.plateWidth),
+          height: Math.round(tuning.plateWidth * 0.5),
+          scale: PLATE_TEXEL_SCALE,
+        }),
+      }),
     );
     this.root.add(this.title);
 
     this.items = items.map((def) => {
       // Three textures per item and no re-drawing later. Building one is a
-      // handful of canvas calls and two `getImageData` round trips — nothing
-      // once, unthinkable on every hover.
-      const size = { width: tuning.plateWidth, height: tuning.plateHeight };
-      const maps = {
-        idle: menuPlateTexture(def.label, 'idle', size),
-        hover: menuPlateTexture(def.label, 'hover', size),
-        disabled: menuPlateTexture(def.label, 'disabled', size),
-      };
+      // handful of canvas calls — nothing once, unthinkable on every hover.
+      const maps = this._bake(def.label);
       const material = createSpriteMaterial(retro, {
         map: def.disabled ? maps.disabled : maps.idle,
       });
@@ -88,22 +99,104 @@ export class MenuItems {
    * than every frame: none of it depends on time, and recomputing a fixed
    * layout sixty times a second is how a menu ends up drifting by a pixel.
    */
+  /**
+   * 한 항목의 세 상태 텍스처.
+   *
+   * 판 크기가 프레임에 따라 변하므로 — `bootMenu.applyArrangement` 를 보라 —
+   * 부팅 때 한 번이 아니라 크기가 바뀔 때마다 필요하다. 그래서 함수로 뺐다.
+   */
+  _bake(label) {
+    const t = this.tuning;
+    const size = {
+      width: Math.round(t.plateWidth),
+      height: Math.round(t.plateHeight),
+      scale: PLATE_TEXEL_SCALE,
+    };
+    return {
+      idle: menuPlateTexture(label, 'idle', size),
+      hover: menuPlateTexture(label, 'hover', size),
+      disabled: menuPlateTexture(label, 'disabled', size),
+    };
+  }
+
+  /**
+   * 판 크기가 바뀌었으면 텍스처를 다시 굽는다.
+   *
+   * ── 왜 필요한가 ────────────────────────────────────────────────────────
+   * 가로 화면에서 판 폭은 프레임에 비례한다. 640 폭 프레임에서 256 이던 판은 421
+   * 프레임에서 168 이고, 텍스처를 그대로 두면 168 폭 쿼드에 256 폭 그림이 눌려
+   * 붙는다 — 글자가 가로로 압축돼 보인다.
+   *
+   * 크기가 같으면 아무것도 하지 않는다. `layout()` 은 리사이즈마다 불리므로
+   * 이 가드가 없으면 창을 끌 때마다 항목 수 x 3 장을 다시 굽는다.
+   */
+  _rebakeIfResized() {
+    const t = this.tuning;
+    const key = `${Math.round(t.plateWidth)}x${Math.round(t.plateHeight)}`;
+    if (key === this._plateKey) return;
+    this._plateKey = key;
+    for (const item of this.items) {
+      const next = this._bake(item.label);
+      for (const tex of Object.values(item.maps)) tex.dispose();
+      item.maps = next;
+      item.material.uniforms.uMap.value = item.disabled
+        ? next.disabled
+        : item.hovered
+          ? next.hover
+          : next.idle;
+    }
+    const title = this.title.material.uniforms.uMap.value;
+    const titleW = Math.round(t.plateWidth);
+    this.title.material.uniforms.uMap.value = titleTexture('BOTTLE CAP CHAOS', '메인 메뉴', {
+      width: titleW,
+      height: Math.round(titleW * 0.5),
+      scale: PLATE_TEXEL_SCALE,
+    });
+    title.dispose();
+  }
+
   layout(unitsPerPixel) {
     const t = this.tuning;
     const u = unitsPerPixel;
     const yaw = (t.yaw * Math.PI) / 180;
+    this._rebakeIfResized();
 
     const w = t.plateWidth * u;
     const h = t.plateHeight * u;
     const n = this.items.length;
 
+    /**
+     * 제목판과 항목들은 **하나의 덩어리**로 배치되고, 그 덩어리가 프레임에 맞춰
+     * 잘리지 않도록 위로 밀린 만큼 다시 내려온다.
+     *
+     * 예전에는 제목을 항목 열 위에 `title.height * 0.72` 만큼 띄워 놓기만 했다.
+     * 제목판이 52 였을 때는 우연히 화면 안에 들어갔고, 두 줄 머리글을 담느라 84 가
+     * 되자 위쪽이 프레임 밖으로 나갔다. 덩어리 전체 높이를 재서 배치하면 판이 몇
+     * 픽셀이든 그런 일이 없다.
+     */
     const title = this.title.material.uniforms.uMap.value.userData ?? { width: 256, height: 80 };
+    // 판 사이 간격은 항목 사이와 같아야 한 열로 읽힌다. 제목만 더 붙으면
+    // 제목이 첫 항목의 머리처럼 보인다.
+    const titleGap = Math.max(SPACE.md, Math.round(t.pitch - t.plateHeight));
+    const itemsTop = t.columnY + ((n - 1) / 2) * t.pitch + t.plateHeight / 2;
+    let titleY = itemsTop + titleGap + title.height / 2;
+
+    /**
+     * 프레임 위 가장자리를 넘으면 덩어리 전체를 그만큼 내린다.
+     *
+     * 제목만 내리면 항목과 겹친다 — 겹친 두 판은 잘린 한 판보다 나쁘다.
+     */
+    const ceiling = FRAME.height / 2 - SPACE.md;
+    const over = Math.max(0, titleY + title.height / 2 - ceiling);
+    titleY -= over;
+    const shift = -over;
+
     this.title.scale.set(title.width * u, title.height * u, 1);
-    this.title.position.set(t.columnX * u, (t.columnY + (n * t.pitch) / 2 + title.height * 0.72) * u, 0);
+    this.title.position.set(t.columnX * u, titleY * u, 0);
     this.title.rotation.y = yaw;
 
     this.items.forEach((item, i) => {
-      const y = t.columnY + ((n - 1) / 2 - i) * t.pitch;
+      const y = t.columnY + ((n - 1) / 2 - i) * t.pitch + shift;
       item.home = { x: t.columnX * u, y: y * u };
       item.mesh.scale.set(w, h, 1);
       item.mesh.rotation.y = yaw;
