@@ -233,18 +233,25 @@ async function boot(canvas) {
   // Nothing in physics/ can be constructed before the WASM is up.
   await initRapier();
 
-  // ── render pipeline (phase 1, untouched) ─────────────────────────────────
-  // `portrait: true` is what lets the canvas grow taller than the board's 4:3,
-  // putting the HUD and the card hand in bands above and below the play area
-  // instead of on top of it. It resolves to exactly the old 4:3 for any window
-  // at least that wide, so landscape and every desktop window are unchanged.
-  // The menu and the cap viewer leave it off — see src/core/frame.js.
-  // NOTE: `portrait: true` turns on the taller frame — the HUD and card hand in
-  // bands above and below the board instead of on top of it. Everything it needs
-  // is built and verified (shared frame, board sub-rect, re-based input, refitted
-  // ortho cameras), but there is one unresolved rendering artefact in the bottom
-  // band, so it ships OFF until that is chased down. Off, every number in the
-  // pipeline is what it was before core/frame.js existed.
+  /**
+   * `portrait: true` — 켜져 있고, 그게 하는 일은 하나다.
+   *
+   * ── 예전 주석 두 개가 서로를 부정하고 있었다 ──────────────────────────────
+   * 하나는 "이 플래그가 HUD 와 손패를 보드 위아래 밴드에 놓는다"고 했고, 바로
+   * 아래 것은 "밑 밴드에 미해결 렌더링 아티팩트가 있어서 OFF 로 나간다"고 했다.
+   * 인자는 `true` 다. 둘 다 틀렸다기보다, 서로 다른 두 가지를 같은 것으로 부르고
+   * 있었다.
+   *
+   * 이 플래그가 하는 일은 프레임이 보드의 4:3 보다 높아질 수 있게 하는 것뿐이다.
+   * 세로 폰에서 캔버스가 위아래 검은 띠 없이 화면을 채우는 게 그 결과다. 가로
+   * 창에서는 정확히 4:3 으로 떨어지므로 데스크톱은 이 플래그와 무관하다.
+   *
+   * HUD 와 손패를 밴드에 놓는 것은 **다른 문제**이고, `frame.js` 의 `playHeight`
+   * 한 줄로 꺼져 있다. 이유와 켜는 조건은 그쪽 주석에 있다.
+   *
+   * 메뉴와 캡 뷰어는 이 플래그를 끈다 — 둘 다 4:3 캔버스에 위아래로 배치하고
+   * 정사각으로 지켜야 할 보드가 없다.
+   */
   const viewport = new Viewport({ canvas, portrait: true });
   // 이방성 상한은 렌더러가 있어야 알 수 있다. 텍스처가 만들어지기 전에.
   setTextureRenderer(viewport.renderer);

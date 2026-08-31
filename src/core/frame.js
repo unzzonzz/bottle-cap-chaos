@@ -46,6 +46,7 @@
  */
 
 import { OrthographicCamera } from 'three';
+import { SIZE, SPACE } from './tokens.js';
 
 /**
  * The widest the frame ever gets, and the size every UI constant was authored at.
@@ -126,34 +127,19 @@ export function setFieldAspect(a) {
 }
 
 /**
- * The least of the frame the two bands keep between them.
+ * 각 밴드가 담아야 하는 높이, 프레임 픽셀.
  *
- * A long field — football's pitch, curling's lane — wants a region taller than
- * the frame can spare, so something has to give. This is the line: the hand and
- * the readouts never get less than a quarter of the frame, and the region takes
- * everything above that. Both degrade gracefully past it (the hand simply shows
- * less card; see `handExposure`).
+ * ── 값이 아니라 계산이다 ────────────────────────────────────────────────────
+ * 190 과 230 이라는 상수였고, 그 숫자는 26 짜리 턴 플레이트와 42 짜리 스코어와
+ * 192 짜리 카드에서 나온 것이었다. 그 셋 다 크기가 바뀌었다 — `tokens.js` 의
+ * SIZE 가 지금 값을 갖고 있으므로 거기서 유도한다. 안 그러면 UI 를 키울 때마다
+ * 여기 숫자를 손으로 따라 고쳐야 하고, 한 번 잊으면 카드가 밴드 밖으로 나간다.
+ *
+ * 위: 여백 + 스코어판(턴 플레이트와 클럭 바가 같은 줄에 들어간다) + 여백.
+ * 아래: 여백 + 손패에서 보이는 카드 높이 + 드래그가 올라갈 여유.
  */
-const BANDS_MIN_SHARE = 0.25;
-
-/**
- * Exactly what each band has to HOLD, in frame pixels — no more.
- *
- * ── the bands take what they need and the BOARD takes the rest ──────────────
- * These used to be a ceiling on an even split of the surplus, which meant the
- * board stayed pinned at its 4:3 minimum and every pixel of extra screen went to
- * the bands. On a phone that left the play area a 4:3 strip across the middle
- * with the map cut off at its edges and two large empty margins around it —
- * a letterbox inside a letterbox.
- *
- * They are now a REQUIREMENT rather than a share. The top holds a 26-tall turn
- * plate, a 5-tall clock, a 22-tall note, a 42-tall score and the margins between
- * them; the bottom holds a 192-tall card plus the room the drag-to-play travel
- * needs above it. Whatever is left over is the board's, and the board is no
- * longer forced to be 4:3 — see `boardAspect`.
- */
-const TOP_BAND_NEED = 190;
-const BOTTOM_BAND_NEED = 230;
+const TOP_BAND_NEED = SPACE.screenMargin * 2 + SIZE.scorePlate.h;
+const BOTTOM_BAND_NEED = SPACE.screenMargin + SIZE.cardExposure + SPACE.xl;
 
 /**
  * Resolve the frame for a window shape.
@@ -282,9 +268,29 @@ export function resolveFrame(windowW, windowH) {
    * for a game aimed along the board rather than across it, and the direction a
    * pinch can undo.
    *
-   * `fieldAspect` is still tracked because `boardRect`/`boardRectCss` and the
-   * pointer re-basing all read the region, and a mode that wants a different
-   * one only has to change this line.
+   * `fieldAspect` 는 `setFieldAspect` 가 쓰기만 하고 `resolveFrame` 은 읽지 않는다.
+   * 예전 주석은 "`boardRect`/`boardRectCss` 와 포인터 리베이싱이 읽는다"고 했는데
+   * 사실이 아니다 — 그것들이 읽는 것은 `FRAME.topBand` 와 `boardHeight` 이고, 그
+   * 둘은 위의 `playHeight` 에서 나온다. 모듈 변수는 밴드가 켜질 때 `playHeight` 를
+   * 필드 비율에 맞춰 자를 값으로서 남겨 둔다.
+   */
+  /**
+   * ── 밴드는 살아 있는 설계이고, 지금은 꺼져 있다 ─────────────────────────
+   * `playHeight` 가 프레임 전체를 먹으므로 `leftover` 가 0 이고, 따라서 두 밴드도
+   * 0 이다. 그 결과 아래의 `topBand` / `bottomBand` / `boardTop` / `boardBottom`
+   * 은 지금 전부 0 이거나 전체 높이이고, `boardAspect` 는 `aspect` 와 같은 값이다.
+   * 그게 화면에 나오는 사실이므로 여기 적어 둔다.
+   *
+   * 배선은 이미 전부 되어 있다 — `HudLayer` 는 `FRAME.topBand` 로 카드 노출을,
+   * `CardHand` 는 `bottomBand` 로 손패 위치를, `Viewport.boardRect*` 는 포인터
+   * 리베이싱을, `GameCamera` 는 `boardAspect` 를 카메라 aspect 로 이미 읽는다.
+   * 켜는 데 필요한 것은 이 한 줄이다.
+   *
+   * 켜지 않은 이유는 렌더 경로다. 카메라가 `boardAspect` 를 쓰는데 월드는 캔버스
+   * 전체에 그려지므로, 밴드가 0 이 아니게 되는 순간 두 비율이 어긋나 장면이
+   * 늘어난다. 예전에는 저해상도 타겟에 scissor 를 걸어(`Viewport.bindBoard`)
+   * 해결했고, PHASE 1 이 그 타겟과 함께 그 경로를 없앴다. 블룸 체인에 같은 것을
+   * 다시 만드는 일은 UI 배치와 함께 PHASE 6 에서 한다.
    */
   const playHeight = height;
 
@@ -305,9 +311,11 @@ export function resolveFrame(windowW, windowH) {
     /** The play area's ACTUAL height — the field's shape, within the bounds. */
     boardHeight: playHeight,
     /**
-     * The play area's shape, which the perspective camera takes as its aspect.
-     * The FIELD's shape wherever the frame can afford it, so nothing is cropped
-     * and nothing is wasted. 4:3 on a landscape window, as it always was.
+     * 플레이 영역의 비율. 원근 카메라가 이 값을 aspect 로 쓴다.
+     *
+     * 밴드가 꺼져 있는 지금은 `playHeight === height` 이므로 이 값은 아래의
+     * `aspect` 와 항상 같다. 두 필드를 다 두는 이유는 밴드가 켜지는 순간 갈라지기
+     * 때문이고, 카메라는 이쪽을 읽어야 하기 때문이다.
      */
     boardAspect: boardWidth / playHeight,
     topBand,
@@ -364,23 +372,6 @@ export function updateFrame(windowW, windowH) {
   }
   Object.assign(FRAME, next);
   return true;
-}
-
-/**
- * Where the board sits, as a fraction of the frame — the form a scissor
- * rectangle and a pointer re-basing both want.
- *
- * y is measured from the BOTTOM, because that is what WebGL's viewport and
- * scissor take and converting once here is better than remembering to flip at
- * each call site.
- */
-export function boardRectNormalised() {
-  return {
-    x: 0,
-    y: FRAME.bottomBand / FRAME.height,
-    w: 1,
-    h: FRAME.boardHeight / FRAME.height,
-  };
 }
 
 /**
