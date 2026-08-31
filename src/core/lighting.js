@@ -1,5 +1,6 @@
 import { DirectionalLight, HemisphereLight, Object3D } from 'three';
 import { PALETTE } from './palette.js';
+import { BUDGET } from './budget.js';
 
 /**
  * 씬의 조명 리그. 키 하나, 반구광 하나, 림 하나.
@@ -25,7 +26,7 @@ import { PALETTE } from './palette.js';
 /** 태양의 방향. `environment.js` 의 `uSunDir` 과 같은 값이어야 한다. */
 const SUN_DIR = { x: -0.55, y: 0.72, z: 0.42 };
 
-export function createLightRig(scene, { shadows = true, shadowMapSize = 2048 } = {}) {
+export function createLightRig(scene, { shadows = true, shadowMapSize = BUDGET.shadowMapSize } = {}) {
   /**
    * 키 라이트. 그림자를 던지는 유일한 광원이다.
    *

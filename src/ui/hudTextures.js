@@ -364,8 +364,13 @@ export function turnPlateTexture(text, color, { width, height, scale = 1, maxWid
    * `fitText` 가 이 안에 들어가도록 크기를 줄이고, 그래도 안 되면 자른다. 예전에는
    * 판만 `maxWidth` 로 좁히고 글자는 원래 크기로 그려서, 좁은 프레임에서 캔버스
    * 밖으로 나간 부분이 그냥 잘려 나갔다.
+   *
+   * ── 여백은 고정이 아니라 **높이 비례**다 ──────────────────────────────────
+   * `SPACE.lg + SPACE.md` = 58 을 고정으로 쓰고 있었다. 240 폭 판에서는 24% 지만,
+   * 375x812 폰(프레임 312)에서 판이 126 으로 줄면 46% 다 — 실측으로 "PLAYER 1" 이
+   * "PLAYE…" 가 됐다. 색 알약과 둥근 끝이 먹는 공간은 폭이 아니라 높이를 따라간다.
    */
-  const inner = maxWidth - (SPACE.lg + SPACE.md);
+  const inner = maxWidth - Math.max(SPACE.md, height * 0.8);
   const fitted = fitText(probe.ctx, text, TYPE.label, inner);
   const font = fitted.font;
   const label = fitted.text;

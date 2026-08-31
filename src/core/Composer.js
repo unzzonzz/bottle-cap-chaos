@@ -3,6 +3,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { BUDGET } from './budget.js';
 
 /**
  * The world's post-processing chain: render, bloom, output. Nothing else.
@@ -86,8 +87,16 @@ export class SceneComposer {
     this.renderPass = new RenderPass(scene, camera);
     this.composer.addPass(this.renderPass);
 
+    /**
+     * 블룸은 타겟보다 **낮은 해상도**로 돈다. `BUDGET.bloomScale` 을 보라.
+     *
+     * `UnrealBloomPass.setSize` 가 정하는 것은 밝은 부분 추출과 다섯 단계 블러가
+     * 도는 내부 타겟의 크기이고, 마지막 합성은 어차피 전체 해상도의 전면 패스다.
+     * 그래서 여기를 절반으로 내리면 블러 체인의 면적이 4분의 1이 되고, 화면에
+     * 도착하는 그림은 사실상 같다 — 블룸은 정의상 저주파다.
+     */
     this.bloomPass = new UnrealBloomPass(
-      new Vector2(x, y),
+      new Vector2(Math.max(1, Math.round(x * BUDGET.bloomScale)), Math.max(1, Math.round(y * BUDGET.bloomScale))),
       bloom.strength ?? 0.45,
       bloom.radius ?? 0.6,
       bloom.threshold ?? 0.72,
@@ -120,7 +129,12 @@ export class SceneComposer {
 
   setSize(w, h) {
     this.composer.setSize(w, h);
-    this.bloomPass.setSize(w, h);
+    // 블룸만 예산 배율을 받는다. 컴포저의 읽기/쓰기 버퍼는 전체 해상도여야 한다 —
+    // 마지막 패스가 캔버스에 그대로 쓰기 때문이다.
+    this.bloomPass.setSize(
+      Math.max(1, Math.round(w * BUDGET.bloomScale)),
+      Math.max(1, Math.round(h * BUDGET.bloomScale)),
+    );
   }
 
   /**

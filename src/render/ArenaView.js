@@ -470,13 +470,36 @@ export class ArenaView {
     const curr = this.arena.currTransforms;
     const t = Math.max(0, Math.min(1, alpha));
 
+    /**
+     * 이 프레임에 그림자를 드리우는 것이 움직였는가.
+     *
+     * ── 그림자 맵을 매 프레임 다시 그릴 이유가 없다 ─────────────────────────
+     * 이 장면에서 그림자를 던지는 것은 뚜껑과 공뿐이다. 조준하는 동안, 카드를 고르는
+     * 동안, 상대 턴을 기다리는 동안 — 즉 경기 시간의 대부분 — 둘 다 가만히 있고,
+     * 그동안 렌더러는 같은 깊이 맵을 매 프레임 다시 그린다. 장면을 한 번 더 그리는
+     * 일이다.
+     *
+     * 물리 스텝 수를 조건으로 쓰지 않는 이유는 그것으로 부족하기 때문이다. 아래의
+     * `fx.capVisual` 은 물리와 무관하게 뚜껑을 **그림에서** 움직인다 — 혼란의
+     * 흔들림, 강타의 맥동. 그 둘만으로 뚜껑이 움직이면 물리는 멈춰 있고 그림자만
+     * 뒤에 남는다.
+     *
+     * 그래서 실제로 쓰는 변환을 비교한다. 여덟 개의 위치와 회전을 프레임마다 재는
+     * 것은 장면을 다시 그리는 것보다 몇 자릿수 싸다. 임계값은 없다 — 정확히 같으면
+     * 같은 것이고, 조금이라도 다르면 다시 그려야 한다.
+     */
+    this.moved = false;
+
     for (let i = 0; i < this.meshes.length; i++) {
       const mesh = this.meshes[i];
+      const wasVisible = mesh.visible;
       if (alive && !alive[i]) {
         mesh.visible = false;
+        if (wasVisible) this.moved = true;
         continue;
       }
       mesh.visible = true;
+      if (!wasVisible) this.moved = true;
       this._place(mesh, prev, curr, i, t);
 
       const v = fx?.capVisual(i) ?? null;
@@ -488,13 +511,56 @@ export class ArenaView {
       } else if (mesh.scale.x !== 1) {
         mesh.scale.setScalar(1);
       }
+
+      if (!this.moved) this.moved = this._changed(i, mesh);
+      this._remember(i, mesh);
     }
 
     // The ball's slot comes after every cap's, which is why the caps could be
     // walked by mesh index above without knowing the ball existed.
-    if (this.ball) this._place(this.ball, prev, curr, this.arena.ballSlot, t);
+    if (this.ball) {
+      this._place(this.ball, prev, curr, this.arena.ballSlot, t);
+      const b = this.meshes.length;
+      if (!this.moved) this.moved = this._changed(b, this.ball);
+      this._remember(b, this.ball);
+    }
 
     this.surface?.update();
+  }
+
+  /**
+   * 이 메시가 지난 프레임과 다른가. 위치 · 회전 · 배율.
+   *
+   * 슬롯당 여덟 개의 숫자를 하나의 평평한 배열에 담는다. 객체 배열이면 프레임마다
+   * 여덟 번의 프로퍼티 조회가 여덟 개의 메시마다 생기고, 그건 이 검사가 아끼려는
+   * 것보다 크지는 않아도 셀 만한 양이다.
+   */
+  _changed(slot, mesh) {
+    const m = (this._shadowLast ??= new Float64Array((this.meshes.length + 1) * 8).fill(NaN));
+    const o = slot * 8;
+    return (
+      m[o] !== mesh.position.x ||
+      m[o + 1] !== mesh.position.y ||
+      m[o + 2] !== mesh.position.z ||
+      m[o + 3] !== mesh.quaternion.x ||
+      m[o + 4] !== mesh.quaternion.y ||
+      m[o + 5] !== mesh.quaternion.z ||
+      m[o + 6] !== mesh.quaternion.w ||
+      m[o + 7] !== mesh.scale.x
+    );
+  }
+
+  _remember(slot, mesh) {
+    const m = (this._shadowLast ??= new Float64Array((this.meshes.length + 1) * 8).fill(NaN));
+    const o = slot * 8;
+    m[o] = mesh.position.x;
+    m[o + 1] = mesh.position.y;
+    m[o + 2] = mesh.position.z;
+    m[o + 3] = mesh.quaternion.x;
+    m[o + 4] = mesh.quaternion.y;
+    m[o + 5] = mesh.quaternion.z;
+    m[o + 6] = mesh.quaternion.w;
+    m[o + 7] = mesh.scale.x;
   }
 
   _place(mesh, prev, curr, slot, t) {
@@ -541,6 +607,10 @@ export class ArenaView {
    * separate paths is how one of them ends up leaking the old GPU buffers.
    */
   rebuild(arena) {
+    // 메시 수가 바뀌므로 기억을 버린다. 남겨 두면 다음 프레임에 슬롯이 어긋난 채
+    // 비교되고, 움직이지 않은 뚜껑이 움직인 것으로 보고된다 — 안전한 방향이지만
+    // 조용히 최적화를 무력화한다.
+    this._shadowLast = null;
     for (const m of this.meshes) this.root.remove(m);
     this.meshes.length = 0;
     if (this.ball) {

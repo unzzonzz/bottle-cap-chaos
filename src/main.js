@@ -267,6 +267,15 @@ async function boot(canvas) {
    */
   const sky = createSky(scene);
   const lights = createLightRig(scene);
+  /**
+   * 그림자 맵은 자동으로 갱신되지 않는다. `ArenaView.moved` 가 켠다.
+   *
+   * 여기서 한 번만 끄는 이유는 이것이 이 문서의 성질이기 때문이다 — 이 장면에서
+   * 그림자를 던지는 것은 뚜껑과 공뿐이고, 둘 다 언제 움직였는지 정확히 알 수 있다.
+   * 어디서 켜는지는 틱 안의 주석에, 왜 물리 스텝 수로는 부족한지는
+   * `ArenaView.update` 에 적혀 있다.
+   */
+  viewport.renderer.shadowMap.autoUpdate = false;
 
   viewport.onResize(({ resolution }) => retro.setResolution(resolution));
 
@@ -1393,6 +1402,10 @@ async function boot(canvas) {
      * 뭉개지는데, 원인이 그림자 코드가 아니라 이 한 줄의 부재라 찾기 어렵다.
      */
     lights.setExtents(ext);
+    // 프러스텀이 바뀌었으므로 맵도 한 번 다시 그려야 한다. `view.rebuild` 를 거치는
+    // 모드 전환은 `_shadowLast` 가 비워져 저절로 갱신되지만, 필드 비율만 바뀌는
+    // 경로는 그러지 않는다 — 그 한 경로 때문에 여기 한 줄이 있다.
+    viewport.renderer.shadowMap.needsUpdate = true;
     // After the extents, because the range is re-clamped against the new fit and
     // clamping against the old one would put the zoom somewhere neither mode
     // allows for a frame.
@@ -1966,6 +1979,19 @@ async function boot(canvas) {
     // rather than on the last one's.
     cardFx.update({ dt, match, camera: gameCamera.camera });
     view.update(match.alpha, match.rules.alive, cardFx);
+
+    /**
+     * 그림자 맵은 그림자를 던지는 것이 움직였을 때만 다시 그린다.
+     *
+     * `ArenaView.update` 가 방금 실제 변환을 비교해 `moved` 를 채웠다 — 왜 물리
+     * 스텝 수로는 부족한지도 거기 적혀 있다. 조준하고 카드를 고르고 상대를 기다리는
+     * 동안, 즉 경기 시간의 대부분, 이 값은 거짓이고 장면을 한 번 덜 그린다.
+     *
+     * 끄는 것(`autoUpdate = false`)은 부팅에서 한 번 한다 — `createLightRig` 옆.
+     * 메뉴 문서는 그대로 자동인데, 저쪽에서 그림자를 던지는 것은 병 하나뿐이고
+     * 그건 매 프레임 떠 있으므로 자동이 맞다.
+     */
+    if (view.moved) viewport.renderer.shadowMap.needsUpdate = true;
     // After the view, so a mark and the cap it is measured from are drawn off
     // the same frame's transforms rather than a frame apart — which on a
     // measurement drawn to a hundredth of a unit would be visible.
