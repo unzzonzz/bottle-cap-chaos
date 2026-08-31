@@ -131,10 +131,18 @@ export const PALETTE = {
     rim: '#d8f0ff',
   },
 
-  /** What is inside the bottle. Bright, translucent, faintly green-cyan. */
+  /**
+   * 병 안의 내용물.
+   *
+   * 사이다는 거의 무색이다. 처음엔 중간 채도의 시안(`#2fb8d8`)이었는데, 환경맵이
+   * 유일한 광원이라 노출까지 겸하는 상태에서 그 채도는 블룸을 넘겨 스스로 빛나는
+   * 젤 덩어리가 됐다. 지금 값은 유리보다 아주 조금 더 파랗기만 하다 — 목에는
+   * 액체가 없고 몸통에는 있다는 사실이 읽힐 정도면 충분하고, 그 이상은 음료가
+   * 아니라 물감이다.
+   */
   liquid: {
-    core: '#2fb8d8',
-    edge: '#7fe0ee',
+    core: '#9fd8e8',
+    edge: '#c2ecf5',
     foam: '#eafaff',
   },
 

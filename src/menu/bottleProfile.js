@@ -175,8 +175,14 @@ export const BOTTLE_DEFAULTS = {
   // ── the contents ─────────────────────────────────────────────────────────
   /** Where the drink stops. Mid-shoulder, as it is on the reference bottle. */
   fillLevel: 150,
-  /** The liquid's radius as a fraction of the glass envelope. */
-  liquidInset: 0.92,
+  /**
+   * 액체 반지름이 유리 외피의 몇 배인가.
+   *
+   * 0.92 는 유리 벽에서 8% 떨어진 값이라, 맑아진 유리 너머로 액체와 벽 사이의
+   * 빈 껍질이 보였다. 실제 음료는 벽에 닿아 있다. 0.96 은 유리 두께만큼만
+   * 안쪽이다.
+   */
+  liquidInset: 0.96,
 
   // ── tessellation ─────────────────────────────────────────────────────────
   /**

@@ -297,12 +297,25 @@ export function buildLiquidGeometry(profile) {
   const fill = Math.min(profile.height - 4, p.fillLevel);
 
   const surfaceR = profile.envelopeAt(fill) * p.liquidInset;
-  const rows = [];
-  const steps = 7;
-  for (let i = 0; i <= steps; i++) {
-    const y = (fill * i) / steps;
-    rows.push({ r: profile.envelopeAt(y) * p.liquidInset * MM, y: y * MM, rib: 0 });
-  }
+
+  /**
+   * 유리와 같은 행에서 잘라 쓴다. 균등 분할이 아니다.
+   *
+   * ── 균등 8행은 어깨를 통째로 건너뛴다 ────────────────────────────────────
+   * 예전엔 바닥에서 액면까지 `fill * i / 7` 로 여덟 행을 균등하게 놓았다. 몸통이
+   * 직선일 때는 그래도 되지만, 액면이 어깨 중간(150)에 있으면 마지막 두 행이
+   * y=128.6 과 y=150 이 되고 그 사이에서 반지름이 29.8 에서 16.1 로 떨어진다.
+   * 사이에 행이 하나도 없으니 어깨 곡선이 직선 원뿔대로 잘려서, 액체 윗부분이
+   * 눈에 띄게 각져 보였다.
+   *
+   * 프로파일은 같은 구간에 132·135·139·143·147 다섯 행을 더 갖고 있다. 그걸
+   * 그대로 빌려 쓰면 액체 표면이 유리 안쪽 벽을 정확히 따라간다 — 애초에 액체가
+   * 해야 할 일이고, 어깨 모양을 두 번 정의하지 않아도 된다.
+   */
+  const rows = profile.rows
+    .filter((row) => row.y < fill)
+    .map((row) => ({ r: row.r * p.liquidInset * MM, y: row.y * MM, rib: 0 }));
+  rows.push({ r: surfaceR * MM, y: fill * MM, rib: 0 });
 
   /**
    * Vertex colours, so the meniscus is brighter than the drink under it.
@@ -313,20 +326,21 @@ export function buildLiquidGeometry(profile) {
    * container, and `Bottle._slosh` — which tilts that surface every frame — was
    * computing something nobody could see.
    *
-   * A real drink is most visible at its surface: the meniscus catches the light
-   * and the rim where it meets the glass catches more. This is that, as a
-   * multiplier the shader already applies. The rim goes ABOVE 1 deliberately —
-   * the render target is half-float, so a value over white survives to the bloom
-   * pass and the ring picks up a faint glow, which is the one place on this
-   * bottle where that is physically what would happen.
+   * 실제 음료는 액면이 가장 잘 보인다 — 표면이 빛을 받고, 유리와 만나는 테두리는
+   * 더 받는다. 셰이더가 이미 곱해주는 값으로 그걸 표현한다.
+   *
+   * 테두리는 1 을 조금 넘긴다. 렌더 타겟이 half-float 이라 흰색을 넘는 값이
+   * 블룸까지 살아남고, 액면 테두리는 이 병에서 그게 물리적으로 맞는 유일한
+   * 자리다. 처음엔 1.9 였고 그건 과했다 — 액체 전체가 스스로 빛나는 것처럼
+   * 보여서, 유리에 담긴 음료가 아니라 발광하는 젤이 됐다.
    *
    * It costs nothing to animate: the slosh already rewrites these vertices'
    * POSITIONS, so the bright ring tilts with the surface for free.
    */
-  const WALL = [0.92, 0.97, 1.0];
-  const BASE = [0.72, 0.8, 0.86];
-  const SURFACE_MID = [1.15, 1.3, 1.35];
-  const SURFACE_RIM = [1.7, 1.85, 1.9];
+  const WALL = [0.9, 0.95, 1.0];
+  const BASE = [0.7, 0.78, 0.85];
+  const SURFACE_MID = [1.0, 1.06, 1.1];
+  const SURFACE_RIM = [1.18, 1.24, 1.28];
 
   const mesh = revolve(rows, {
     cols,

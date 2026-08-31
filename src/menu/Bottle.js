@@ -101,11 +101,20 @@ export class Bottle {
     // Opaque and lit, so the drink picks up the same key and fill as the glass
     // around it. `gloss: 0` — a liquid seen through brown glass with a specular
     // highlight on it looks like a solid.
-    // `vertexColors` is what makes the meniscus ring visible — see the note in
-    // `buildLiquidGeometry`. A faint gloss so the surface catches the sun.
+    /**
+     * 유리 안에 담긴 음료.
+     *
+     * `vertexColors` 가 액면 링을 보이게 하는 장치다 — `buildLiquidGeometry` 의
+     * 주석 참조. 나머지 세 값은 "스스로 빛나지 않게" 하려고 재서 넣었다: 액체는
+     * 유리 안쪽에 있어서 바깥 표면만큼 빛을 받을 수 없는데, 환경맵이 유일한
+     * 광원인 지금은 아무것도 안 하면 유리와 똑같이 노출된다. 그러면 병 전체가
+     * 한 덩어리로 발광한다.
+     */
     this.liquidMaterial = retro.create({
       color: PALETTE.liquid.core,
-      gloss: 0.55,
+      gloss: 0.5,
+      clearcoat: 0.15,
+      envIntensity: 0.6,
       vertexColors: true,
     });
     /**
