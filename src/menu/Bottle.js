@@ -114,10 +114,15 @@ export class Bottle {
       color: PALETTE.liquid.core,
       gloss: 0.5,
       clearcoat: 0.15,
-      // 유리와 같은 이유로 전역값보다 높다 — 액체도 환경을 통해 보인다. 다만
-      // 유리만큼은 아니다: 액체는 굴절이 아니라 확산이 대부분이라 과하면 다시
-      // 스스로 빛나기 시작한다.
-      envIntensity: 1.5,
+      /**
+       * 1.5 였다. 1.0 으로 내렸다.
+       *
+       * 액체 색을 유리와 구별되게 진하게 하려면(`PALETTE.liquid` 참조) 노출도 함께
+       * 내려야 한다. 색만 진하게 하고 1.5 를 그대로 두면 그 진한 색이 그대로 밝아져
+       * 다시 유리와 같은 밝기가 되고, 심하면 블룸 임계값을 넘어 하얗게 뜬다 — 처음
+       * `#2fb8d8` 을 물렸던 이유가 정확히 그것이었다. 색과 노출은 한 쌍이다.
+       */
+      envIntensity: 1.0,
       vertexColors: true,
     });
     /**
@@ -701,25 +706,55 @@ export class Bottle {
     const floorY = 2 * MM;
 
     /**
-     * 링이 **둘**이다: 부채꼴의 테두리와 옆벽 맨 윗줄. 같은 각도, 같은 반지름,
-     * 다른 정점. 하나만 움직이면 벽 끝이 액면 위로 삐져나오거나 사이가 벌어진다.
+     * ── 링의 반지름은 **높이를 따라간다**. 이것이 빠져서 액면이 유리를 뚫었다 ──
+     * 처음에는 y 만 기울이고 반지름은 원래 액면 높이에서 잰 값 하나로 두었다. 병이
+     * 원통이면 그래도 맞지만 이 병에는 어깨가 있다 — `fillLevel` 150 근처에서
+     * 반지름이 프로파일 14 단위마다 눈에 띄게 줄어든다. 수평면이 한쪽을 올리고
+     * 다른 쪽을 내리면, 올라간 쪽은 병이 좁아진 자리에 넓은 원이 놓여 **유리를 뚫고
+     * 나오고** 내려간 쪽은 벽에서 떨어져 틈이 생긴다.
+     *
+     * 실측: 34도로 기울인 병에서 액면이 유리 오른쪽으로 검은 쐐기처럼 튀어나왔다.
+     *
+     * 그래서 컬럼마다 (r, y) 두 개를 함께 푼다:
+     *
+     *     y = y0 + (kx*cos + kz*sin) * r      수평면 위에 있을 것
+     *     r = envelope(y) * liquidInset       유리 안쪽 벽에 닿아 있을 것
+     *
+     * 두 식의 교점이고, 감쇠를 준 고정점 반복으로 푼다 — 어깨에서는 dr/dy 가 커서
+     * 감쇠 없이는 진동한다.
+     */
+    const inset = p.liquidInset;
+    const y0 = base.surfaceY;
+    const solve = (dir) => {
+      let r = base.surfaceRadius ?? 0;
+      for (let n = 0; n < 6; n++) {
+        const yy = Math.max(floorY, Math.min(ceil, y0 + dir * r));
+        const want = this.profile.envelopeAt(yy / MM) * inset * MM;
+        r += (want - r) * 0.6;
+      }
+      return { r, y: Math.max(floorY, Math.min(ceil, y0 + dir * r)) };
+    };
+
+    /**
+     * 링이 **둘**이다: 부채꼴의 테두리와 옆벽 맨 윗줄. 같은 각도, 같은 자리, 다른
+     * 정점. 하나만 움직이면 벽 끝이 액면 위로 삐져나오거나 사이가 벌어진다.
      * `bottleGeometry` 의 `wallTopRim` 주석에 왜 둘인지 적혀 있다.
+     *
+     * y 만이 아니라 x·z 도 쓴다. 반지름이 컬럼마다 다르므로 링은 더 이상 원이
+     * 아니고, y 만 옮기면 반지름이 옛 값 그대로 남는다 — 그게 유리를 뚫던 원인이다.
      */
     const attr = base.attr;
-    const R0 = base.surfaceRadius ?? 0;
     const wall = base.wallTopRim;
     for (let i = 0; i < base.surfaceCols; i++) {
       const th = (i / base.surfaceCols) * Math.PI * 2;
-      const x = R0 * Math.cos(th);
-      const z = R0 * Math.sin(th);
-      // 수평면 + 출렁임. 출렁임은 병이 기우는 축과 같은 축을 돈다 — 기울어진 병에서
-      // 술이 낮은 쪽으로 몰리지, 아무 상관 없는 쪽으로 몰리지 않는다.
-      const y = Math.max(
-        floorY,
-        Math.min(ceil, base.surfaceY + kx * x + kz * z + Math.cos(th) * amp),
-      );
-      attr.setY(base.surfaceRim + i, y);
-      if (wall !== undefined) attr.setY(wall + i, y);
+      const c = Math.cos(th);
+      const sn = Math.sin(th);
+      const { r, y } = solve(kx * c + kz * sn);
+      // 출렁임은 수평면 **위에** 얹힌다. 기울기와 같은 축을 돌므로, 기울어진 병에서
+      // 술이 낮은 쪽으로 몰리지 아무 상관 없는 쪽으로 몰리지 않는다.
+      const yy = Math.max(floorY, Math.min(ceil, y + c * amp));
+      attr.setXYZ(base.surfaceRim + i, r * c, yy, r * sn);
+      if (wall !== undefined) attr.setXYZ(wall + i, r * c, yy, r * sn);
     }
     // 가운데는 기울기의 피벗이다. 수평면도 출렁임도 여기서는 0 이므로 움직이지
     // 않고, 그것이 이것을 기울기로 만든다 — 액면 전체가 위아래로 까딱이는 것이 아니라.

@@ -1,0 +1,120 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>bottle preview</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #7fb2d8; overflow: hidden; }
+  canvas { display: block; }
+  #ui {
+    position: fixed; left: 12px; top: 12px; z-index: 2;
+    font: 12px/1.6 ui-monospace, Menlo, monospace; color: #123;
+    background: rgba(255,255,255,0.82); padding: 10px 12px; border-radius: 10px;
+  }
+  #ui label { display: block; }
+  #ui input { width: 180px; vertical-align: middle; }
+</style>
+<div id="ui">
+  <label>lean Z <input id="lz" type="range" min="-40" max="40" step="1" value="8" /> <b id="lzv">8</b>°</label>
+  <label>lean X <input id="lx" type="range" min="-40" max="40" step="1" value="0" /> <b id="lxv">0</b>°</label>
+  <label>fill <input id="fill" type="range" min="40" max="185" step="1" value="150" /> <b id="fillv">150</b></label>
+  <label>shake <input id="sh" type="range" min="0" max="1" step="0.01" value="0" /> <b id="shv">0</b></label>
+  <label><input id="wire" type="checkbox" /> wireframe</label>
+</div>
+<script type="module">
+  import * as THREE from 'three';
+  import { GlossMaterials } from '/src/core/GlossMaterial.js';
+  import { buildEnvironment } from '/src/core/environment.js';
+  import { createLightRig } from '/src/core/lighting.js';
+  import { Bottle } from '/src/menu/Bottle.js';
+  import { MENU_CONFIG } from '/src/menu/menuConfig.js';
+  import { PALETTE } from '/src/core/palette.js';
+  import { MM } from '/src/cap/capGeometry.js';
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.shadowMap.enabled = true;
+  document.body.appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(PALETTE.bg.skyMid);
+  const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 500);
+
+  const materials = new GlossMaterials({ resolution: new THREE.Vector2(1, 1) });
+  materials.setEnvironment(buildEnvironment(renderer));
+  createLightRig(scene).setExtents({ x: 26, z: 26 });
+
+  const cfg = structuredClone(MENU_CONFIG);
+  // 메뉴에서는 병이 화면 왼쪽에 선다. 여기서는 병만 보므로 가운데로.
+  cfg.bottle.originX = 0;
+  cfg.bottle.originY = 0;
+  cfg.bottle.floorY = -0.6;
+  const bottle = new Bottle({ retro: materials, tuning: cfg.bottle });
+  /**
+   * 그림자와 버스트는 넣지 않는다.
+   *
+   * 그림자는 바닥에 눕힌 쿼드라, 카메라가 병의 중간 높이에 있으면 정면으로 보여
+   * 가느다란 검은 선이 된다 — 처음 이 페이지로 볼 때 그것을 액면이 유리를 뚫은
+   * 것으로 잘못 읽었다. 여기서 보려는 것은 유리와 액체뿐이다.
+   */
+  scene.add(bottle.root);
+
+  const $ = (id) => document.getElementById(id);
+  let shake = 0;
+
+  function applyTuning() {
+    cfg.bottle.leanZ = Number($('lz').value);
+    cfg.bottle.aimLeanZ = Number($('lz').value);
+    cfg.bottle.leanX = Number($('lx').value);
+    cfg.bottle.aimPitch = Number($('lx').value);
+    shake = Number($('sh').value);
+    $('lzv').textContent = $('lz').value;
+    $('lxv').textContent = $('lx').value;
+    $('shv').textContent = $('sh').value;
+    bottle.applyLean(0);
+  }
+  for (const id of ['lz', 'lx', 'sh']) $(id).addEventListener('input', applyTuning);
+  $('fill').addEventListener('input', () => {
+    cfg.bottle.profile.fillLevel = Number($('fill').value);
+    $('fillv').textContent = $('fill').value;
+    bottle.rebuild();
+    applyTuning();
+  });
+  $('wire').addEventListener('change', () => {
+    const on = $('wire').checked;
+    bottle.root.traverse((o) => { for (const m of [].concat(o.material ?? [])) if (m) m.wireframe = on; });
+  });
+  applyTuning();
+
+  function fit() {
+    const w = document.documentElement.clientWidth;
+    const h = document.documentElement.clientHeight;
+    renderer.setSize(w, h, false);
+    renderer.domElement.style.width = `${w}px`;
+    renderer.domElement.style.height = `${h}px`;
+    camera.aspect = w / h;
+    // Frame the bottle from its own bounds rather than from a guessed scale.
+    bottle.root.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(bottle.root);
+    const c = box.getCenter(new THREE.Vector3());
+    const s = box.getSize(new THREE.Vector3());
+    const reach = Math.max(s.y, s.x * (h / w || 1)) * 1.25;
+    const dist = reach / (2 * Math.tan((camera.fov * Math.PI) / 360));
+    camera.position.set(c.x, c.y, c.z + dist);
+    camera.lookAt(c);
+    camera.updateProjectionMatrix();
+    window.__preview = { bottle, box, camera, scene, MM };
+  }
+  addEventListener('resize', fit);
+  fit();
+
+  let last = performance.now();
+  renderer.setAnimationLoop(() => {
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    bottle.update(dt, { shake, aim: 0, camera });
+    // 매 프레임 다시 맞춘다. 기울기와 채움을 바꾸면 경계가 달라지고, 이건 도구다.
+    fit();
+    renderer.render(scene, camera);
+  });
+</script>
