@@ -76,6 +76,18 @@ const RED = '#e8604a';
 const RED_DEEP = '#a8342a';
 const RED_PALE = '#f8cec6';
 const VIOLET = '#9b86dc';
+/**
+ * 침묵 카드 전용. 다른 어디에도 쓰이지 않는다.
+ *
+ * 원래 `SLATE` 였는데, 그건 `ui.textMuted` 와 **같은 값**이었다. 그래서 침묵 카드는
+ * 카드 본문 글씨와 똑같은 색의 띠를 두르고 있었고, 다섯 장이 나란히 놓인 부채꼴에서
+ * 그 한 장만 "비활성"으로 보였다 — 실제로는 멀쩡히 낼 수 있는 카드인데.
+ *
+ * 손에서 카드를 고르는 것은 색으로 고르는 것이므로, 여섯 장은 여섯 색이어야 한다.
+ * 남은 자리는 장미색이었다: 청록/라벤더/노랑/주황/하늘 어느 것과도 안 겹치고,
+ * `RED` 계열과도 충분히 멀어서 "거절됨"으로 오해되지 않는다.
+ */
+const ROSE = '#d9628f';
 
 export const PALETTE = {
   /**
@@ -403,7 +415,7 @@ export const PALETTE = {
     chaos: VIOLET,
     onemore: YELLOW,
     smash: ORANGE,
-    silence: SLATE,
+    silence: ROSE,
   },
 
   /**

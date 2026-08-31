@@ -128,22 +128,15 @@ export class Viewport {
   /**
    * The board's rectangle inside the drawing buffer, in DEVICE pixels, y-UP.
    *
-   * With `portrait` off — and, today, with it on as well, because `frame.js`'s
-   * bands resolve to zero — this is the whole buffer. It is kept because
-   * PHASE 5 decides whether the band system comes back, and because the pointer
-   * mapping below is derived from the same numbers.
+   * 언제나 버퍼 전체다. 밴드가 켜진 세로 화면에서도 그렇다 — 밴드는 UI 가 붙는
+   * 예약 영역이지 보드에서 잘라낸 구멍이 아니다. `frame.js` 의 `playHeight` 주석에
+   * 왜 그렇게 정했는지, 잘라내 봤을 때 뚜껑이 어떻게 늘어났는지 적혀 있다.
+   *
+   * 함수로 남는 이유는 호출부다: `boardClientRect` 가 포인터 매핑 전체를 여기에
+   * 걸고 있고, 보드가 다시 프레임의 일부가 되는 날 고칠 곳이 한 곳이 된다.
    */
   boardRect() {
-    if (!this.portrait) {
-      return { x: 0, y: 0, w: this.resolution.x, h: this.resolution.y };
-    }
-    const per = this.resolution.x / FRAME.width;
-    return {
-      x: 0,
-      y: Math.round(FRAME.bottomBand * per),
-      w: this.resolution.x,
-      h: Math.round(FRAME.boardHeight * per),
-    };
+    return { x: 0, y: 0, w: this.resolution.x, h: this.resolution.y };
   }
 
   /**
@@ -154,9 +147,7 @@ export class Viewport {
    */
   boardRectCss() {
     const s = this.displaySize;
-    if (!this.portrait) return { x: 0, y: 0, w: s.x, h: s.y };
-    const per = s.x / FRAME.width;
-    return { x: 0, y: FRAME.topBand * per, w: s.x, h: FRAME.boardHeight * per };
+    return { x: 0, y: 0, w: s.x, h: s.y };
   }
 
   /**

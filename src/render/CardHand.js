@@ -2,6 +2,7 @@ import { Group, Mesh, MeshBasicMaterial, PlaneGeometry, Vector3 } from 'three';
 import { CARD_BY_ID } from '../game/cards/cardCatalog.js';
 import { cardFaceTexture, cardBackTexture } from './cardTexture.js';
 import { PALETTE } from '../core/palette.js';
+import { SIZE, SPACE } from '../core/tokens.js';
 
 /**
  * One player's hand, as meshes.
@@ -33,8 +34,33 @@ import { PALETTE } from '../core/palette.js';
  * determinism story entirely.
  */
 
-/** Height as a multiple of width. Matches the texture generator's. */
-export const CARD_ASPECT = 1.5;
+/**
+ * 카드의 세로:가로. 텍스처 생성기와 같은 값이어야 한다.
+ *
+ * 1.5 라고 손으로 적혀 있었고 `cardTexture.js` 에도 같은 숫자가 또 적혀 있었다.
+ * 이제 둘 다 `SIZE.card` 에서 나온다 — 두 곳에 적힌 같은 숫자는 언젠가 한 곳만
+ * 고쳐지고, 그러면 텍스처가 메시에 늘어나 붙는다.
+ */
+export const CARD_ASPECT = SIZE.card.h / SIZE.card.w;
+
+/**
+ * 부채꼴 전체에 걸리는 배율.
+ *
+ * ── 왜 여기에 있고 config 에 없나 ───────────────────────────────────────────
+ * 카드의 크기는 `config.cards.width` 가 정하고 그 키는 **수정 금지**다. 그 아래에
+ * `spacing`, `neighbourPush`, `hoverScale`, `hitMargin` 이 전부 128 폭에 맞춰
+ * 조율돼 있어서, 폭만 바꾸면 그 넷이 전부 틀어진다.
+ *
+ * 그래서 폭이 아니라 **손 전체**를 키운다. `root.scale` 하나에 곱하면 간격도
+ * 밀림도 히트 영역도 같은 비율로 따라 커지므로, 조율된 관계는 그대로 있고 화면에
+ * 도착하는 크기만 `SIZE.card` 가 정한 값이 된다.
+ *
+ * 부채꼴 밖에서 카드를 그리는 것 — `CardFlight` 는 `cards.scene` 에 직접 붙는다 —
+ * 은 이 값을 스스로 곱해야 한다. 손의 자식이 아니라서 `root.scale` 을 못 받는다.
+ */
+export function cardScale(cfg) {
+  return SIZE.card.w / cfg.width;
+}
 
 /**
  * How much of a hand shows, given the band it has to live in.
@@ -79,7 +105,7 @@ export function handExposure(cfg, band, cardHeight, rootScale) {
     // The band's own share caps it so a short band never over-exposes.
     idle: Math.min(card, band * 0.55),
     // Clear of the idle line by enough that the lift is unmistakable.
-    active: Math.min(cardHeight + 40, band * 0.78),
+    active: Math.min(card + 40, band * 0.78),
     // The opponent's, at the top. Smaller — it is not yours and not playable.
     parked: Math.min(card * 0.62, band * 0.42),
   };
@@ -121,12 +147,14 @@ function lerp(a, b, t) {
  * 값을 고치는 대신 렌더 쪽에서 배수를 곱한다 — `cardCatalog` 의 accent 를
  * 팔레트가 덮어쓰는 것과 같은 방식이고, 같은 이유다.
  *
- * 배수는 UI 텍스처와 같은 것을 쓴다. 카드와 HUD 판이 나란히 놓이는데 둘의
- * 선명도가 다르면 그게 제일 먼저 보인다.
+ * 배수는 둘을 곱한 것이다. `ui.textureScale` 은 화면 픽셀 밀도를 위한 것이고 —
+ * 카드와 HUD 판이 나란히 놓이는데 둘의 선명도가 다르면 그게 제일 먼저 보인다 —
+ * `cardScale` 은 카드가 프레임에서 커진 만큼이다. 후자를 빼먹으면 카드만 부드럽게
+ * 흐려진다.
  */
-function texelsFor(config, base) {
+export function texelsFor(config, base) {
   const scale = Math.max(1, Math.min(3, config.ui?.textureScale ?? 1));
-  return Math.round(base * scale);
+  return Math.round(base * scale * cardScale(config.cards));
 }
 
 /** One spring channel. Semi-implicit Euler, sub-stepped so it cannot blow up. */
@@ -548,7 +576,22 @@ export class CardHand {
     // far out of the edge a hand is, whichever edge it is at.
     const r = atBottom ? raise : 0;
     const present = atBottom ? r : 0;
-    const rootScale = lerp(cfg.inactiveScale, 1, present);
+    /**
+     * ── 부채꼴은 프레임을 넘지 않는다 ─────────────────────────────────────
+     * `cardScale` 은 카드가 `SIZE.card` 만해지도록 곱하는 값이고, 그건 640 폭
+     * 프레임을 전제로 고른 크기다. 세로 화면의 프레임은 312 폭이라 다섯 장이
+     * 펼쳐지면 427 프레임 픽셀을 먹는다 — 양쪽 끝 카드가 화면 밖으로 나간다.
+     *
+     * 그래서 실제 펼침 폭을 재서 필요하면 조인다. 폭을 고정 상수로 가정하지 않는
+     * 이유는 손에 든 장수와 정렬 드래그 상태에 따라 실제 폭이 변하기 때문이다.
+     * 손이 좁아지면 배율은 저절로 돌아온다.
+     */
+    const wide = this._halfSpan() * 2 + SPACE.md * 2;
+    const fit = wide > 0 ? this.frame.width / wide : 1;
+    const rootScale = Math.min(
+      lerp(cfg.inactiveScale, 1, present) * cardScale(cfg),
+      Math.max(cfg.inactiveScale, fit),
+    );
 
     // The band this hand lives in — its own edge's, not the other one's. Zero
     // in landscape, where `handExposure` hands back the authored numbers.
@@ -1128,14 +1171,27 @@ export class CardHand {
    * cost of being too big is that the hand lingers, and the cost of being too
    * small is that it becomes unusable.
    */
-  bounds() {
+  /**
+   * 부채꼴의 반폭, `root.scale` 이전의 로컬 단위로.
+   *
+   * `bounds()` 와 `_layout` 이 둘 다 필요로 한다. 후자는 이 값으로 손 전체가 프레임
+   * 밖으로 나가지 않게 배율을 조인다 — 그래서 이 계산은 배율을 **참조하면 안 된다**.
+   * 참조하면 배율이 자기 자신에 의존하게 된다.
+   */
+  _halfSpan() {
     const cfg = this.config.cards;
-    const s = this.root.scale.x;
-    const h = cfg.width * CARD_ASPECT;
     let halfSpan = cfg.width / 2;
     for (const c of this.cards) {
       halfSpan = Math.max(halfSpan, Math.abs(c.x.value) + (cfg.width * c.s.value) / 2);
     }
+    return halfSpan;
+  }
+
+  bounds() {
+    const cfg = this.config.cards;
+    const s = this.root.scale.x;
+    const h = cfg.width * CARD_ASPECT;
+    const halfSpan = this._halfSpan();
     const pad = cfg.hitMargin * 2;
     const top = this.root.position.y + (h * cfg.hoverScale + Math.max(0, cfg.hoverLift)) * s;
     return {

@@ -286,6 +286,7 @@ export function glassPanel(ctx, o) {
     alpha = 0.88,
     accent = PALETTE.accent.cyan,
     elevation = ELEVATION.floating,
+    tint = null,
   } = o;
 
   const skin = { ...skinFor('idle', accent), elevation, alpha, bounceAlpha: 0.12 };
@@ -304,6 +305,21 @@ export function glassPanel(ctx, o) {
   ctx.save();
   roundRectPath(ctx, x, y, w, h, radius);
   ctx.clip();
+
+  /**
+   * 색조. 판이 무엇에 관한 것인지를 말해야 할 때만.
+   *
+   * 유리의 기본 바탕은 중립이고 그게 맞다 — 대부분의 판은 담고 있는 내용이 말을
+   * 하지 판 자체가 하지 않는다. 하지만 "이 카드는 낼 수 없다" 같은 판은 읽기 전에
+   * 이미 무슨 종류인지 보여야 하므로, 바탕 위에 옅은 물을 한 겹 올린다. 광택과
+   * 가장자리보다 **아래**에 올려야 유리 아래에 색이 있는 것으로 보이고, 위에
+   * 올리면 유리에 색을 칠한 것으로 보인다.
+   */
+  if (tint) {
+    ctx.fillStyle = tint;
+    ctx.fillRect(x, y, w, h);
+  }
+
   const bh = h * 0.28;
   const bounce = ctx.createLinearGradient(0, y + h - bh, 0, y + h);
   bounce.addColorStop(0, withAlpha(accent, 0));
@@ -355,6 +371,52 @@ export function focusRing(ctx, { x, y, w, h, radius = RADIUS.pill, accent = PALE
 /** A `TYPE` entry as a canvas `font` string. The stack lives in `fonts.js`. */
 export function fontSpec(t, family = FONT_FAMILY) {
   return `${t.weight} ${t.size}px ${family}`;
+}
+
+/**
+ * 주어진 폭 안에 들어가는 폰트 스펙과 문자열을 고른다.
+ *
+ * ── 자르기 전에 줄인다 ──────────────────────────────────────────────────────
+ * 판은 자기가 말하는 것만큼 넓지만 프레임에 상한이 있고, 상한에 걸리면 지금까지는
+ * 글자가 캔버스 밖으로 나가 잘렸다 — 세로 화면 312 폭 프레임에서 턴 플레이트가
+ * "PLAYER 1" 대신 "PLAYE" 였다.
+ *
+ * 사람 이름이 들어오는 자리이므로 순서가 중요하다. 먼저 글자 크기를 줄이고 —
+ * 조금 작은 이름은 여전히 그 사람의 이름이다 — 최소 크기에서도 안 들어갈 때만
+ * 자른다. 최소 크기는 원래의 76% 로, 그 아래는 옆의 다른 라벨과 다른 글씨체처럼
+ * 보이기 시작하는 지점이다.
+ *
+ * @param {CanvasRenderingContext2D} ctx  측정에만 쓴다. 상태는 되돌려 놓는다.
+ * @param {string} text
+ * @param {{size: number, weight: number, tracking?: number}} type
+ * @param {number} maxWidth
+ * @returns {{font: string, text: string, size: number, width: number}}
+ */
+export function fitText(ctx, text, type, maxWidth) {
+  const prev = ctx.font;
+  const measure = (t, size) => {
+    ctx.font = fontSpec({ ...type, size });
+    return ctx.measureText(t).width;
+  };
+
+  let size = type.size;
+  let width = measure(text, size);
+  const floor = Math.max(9, Math.round(type.size * 0.76));
+  while (width > maxWidth && size > floor) {
+    size -= 1;
+    width = measure(text, size);
+  }
+
+  let out = text;
+  if (width > maxWidth && out.length > 1) {
+    // 말줄임표까지 포함해서 들어가야 하므로 한 글자씩 줄이며 다시 잰다.
+    while (out.length > 1 && measure(`${out}…`, size) > maxWidth) out = out.slice(0, -1);
+    out = `${out}…`;
+    width = measure(out, size);
+  }
+
+  ctx.font = prev;
+  return { font: fontSpec({ ...type, size }), text: out, size, width };
 }
 
 /**

@@ -2,7 +2,16 @@ import { CanvasTexture, ClampToEdgeWrapping, LinearFilter, SRGBColorSpace } from
 import { darken, PALETTE } from '../core/palette.js';
 import { registerTextureCache } from './fonts.js';
 import { ELEVATION, RADIUS, SIZE, SPACE, TYPE } from '../core/tokens.js';
-import { applyTracking, focusRing, fontSpec, gelButton, glassPanel, roundRectPath, skinFor } from './glass.js';
+import {
+  applyTracking,
+  fitText,
+  focusRing,
+  fontSpec,
+  gelButton,
+  glassPanel,
+  roundRectPath,
+  skinFor,
+} from './glass.js';
 import { drawIcon } from './icons.js';
 
 /**
@@ -349,10 +358,20 @@ export function turnPlateTexture(text, color, { width, height, scale = 1, maxWid
   const hit = cache.get(key);
   if (hit) return hit;
 
-  const font = fontSpec(TYPE.label);
   const probe = makeCanvas(8, 8);
-  probe.ctx.font = font;
-  const textW = Math.ceil(probe.ctx.measureText(text).width);
+  applyTracking(probe.ctx, TYPE.label.tracking);
+  /**
+   * 글자가 들어갈 수 있는 폭. 판의 상한에서 색 알약과 좌우 여백을 뺀 것.
+   *
+   * `fitText` 가 이 안에 들어가도록 크기를 줄이고, 그래도 안 되면 자른다. 예전에는
+   * 판만 `maxWidth` 로 좁히고 글자는 원래 크기로 그려서, 좁은 프레임에서 캔버스
+   * 밖으로 나간 부분이 그냥 잘려 나갔다.
+   */
+  const inner = maxWidth - (SPACE.lg + SPACE.md);
+  const fitted = fitText(probe.ctx, text, TYPE.label, inner);
+  const font = fitted.font;
+  const label = fitted.text;
+  const textW = Math.ceil(fitted.width);
   // 판은 자기가 말하는 것만큼 넓다. 라벨을 고정 폭 안에 넣으면 짧은 이름이
   // 상자 안에서 떠다니고, 긴 닉네임은 잘린다.
   const frameW = Math.min(maxWidth, Math.max(width, textW + SPACE.lg + SPACE.md));
@@ -380,9 +399,9 @@ export function turnPlateTexture(text, color, { width, height, scale = 1, maxWid
 
   applyTracking(ctx, TYPE.label.tracking);
   drawText(ctx, {
-    text,
+    text: label,
     x: pad + SPACE.xs * 2 + bar + SPACE.xs,
-    y: height / 2 + TYPE.label.size * 0.36,
+    y: height / 2 + fitted.size * 0.36,
     font,
     color: PALETTE.ui.text,
   });

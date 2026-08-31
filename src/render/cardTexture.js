@@ -1,43 +1,47 @@
-import { CanvasTexture, ClampToEdgeWrapping, LinearFilter, SRGBColorSpace } from 'three';
-import { PALETTE } from '../core/palette.js';
+import {
+  CanvasTexture,
+  ClampToEdgeWrapping,
+  LinearFilter,
+  LinearMipmapLinearFilter,
+  SRGBColorSpace,
+} from 'three';
+import { PALETTE, withAlpha } from '../core/palette.js';
+import { RADIUS, SIZE, SPACE, TYPE } from '../core/tokens.js';
+import { applyTracking, fontSpec, glassPanel, roundRectPath } from '../ui/glass.js';
+import { drawIcon, iconForCard } from '../ui/icons.js';
+
+/** 카드의 세로:가로. `tokens.js` 가 정한다. */
+const CARD_RATIO = SIZE.card.h / SIZE.card.w;
 import { registerTextureCache } from '../ui/fonts.js';
 
 /**
- * A card face, drawn at whatever resolution it is asked for.
+ * 카드 면. 요구받은 해상도로 그린다.
  *
- * ── two resolutions, and why ────────────────────────────────────────────────
- * A card in the hand is small on screen and 128x192 is plenty for it. The same
- * texture on a card that has been raised and enlarged to be READ is not: the
- * description line is the first thing to go, and a card you cannot read is a
- * card you cannot choose. So the hovered card swaps up to a larger texture and
- * swaps back down when it drops — the same idea as a mesh LOD, for the same
- * reason, and the only thing that differs between the two is how many texels
- * the drawing gets. Filtering, wrapping and the post chain are identical, so a
- * card does not change its LOOK when it changes its detail.
+ * ── 해상도가 둘인 이유 ──────────────────────────────────────────────────────
+ * 손에 든 카드는 화면에서 작고, 거기엔 낮은 해상도로 충분하다. 같은 텍스처가
+ * **읽히기 위해** 들어 올려 확대된 카드에서는 충분하지 않다: 설명 줄이 가장 먼저
+ * 무너지고, 읽을 수 없는 카드는 고를 수 없는 카드다. 그래서 호버된 카드는 더 큰
+ * 텍스처로 바꿔 달았다가 내려놓으면 되돌린다 — 메시 LOD 와 같은 발상이고 같은
+ * 이유다. 둘 사이에 다른 것은 그림이 받는 텍셀 수뿐이라, 카드가 디테일을 바꿀 때
+ * **생김새**는 바뀌지 않는다.
  *
- * ── the text has to be aliased ──────────────────────────────────────────────
- * `imageSmoothingEnabled = false` does not do it: that flag governs image
- * SCALING, and the font rasteriser antialiases glyph edges regardless. Left
- * alone, every letter arrives with a halo of intermediate values, and those get
- * flattened by the 5-bit quantiser downstream into fringing that reads as a
- * compression artefact.
+ * ── 글자를 이진화하던 것은 사라졌다 ─────────────────────────────────────────
+ * 예전에는 글자를 스크래치 캔버스에 그린 뒤 알파를 0 아니면 255 로 자르고 합성했다.
+ * 저해상도 타겟에 nearest 로 확대되고 5비트로 양자화되는 파이프라인에서 글자
+ * 가장자리의 중간 알파가 디더와 함께 압축 아티팩트처럼 보였기 때문이다. 그 셋 —
+ * 저해상도 타겟, nearest 확대, 양자화 — 이 모두 사라졌으므로 이진화도 사라졌다.
+ * `drawText` 의 주석에 자세히 적혀 있다.
  *
- * So text is drawn to a scratch canvas and its alpha is pushed to fully on or
- * fully off before it is composited. Hard edges, no halo, and it survives the
- * quantiser because there is nothing left in between to quantise.
+ * ── 좌표는 프레임 픽셀이다 ──────────────────────────────────────────────────
+ * 이 파일의 숫자는 `tokens.js` 의 `SIZE.card` (150x220) 기준이고, 캔버스 자체에
+ * 배율이 걸린다. 예전에는 128 폭 기준으로 저술하고 모든 숫자에 `u = w / 128` 을
+ * 곱했는데, 그러면 코드를 읽어서는 카드가 실제로 몇 픽셀인지 알 수 없었다.
  *
- * ── cached ──────────────────────────────────────────────────────────────────
- * Keyed by card and size. Building one of these is a handful of canvas calls
- * and several `getImageData` round trips, which is nothing once and unthinkable
- * every frame.
+ * ── 캐시된다 ────────────────────────────────────────────────────────────────
+ * 카드와 크기로 키를 만든다. 하나 만드는 데 캔버스 호출 수십 번이 들고, 그건 한 번은
+ * 아무것도 아니지만 매 프레임이면 생각할 수 없다.
  */
 
-const BG = PALETTE.ui.surface;
-const PANEL = PALETTE.ui.surfaceAlt;
-const RULE = PALETTE.ui.edge;
-const BODY = PALETTE.ui.textMuted;
-const BACK_A = PALETTE.ui.surfaceAlt;
-const BACK_B = PALETTE.ui.surfaceSunken;
 const BACK_MARK = PALETTE.ui.edgeStrong;
 
 /**
@@ -92,6 +96,26 @@ function drawText(target, { text, x, y, font, color, align = 'left' }) {
   target.restore();
 }
 
+/**
+ * 캔버스를 텍스처로. 네 군데가 같은 여덟 줄을 반복하고 있었다.
+ *
+ * `mips` 는 카드 면/뒷면에만 켠다. 손에 든 카드는 부채꼴로 기울어 있고 화면에서
+ * 축소돼 보이므로 밉이 있어야 한다. 반대로 드롭 가이드와 알림 판은 화면에 정면으로,
+ * 텍셀 하나가 픽셀 하나가 되게 놓이는 쿼드라 밉이 낭비이자 흐림이다.
+ */
+function toTexture(canvas, { mips = true } = {}) {
+  const tex = new CanvasTexture(canvas);
+  tex.colorSpace = SRGBColorSpace;
+  tex.magFilter = LinearFilter;
+  tex.minFilter = mips ? LinearMipmapLinearFilter : LinearFilter;
+  tex.generateMipmaps = mips;
+  tex.wrapS = ClampToEdgeWrapping;
+  tex.wrapT = ClampToEdgeWrapping;
+  tex.anisotropy = mips ? 4 : 1;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 /** Wrap `text` to `width` px in the current font, by measuring. */
 function wrap(ctx, text, width, font) {
   ctx.font = font;
@@ -117,89 +141,93 @@ function wrap(ctx, text, width, font) {
  */
 export function cardFaceTexture(card, width) {
   const w = Math.max(48, Math.round(width));
-  const h = Math.round(w * 1.5);
+  const h = Math.round(w * CARD_RATIO);
   const key = `face:${card.id}:${w}`;
   const hit = cache.get(key);
   if (hit) return hit;
 
   const { canvas, ctx } = makeCanvas(w, h);
-  const scratch = makeCanvas(w, h);
-  /** Everything below is authored against a 128-wide card and scaled. */
-  const u = w / 128;
+  /**
+   * 프레임 좌표로 그린다. 텍셀은 `w` 가 정한다.
+   *
+   * 예전에는 128 폭 카드를 기준으로 저술하고 `u = w / 128` 을 모든 숫자에 곱했다.
+   * 이제 캔버스 자체에 배율을 걸어 두면 아래 숫자가 `tokens.js` 의 프레임 픽셀과
+   * 같은 단위가 된다 — 카드가 150 폭이라는 사실이 코드에 그대로 보인다.
+   */
+  const fw = SIZE.card.w;
+  const fh = SIZE.card.h;
+  ctx.scale(w / fw, h / fh);
 
-  ctx.fillStyle = BG;
-  ctx.fillRect(0, 0, w, h);
+  const accent = accentOf(card);
 
-  // Border, and a chamfer at two corners. Sharp — a radius is the fastest way
-  // to make this look like it came from a different program than the pitch.
-  ctx.strokeStyle = accentOf(card);
-  ctx.lineWidth = Math.max(1, Math.round(u));
-  ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
-  // The chamfer's cut corners. The palette's edge rather than the black they
-  // were: on a white face a black triangle is not a cut corner, it is a hole.
-  ctx.fillStyle = PALETTE.ui.edge;
-  const ch = Math.round(9 * u);
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(ch, 0);
-  ctx.lineTo(0, ch);
-  ctx.closePath();
-  ctx.moveTo(w, h);
-  ctx.lineTo(w - ch, h);
-  ctx.lineTo(w, h - ch);
-  ctx.closePath();
+  /**
+   * 카드 면은 유리 패널이다. 모서리는 둥글고, 잘라낸 모서리(chamfer)는 없다.
+   *
+   * 예전에는 각진 테두리에 두 모서리를 사선으로 잘라냈고, 주석이 그 이유를
+   * "라운드를 주면 피치와 다른 프로그램에서 온 것처럼 보인다"고 적어 두었다.
+   * 지금은 정반대다 — UI 전체가 pill 과 라운드 패널이고, 각진 카드가 남으면
+   * 그것만 다른 프로그램에서 온 것으로 보인다.
+   */
+  glassPanel(ctx, { x: 0, y: 0, w: fw, h: fh, radius: RADIUS.card, accent, alpha: 1 });
+
+  // 카드 색 띠. 위쪽 가장자리를 따라, 손에 쥐었을 때 부채꼴로 겹쳐도 보이는 자리.
+  ctx.fillStyle = accent;
+  roundRectPath(ctx, SPACE.sm, SPACE.sm, fw - SPACE.sm * 2, 5, 2.5);
   ctx.fill();
 
-  // Name, then a rule under it.
+  // 이름.
+  applyTracking(ctx, TYPE.label.tracking);
   drawText(ctx, {
     text: card.name,
-    x: Math.round(7 * u),
-    y: Math.round(19 * u),
-    font: `${Math.round(14 * u)}px ui-monospace, Menlo, monospace`,
-    color: accentOf(card),
-  });
-  ctx.fillStyle = RULE;
-  ctx.fillRect(Math.round(5 * u), Math.round(25 * u), w - Math.round(10 * u), Math.max(1, Math.round(u)));
-
-  // Art panel and its glyph. One angular character rather than an
-  // illustration — see `cardCatalog`.
-  const artY = Math.round(31 * u);
-  const artH = Math.round(78 * u);
-  ctx.fillStyle = PANEL;
-  ctx.fillRect(Math.round(6 * u), artY, w - Math.round(12 * u), artH);
-  drawText(ctx, {
-    text: card.glyph,
-    x: Math.round(w / 2),
-    y: artY + Math.round(artH * 0.68),
-    font: `${Math.round(46 * u)}px ui-monospace, Menlo, monospace`,
-    color: accentOf(card),
+    x: fw / 2,
+    y: SPACE.sm + 5 + SPACE.md,
+    font: fontSpec(TYPE.label),
+    color: PALETTE.ui.text,
     align: 'center',
   });
+  applyTracking(ctx, 0);
 
-  // Description, wrapped to the card.
-  const bodyFont = `${Math.round(10 * u)}px ui-monospace, Menlo, monospace`;
-  const lines = wrap(ctx, card.text, w - Math.round(14 * u), bodyFont);
-  let ty = artY + artH + Math.round(14 * u);
+  /**
+   * 아트 패널과 아이콘.
+   *
+   * 유니코드 글리프가 아니라 `icons.js` 의 벡터다. 글리프 다섯 개는 46px 에서
+   * 잉크 픽셀 수를 세어 고른 것이었고, 그 측정은 알파 이진화를 전제로 했다.
+   * 이진화가 없으므로 제약도 없다 — `iconForCard` 가 카탈로그의 `glyph` 를
+   * 아이콘 이름으로 옮긴다.
+   */
+  const artY = SPACE.sm + 5 + SPACE.md + SPACE.sm;
+  const artH = fh * 0.42;
+  ctx.save();
+  roundRectPath(ctx, SPACE.sm, artY, fw - SPACE.sm * 2, artH, RADIUS.chip);
+  ctx.fillStyle = withAlpha(accent, 0.12);
+  ctx.fill();
+  ctx.restore();
+
+  const icon = iconForCard(card);
+  if (icon) {
+    const size = Math.min(artH * 0.72, fw * 0.44);
+    drawIcon(ctx, icon, { x: (fw - size) / 2, y: artY + (artH - size) / 2, size, color: accent });
+  }
+
+  // 설명. 카드 폭에 맞춰 접는다.
+  const bodyFont = fontSpec(TYPE.caption);
+  const lines = wrap(ctx, card.text, fw - SPACE.md * 2, bodyFont);
+  let ty = artY + artH + SPACE.md;
+  applyTracking(ctx, TYPE.caption.tracking);
   for (const line of lines.slice(0, 3)) {
     drawText(ctx, {
       text: line,
-      x: Math.round(7 * u),
+      x: fw / 2,
       y: ty,
       font: bodyFont,
-      color: BODY,
+      color: PALETTE.ui.textMuted,
+      align: 'center',
     });
-    ty += Math.round(12 * u);
+    ty += TYPE.caption.size + 4;
   }
+  applyTracking(ctx, 0);
 
-  const tex = new CanvasTexture(canvas);
-  tex.colorSpace = SRGBColorSpace;
-  tex.magFilter = LinearFilter;
-  tex.minFilter = LinearFilter;
-  tex.generateMipmaps = false;
-  tex.wrapS = ClampToEdgeWrapping;
-  tex.wrapT = ClampToEdgeWrapping;
-  tex.anisotropy = 1;
-  tex.needsUpdate = true;
+  const tex = toTexture(canvas);
   cache.set(key, tex);
   return tex;
 }
@@ -207,80 +235,92 @@ export function cardFaceTexture(card, width) {
 /** The back. One texture for every card — that is what a back is. */
 export function cardBackTexture(width) {
   const w = Math.max(48, Math.round(width));
-  const h = Math.round(w * 1.5);
+  const h = Math.round(w * CARD_RATIO);
   const key = `back:${w}`;
   const hit = cache.get(key);
   if (hit) return hit;
 
   const { canvas, ctx } = makeCanvas(w, h);
-  const scratch = makeCanvas(w, h);
-  const u = w / 128;
+  const fw = SIZE.card.w;
+  const fh = SIZE.card.h;
+  ctx.scale(w / fw, h / fh);
 
-  // Hard-stop diagonal stripes: a pattern, not a gradient.
-  ctx.fillStyle = BACK_B;
-  ctx.fillRect(0, 0, w, h);
-  ctx.fillStyle = BACK_A;
-  const band = Math.max(2, Math.round(6 * u));
-  for (let i = -h; i < w + h; i += band * 2) {
+  // 앞면과 같은 유리 패널. 뒷면만 각지면 부채꼴에서 그것만 튀어 보인다.
+  glassPanel(ctx, {
+    x: 0,
+    y: 0,
+    w: fw,
+    h: fh,
+    radius: RADIUS.card,
+    accent: PALETTE.accent.sky,
+    alpha: 1,
+  });
+
+  /**
+   * 사선 줄무늬. 그라디언트가 아니라 무늬다.
+   *
+   * 패널 안쪽으로 클리핑해서 라운드 모서리를 넘지 않게 한다 — 예전에는 각진
+   * 사각형이라 클립이 필요 없었다.
+   *
+   * 아주 옅다. 상대의 손은 화면 위쪽에 **늘 떠 있는** 것이라, 앞면 한 장만큼의
+   * 대비를 가지면 판 위에서 눈이 그쪽으로 계속 끌린다. 처음 넣었을 때 `edgeStrong`
+   * 을 알파 0.5 로 칠했더니 카드 다섯 장이 회색 빗금 덩어리가 됐다.
+   */
+  ctx.save();
+  roundRectPath(ctx, 0, 0, fw, fh, RADIUS.card);
+  ctx.clip();
+  ctx.fillStyle = withAlpha(PALETTE.accent.sky, 0.14);
+  const band = 9;
+  for (let i = -fh; i < fw + fh; i += band * 2) {
     ctx.beginPath();
     ctx.moveTo(i, 0);
     ctx.lineTo(i + band, 0);
-    ctx.lineTo(i + band + h, h);
-    ctx.lineTo(i + h, h);
+    ctx.lineTo(i + band + fh, fh);
+    ctx.lineTo(i + fh, fh);
     ctx.closePath();
     ctx.fill();
   }
-  ctx.strokeStyle = BACK_MARK;
-  ctx.lineWidth = Math.max(1, Math.round(u));
-  ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
-  drawText(ctx, {
-    text: '✶',
-    x: Math.round(w / 2),
-    y: Math.round(h / 2 + 12 * u),
-    font: `${Math.round(30 * u)}px ui-monospace, Menlo, monospace`,
-    color: BACK_MARK,
-    align: 'center',
+  ctx.restore();
+
+  // 가운데 표식. 이 게임의 물건인 왕관 뚜껑.
+  const size = fw * 0.4;
+  drawIcon(ctx, 'cap', {
+    x: (fw - size) / 2,
+    y: (fh - size) / 2,
+    size,
+    color: withAlpha(PALETTE.accent.skyDeep, 0.32),
   });
 
-  const tex = new CanvasTexture(canvas);
-  tex.colorSpace = SRGBColorSpace;
-  tex.magFilter = LinearFilter;
-  tex.minFilter = LinearFilter;
-  tex.generateMipmaps = false;
-  tex.wrapS = ClampToEdgeWrapping;
-  tex.wrapT = ClampToEdgeWrapping;
-  tex.anisotropy = 1;
-  tex.needsUpdate = true;
+  const tex = toTexture(canvas);
   cache.set(key, tex);
   return tex;
 }
 
 /**
- * The drop guide: a card-shaped slot, in hard yellow, hollow in the middle.
+ * 드롭 가이드: 카드 모양의 빈 슬롯.
  *
- * ── it is an AFFORDANCE, and it is placed where the rule already is ──────────
- * The gesture that plays a card is vertical travel out of the fan — see
- * `CardHand._checkArmed` — and that is deliberately not "land inside a target",
- * for the reason written there: a target is a small thing to find, and it makes
- * the same gesture succeed or fail depending on which end of the hand the card
- * started from. None of that changes because there is now something drawn.
+ * ── 이건 **어포던스**고, 이미 있는 규칙 위에 놓인다 ──────────────────────────
+ * 카드를 내는 동작은 부채꼴에서 위로 벗어나는 것이다 — `CardHand._checkArmed` 를
+ * 보라 — 그리고 그것은 의도적으로 "표적 안에 착지하기"가 아니다. 거기 적힌 이유
+ * 대로, 표적은 찾아야 하는 작은 것이고, 손의 어느 쪽 끝에서 시작했느냐에 따라 같은
+ * 동작이 되기도 하고 안 되기도 하게 만든다. 그림이 생겼다고 그 중 무엇도 변하지
+ * 않는다.
  *
- * What the drawing is for is the other half of the problem, which is real: a
- * threshold you cannot see is a threshold you have to discover by failing at it.
- * So this is drawn at exactly the height the card arms at, and following it
- * therefore always works. It is a signpost on the rule, not a second rule.
+ * 그림이 맡는 것은 문제의 나머지 절반, 실재하는 쪽이다: 보이지 않는 문턱은 실패해
+ * 봐야만 알게 되는 문턱이다. 그래서 이것은 카드가 무장되는 바로 그 높이에 그려지고,
+ * 따라서 이걸 따라가면 언제나 성공한다. 두 번째 규칙이 아니라 규칙 위의 표지판이다.
  *
- * ── hollow, and bigger than the card ────────────────────────────────────────
- * Hollow because the card has to be readable through it while it is being
- * carried. Bigger — see `guideMargin` — because a border exactly the card's size
- * is a border the card covers completely the moment it arrives, so the guide
- * would vanish at precisely the moment it is confirming something.
+ * ── 비어 있고, 카드보다 크다 ────────────────────────────────────────────────
+ * 비어 있는 것은 옮기는 동안 카드가 그 너머로 읽혀야 하기 때문이다. 큰 것은 —
+ * `guideMargin` 을 보라 — 카드와 정확히 같은 크기의 테두리는 카드가 도착하는 순간
+ * 완전히 덮이는 테두리라, 무언가를 확인해 주는 바로 그 순간에 사라지기 때문이다.
  *
- * ── corner brackets ─────────────────────────────────────────────────────────
- * The border alone reads as a panel. Four brackets read as a SLOT, and they are
- * the one shape that says "put it here" without a word on it. Drawn as whole
- * pixels at hard values, like everything else in this file — a soft glow around
- * a drop target is the single most modern thing this screen could grow.
+ * ── 하드 밴드에서 부드러운 슬롯으로 ─────────────────────────────────────────
+ * 예전에는 두 톤의 각진 띠와 정수 픽셀 사각형이었고, 주석이 그 이유를 "드롭 타깃
+ * 둘레의 부드러운 글로우는 이 화면이 기를 수 있는 가장 현대적인 것"이라고 적어
+ * 두었다. 그 문장은 이제 목표의 반대다. 모서리는 카드와 같은 `RADIUS.card` 로
+ * 둥글고, 테두리는 점선이며 — 점선은 "여기는 아직 비어 있다"를 실선보다 잘 말한다 —
+ * 모서리 꺾쇠만 실선으로 남겨 슬롯이라는 사실을 유지한다.
  *
  * @param {number} width   texels across, matching the on-screen size
  * @param {number} height  texels down. Not derived: the guide carries a margin,
@@ -294,48 +334,57 @@ export function useGuideTexture(width, height) {
   if (hit) return hit;
 
   const { canvas, ctx } = makeCanvas(w, h);
-  const u = w / 128;
+  const u = w / SIZE.card.w;
+  const radius = RADIUS.card * u;
+  const line = Math.max(1.5, 2 * u);
+  const pad = line;
 
-  const EDGE = PALETTE.accent.yellow;
-  const CORE = PALETTE.accent.yellowPale;
-  const SHADE = PALETTE.accent.yellowDeep;
+  // 옅은 물. 슬롯 안쪽이 주변보다 아주 조금 밝아야 "빈 자리"로 읽힌다.
+  roundRectPath(ctx, pad, pad, w - pad * 2, h - pad * 2, radius);
+  ctx.fillStyle = withAlpha(PALETTE.accent.yellowPale, 0.1);
+  ctx.fill();
 
-  const line = Math.max(1, Math.round(2 * u));
-  const rect = (x, y, rw, rh, style) => {
-    ctx.fillStyle = style;
-    ctx.fillRect(Math.round(x), Math.round(y), Math.max(1, Math.round(rw)), Math.max(1, Math.round(rh)));
-  };
+  // 점선 테두리.
+  ctx.save();
+  ctx.setLineDash([10 * u, 7 * u]);
+  ctx.lineCap = 'round';
+  ctx.lineWidth = line;
+  ctx.strokeStyle = withAlpha(PALETTE.accent.yellow, 0.85);
+  roundRectPath(ctx, pad, pad, w - pad * 2, h - pad * 2, radius);
+  ctx.stroke();
+  ctx.restore();
 
-  // The frame: one lit band with a darker one inside it. Two hard tones, not a
-  // falloff — three would already start reading as a gradient at this width.
-  const band = (inset, t, style) => {
-    rect(inset, inset, w - inset * 2, t, style);
-    rect(inset, h - inset - t, w - inset * 2, t, style);
-    rect(inset, inset, t, h - inset * 2, style);
-    rect(w - inset - t, inset, t, h - inset * 2, style);
-  };
-  band(0, line, EDGE);
-  band(line, Math.max(1, Math.round(u)), SHADE);
-
-  // Brackets: a longer, brighter run at each corner, drawn over the frame.
-  const arm = Math.max(4, Math.round(22 * u));
-  const t = Math.max(1, Math.round(3 * u));
-  for (const [cx, cy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
-    const x = cx ? w - arm : 0;
-    const y = cy ? h - t : 0;
-    rect(x, y, arm, t, CORE);
-    rect(cx ? w - t : 0, cy ? h - arm : 0, t, arm, CORE);
+  /**
+   * 모서리 꺾쇠. 실선으로, 라운드를 따라 돈다.
+   *
+   * 테두리만 있으면 패널로 읽힌다. 꺾쇠 넷이 있어야 **슬롯**으로 읽히고, 그것이
+   * 한 글자도 없이 "여기 놓아라"를 말하는 유일한 모양이다.
+   */
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineWidth = line * 1.6;
+  ctx.strokeStyle = PALETTE.accent.yellowPale;
+  const arm = Math.max(6, 20 * u);
+  const l = pad;
+  const r = w - pad;
+  const t = pad;
+  const b = h - pad;
+  const corners = [
+    [l, t + radius, l, t, l + radius, t],
+    [r, t + radius, r, t, r - radius, t],
+    [l, b - radius, l, b, l + radius, b],
+    [r, b - radius, r, b, r - radius, b],
+  ];
+  for (const [ax, ay, cx, cy, bx, by] of corners) {
+    ctx.beginPath();
+    ctx.moveTo(ax, ay + Math.sign(cy - ay) * -arm);
+    ctx.arcTo(cx, cy, bx, by, radius);
+    ctx.lineTo(bx + Math.sign(bx - cx) * arm, by);
+    ctx.stroke();
   }
+  ctx.restore();
 
-  const tex = new CanvasTexture(canvas);
-  tex.colorSpace = SRGBColorSpace;
-  tex.magFilter = LinearFilter;
-  tex.minFilter = LinearFilter;
-  tex.generateMipmaps = false;
-  tex.wrapS = ClampToEdgeWrapping;
-  tex.wrapT = ClampToEdgeWrapping;
-  tex.anisotropy = 1;
-  tex.needsUpdate = true;
+  const tex = toTexture(canvas, { mips: false });
   cache.set(key, tex);
   return tex;
 }
@@ -358,36 +407,42 @@ export function noticeTexture(text) {
   const hit = cache.get(key);
   if (hit) return hit;
 
-  const font = '11px ui-monospace, Menlo, monospace';
+  const font = fontSpec(TYPE.caption);
   const probe = makeCanvas(8, 8);
   probe.ctx.font = font;
-  const w = Math.ceil(probe.ctx.measureText(text).width) + 16;
-  const h = 20;
+  applyTracking(probe.ctx, TYPE.caption.tracking);
+  const w = Math.ceil(probe.ctx.measureText(text).width) + SPACE.md * 2;
+  const h = TYPE.caption.size + SPACE.md;
 
   const { canvas, ctx } = makeCanvas(w, h);
-  const scratch = makeCanvas(w, h);
-  ctx.fillStyle = PALETTE.ui.surface;
-  ctx.fillRect(0, 0, w, h);
-  ctx.strokeStyle = PALETTE.ui.danger;
-  ctx.lineWidth = 1;
-  ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
+  /**
+   * 거절 사유는 알약 모양 판이다.
+   *
+   * 색은 `danger` 계열을 유지한다 — 이건 "못 낸다"는 말이고, 유리의 중립색으로
+   * 칠하면 다른 안내와 구별되지 않는다. `gelButton` 을 쓰지 않는 것도 같은 이유로,
+   * 저건 누를 수 있는 것의 모양이고 이건 읽는 것이다.
+   */
+  glassPanel(ctx, {
+    x: 0,
+    y: 0,
+    w,
+    h,
+    radius: h / 2,
+    tint: withAlpha(PALETTE.ui.danger, 0.16),
+    accent: PALETTE.ui.danger,
+  });
+  applyTracking(ctx, TYPE.caption.tracking);
   drawText(ctx, {
     text,
-    x: 8,
-    y: 14,
+    x: w / 2,
+    y: h / 2 + TYPE.caption.size * 0.36,
     font,
     color: PALETTE.ui.dangerDeep,
+    align: 'center',
   });
+  applyTracking(ctx, 0);
 
-  const tex = new CanvasTexture(canvas);
-  tex.colorSpace = SRGBColorSpace;
-  tex.magFilter = LinearFilter;
-  tex.minFilter = LinearFilter;
-  tex.generateMipmaps = false;
-  tex.wrapS = ClampToEdgeWrapping;
-  tex.wrapT = ClampToEdgeWrapping;
-  tex.anisotropy = 1;
-  tex.needsUpdate = true;
+  const tex = toTexture(canvas, { mips: false });
   tex.userData = { width: w, height: h };
   cache.set(key, tex);
   return tex;

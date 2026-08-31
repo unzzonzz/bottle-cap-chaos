@@ -46,7 +46,7 @@
  */
 
 import { OrthographicCamera } from 'three';
-import { SIZE, SPACE } from './tokens.js';
+import { MIN_CSS_PX_PER_FRAME_PX, SIZE, SPACE } from './tokens.js';
 
 /**
  * The widest the frame ever gets, and the size every UI constant was authored at.
@@ -62,38 +62,6 @@ export const MAX_FRAME_WIDTH = 640;
  */
 export const MIN_FRAME_WIDTH = 240;
 
-/**
- * How many CSS pixels one frame pixel must be worth, at minimum.
- *
- * ── this is THE dial for how big the UI is on a phone ────────────────────────
- * Every UI constant in the project is in frame pixels — a 104-wide button, a
- * 208-wide score, 16px type — and how large any of them LOOKS is entirely
- * `canvasCssWidth / frame.width`. On a desktop window that ratio is about 1.97,
- * so the 나가기 button is 205 CSS px across and its label is 31 px. On a phone
- * with the frame pinned at 640 the same button is 65 CSS px with a 10 px label,
- * which is why it was unreadable: identical PROPORTIONS, a third of the size.
- *
- * Making the frame narrower on a narrow screen fixes it in one number, because
- * every constant scales together and none of the relationships between them
- * change. The proportions stay exactly as authored; only the ratio moves.
- *
- * ── why 1.25 and not PC parity ───────────────────────────────────────────────
- * Matching a desktop EXACTLY would need a ratio of ~1.97, i.e. a frame 204 wide
- * on a 402-px phone — and then the button is 205 CSS px, which is 51% of the
- * screen. That is what "the same physical size" actually costs when the screen
- * is a third as wide, and it is too much: one button would be half the width of
- * the game.
- *
- * 1.25 doubles the old size and lands where it matters:
- *
- *     button  130 x 42 CSS px   (hit quad 67 px — clears the 44pt minimum)
- *     label   20 CSS px         (was 10)
- *     note    16 CSS px         (was 8)
- *     card    173 CSS px wide   (was 80)
- *
- * Raise it if you want them bigger still; nothing else has to change.
- */
-export const MIN_CSS_PX_PER_FRAME_PX = 1.25;
 
 /** The play area's aspect. The perspective camera keeps this, always. */
 export const BOARD_ASPECT = 4 / 3;
@@ -275,32 +243,43 @@ export function resolveFrame(windowW, windowH) {
    * 필드 비율에 맞춰 자를 값으로서 남겨 둔다.
    */
   /**
-   * ── 밴드는 살아 있는 설계이고, 지금은 꺼져 있다 ─────────────────────────
-   * `playHeight` 가 프레임 전체를 먹으므로 `leftover` 가 0 이고, 따라서 두 밴드도
-   * 0 이다. 그 결과 아래의 `topBand` / `bottomBand` / `boardTop` / `boardBottom`
-   * 은 지금 전부 0 이거나 전체 높이이고, `boardAspect` 는 `aspect` 와 같은 값이다.
-   * 그게 화면에 나오는 사실이므로 여기 적어 둔다.
+   * ── 밴드가 켜졌다. 보드에서 잘라내는 것이 아니라 UI 가 **앵커**하는 자리다 ──
+   * 이 파일에는 밴드를 두 번 시도하고 두 번 되돌린 기록이 길게 적혀 있다. 세 번째
+   * 답이 그 두 essay 가 이미 내려 둔 결론이다: 보드는 프레임 전체를 쓰고, 밴드는
+   * HUD 와 손패가 어디에 붙을지를 말하는 **예약 영역**일 뿐이다.
    *
-   * 배선은 이미 전부 되어 있다 — `HudLayer` 는 `FRAME.topBand` 로 카드 노출을,
-   * `CardHand` 는 `bottomBand` 로 손패 위치를, `Viewport.boardRect*` 는 포인터
-   * 리베이싱을, `GameCamera` 는 `boardAspect` 를 카메라 aspect 로 이미 읽는다.
-   * 켜는 데 필요한 것은 이 한 줄이다.
+   *   가로 화면  height === boardHeight  ->  여분 0  ->  밴드 0. 어제와 완전히 동일.
+   *   세로 화면  height  >  boardHeight  ->  여분에서 필요한 만큼만 밴드가 가져감
    *
-   * 켜지 않은 이유는 렌더 경로다. 카메라가 `boardAspect` 를 쓰는데 월드는 캔버스
-   * 전체에 그려지므로, 밴드가 0 이 아니게 되는 순간 두 비율이 어긋나 장면이
-   * 늘어난다. 예전에는 저해상도 타겟에 scissor 를 걸어(`Viewport.bindBoard`)
-   * 해결했고, PHASE 1 이 그 타겟과 함께 그 경로를 없앴다. 블룸 체인에 같은 것을
-   * 다시 만드는 일은 UI 배치와 함께 PHASE 6 에서 한다.
+   * ── 왜 보드를 밴드 사이로 가두지 않는가: 실측 ─────────────────────────────
+   * 가둬 봤다. 312x608 프레임에서 보드는 312x312 정사각형이 되고 `boardAspect` 는
+   * 1.0 이 되는데, 월드는 캔버스 전체(312x608)에 그려지므로 두 비율이 어긋나
+   * **뚜껑이 세로로 늘어난 타원이 된다**. 고치려면 월드를 보드 사각형에만 그리는
+   * scissor 경로가 필요하고, 그건 PHASE 1 이 저해상도 타겟과 함께 지운 것을 블룸
+   * 체인 위에 다시 만드는 일이다.
+   *
+   * 그 값을 치를 이유가 없다. 밴드가 필요한 것은 UI 가 붙을 자리이지 보드를 자르는
+   * 것이 아니고 — HUD 는 위 가장자리에, 손패는 아래 가장자리에 이미 앵커돼 있다 —
+   * 잘라서 얻는 것은 세로 화면에서 보드가 51% 로 줄어드는 것뿐이다.
+   *
+   * 그래서 `boardHeight` / `boardAspect` / `boardTop` / `boardBottom` 은 프레임
+   * 전체를 그대로 가리킨다. 렌더 경로는 한 줄도 바뀌지 않는다.
    */
   const playHeight = height;
+  const wanted = TOP_BAND_NEED + BOTTOM_BAND_NEED;
 
   /**
-   * The bands split whatever the region left, in the proportion they were
-   * authored at — the top holds readouts, the bottom holds a card, and the card
-   * is the taller of the two.
+   * 밴드는 4:3 최소치를 넘는 **여분**에서만, 그것도 필요한 만큼만 가져간다.
+   *
+   * 여분에서만 가져가는 것이 가로 화면을 건드리지 않는 이유다: 가로에서는 프레임
+   * 높이가 정확히 4:3 이라 여분이 0 이고, 따라서 밴드가 0 이며, 이 함수가 내놓는
+   * 모든 값이 밴드를 켜기 전과 같다.
+   *
+   * 필요한 만큼만 가져가는 것이 세로에서 UI 가 화면의 절반을 먹지 않는 이유다.
+   * 312x608 을 예로 들면 여분이 374 인데 두 밴드가 원하는 것은 296 뿐이다.
    */
-  const leftover = Math.max(0, height - playHeight);
-  const need = TOP_BAND_NEED + BOTTOM_BAND_NEED;
+  const leftover = Math.min(wanted, Math.max(0, height - boardHeight));
+  const need = wanted;
   const topBand = Math.round(leftover * (TOP_BAND_NEED / need));
   const bottomBand = leftover - topBand;
 
@@ -320,8 +299,17 @@ export function resolveFrame(windowW, windowH) {
     boardAspect: boardWidth / playHeight,
     topBand,
     bottomBand,
-    boardTop: topBand,
-    boardBottom: topBand + playHeight,
+    /**
+     * 보드 사각형의 위/아래 가장자리. 프레임 그 자체다.
+     *
+     * 예전에는 `topBand` 와 `topBand + playHeight` 였다. 밴드가 보드를 잘라낸다는
+     * 전제였고, 그 전제가 사라졌으므로 값도 사라진다 — 밴드가 0 이 아닌 세로
+     * 화면에서 `boardBottom` 이 프레임 높이를 넘어(608 프레임에 748) 있었는데,
+     * 아무도 읽지 않아 조용했을 뿐이다. 읽는 쪽이 생기면 바로 틀리는 값이라
+     * 지금 맞춰 둔다.
+     */
+    boardTop: 0,
+    boardBottom: playHeight,
     aspect: width / height,
     /**
      * Is the frame taller than the 4:3 it was designed in?

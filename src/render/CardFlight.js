@@ -1,7 +1,7 @@
 import { Mesh, PlaneGeometry } from 'three';
 import { CARD_BY_ID } from '../game/cards/cardCatalog.js';
 import { cardBackTexture } from './cardTexture.js';
-import { CARD_ASPECT } from './CardHand.js';
+import { CARD_ASPECT, cardScale, texelsFor } from './CardHand.js';
 
 /**
  * A found card, flying from the field into the hand.
@@ -72,7 +72,7 @@ export class CardFlight {
     // but it is deliberately not used to pick the artwork. See the header.
     if (!CARD_BY_ID.has(cardId) || key === null || key === undefined) return;
 
-    const mat = this.materials.create(cardBackTexture(this.config.cards.textureWidth));
+    const mat = this.materials.create(cardBackTexture(texelsFor(this.config, this.config.cards.textureWidth)));
     const mesh = new Mesh(QUAD, mat);
     mesh.renderOrder = 800;
     root.add(mesh);
@@ -98,8 +98,10 @@ export class CardFlight {
     if (!this.flights.length) return;
     const cfg = this.config.cards;
     const life = Math.max(0.05, this.config.orbs.pickupSeconds);
-    const w = cfg.width;
-    const h = cfg.width * CARD_ASPECT;
+    // 날아오는 카드는 `cards.scene` 에 직접 붙어 손의 `root.scale` 을 받지 못하므로
+    // 부채꼴 배율을 스스로 곱한다. 빠뜨리면 부채꼴에 도착하는 순간 카드가 튄다.
+    const w = cfg.width * cardScale(cfg);
+    const h = w * CARD_ASPECT;
 
     for (let i = this.flights.length - 1; i >= 0; i--) {
       const f = this.flights[i];

@@ -261,7 +261,37 @@ function iconSound(ctx, size, color) {
   ctx.stroke();
 }
 
+/**
+ * 왕관 뚜껑. 이 게임의 물건.
+ *
+ * 21개의 주름이 실제 크라운 코르크의 개수다 — `src/cap/` 의 지오메트리가 같은
+ * 수를 쓴다. 아이콘에서 그 수를 세는 사람은 없지만, 세었을 때 맞는 편이 낫다.
+ *
+ * 채우기 하나로 그린다. 선으로 그린 왕관 뚜껑은 작은 크기에서 주름이 서로 붙어
+ * 그냥 톱니바퀴가 된다.
+ */
+function iconCap(ctx, size, color) {
+  setup(ctx, size, color);
+  const cx = size / 2;
+  const cy = size / 2;
+  const outer = size * 0.44;
+  const inner = size * 0.38;
+  const teeth = 21;
+  ctx.beginPath();
+  for (let i = 0; i < teeth * 2; i++) {
+    const a = (i / (teeth * 2)) * Math.PI * 2 - Math.PI / 2;
+    const r = i % 2 === 0 ? outer : inner;
+    const x = cx + Math.cos(a) * r;
+    const y = cy + Math.sin(a) * r;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
 export const ICON = {
+  cap: iconCap,
   swap: iconSwap,
   trajectory: iconTrajectory,
   chaos: iconChaos,

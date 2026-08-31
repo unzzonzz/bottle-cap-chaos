@@ -22,7 +22,49 @@
  * under it.
  */
 
-import { MIN_CSS_PX_PER_FRAME_PX } from './frame.js';
+/**
+ * ── 이 상수가 `frame.js` 가 아니라 여기 있는 이유는 순환 import 다 ──────────
+ * 원래 `frame.js` 에 있었고 이 파일이 거기서 가져왔는데, `frame.js` 는 밴드 높이를
+ * 계산하려고 이 파일의 `SIZE` 와 `SPACE` 를 module 스코프에서 읽는다. 둘이 서로를
+ * module 스코프에서 읽으면 **먼저 평가되는 쪽이 상대의 절반만 본다** — 어느 쪽이
+ * 먼저인지는 import 그래프의 우연이라, 앱에서는 우연히 맞고 이 파일 하나만 실행하면
+ * `Cannot access 'SPACE' before initialization` 으로 죽었다.
+ *
+ * 화면 픽셀당 프레임 픽셀 수는 **크기**에 관한 사실이지 레이아웃에 관한 사실이
+ * 아니므로 여기가 원래 자리다. 이제 의존은 한 방향이다: frame -> tokens.
+ */
+/**
+ * How many CSS pixels one frame pixel must be worth, at minimum.
+ *
+ * ── this is THE dial for how big the UI is on a phone ────────────────────────
+ * Every UI constant in the project is in frame pixels — a 104-wide button, a
+ * 208-wide score, 16px type — and how large any of them LOOKS is entirely
+ * `canvasCssWidth / frame.width`. On a desktop window that ratio is about 1.97,
+ * so the 나가기 button is 205 CSS px across and its label is 31 px. On a phone
+ * with the frame pinned at 640 the same button is 65 CSS px with a 10 px label,
+ * which is why it was unreadable: identical PROPORTIONS, a third of the size.
+ *
+ * Making the frame narrower on a narrow screen fixes it in one number, because
+ * every constant scales together and none of the relationships between them
+ * change. The proportions stay exactly as authored; only the ratio moves.
+ *
+ * ── why 1.25 and not PC parity ───────────────────────────────────────────────
+ * Matching a desktop EXACTLY would need a ratio of ~1.97, i.e. a frame 204 wide
+ * on a 402-px phone — and then the button is 205 CSS px, which is 51% of the
+ * screen. That is what "the same physical size" actually costs when the screen
+ * is a third as wide, and it is too much: one button would be half the width of
+ * the game.
+ *
+ * 1.25 doubles the old size and lands where it matters:
+ *
+ *     button  130 x 42 CSS px   (hit quad 67 px — clears the 44pt minimum)
+ *     label   20 CSS px         (was 10)
+ *     note    16 CSS px         (was 8)
+ *     card    173 CSS px wide   (was 80)
+ *
+ * Raise it if you want them bigger still; nothing else has to change.
+ */
+export const MIN_CSS_PX_PER_FRAME_PX = 1.25;
 
 /**
  * Corner radii.

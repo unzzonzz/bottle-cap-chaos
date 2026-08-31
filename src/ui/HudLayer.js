@@ -1,6 +1,6 @@
 import { Mesh, PlaneGeometry, Raycaster, Scene, Vector2 } from 'three';
 import { FRAME, frameCamera, refitFrameCamera } from '../core/frame.js';
-import { CARD_ASPECT, handExposure } from '../render/CardHand.js';
+import { CARD_ASPECT, cardScale, handExposure } from '../render/CardHand.js';
 import { MATCH_STATE } from '../game/Match.js';
 import { scoreboardFor } from '../game/modes.js';
 import { PLAYER_COLORS } from '../render/playerColors.js';
@@ -85,8 +85,10 @@ export const HUD_FRAME = FRAME;
 function parkedHandReach(config) {
   const cfg = config.cards;
   const cardHeight = cfg.width * CARD_ASPECT;
-  // The parked hand is never raised, so its scale is always `inactiveScale`.
-  const scale = cfg.inactiveScale;
+  // 상대 손은 절대 들어 올려지지 않으므로 배율은 언제나 `inactiveScale` 이다 —
+  // 부채꼴 전체에 걸리는 `cardScale` 을 곱해서. 이 곱을 빠뜨리면 점수판이 실제보다
+  // 짧게 뻗은 손을 가정하고, 카드가 그 아래로 내려와 숫자를 덮는다.
+  const scale = cfg.inactiveScale * cardScale(cfg);
   return handExposure(cfg, FRAME.topBand ?? 0, cardHeight, scale).parked;
 }
 
@@ -125,7 +127,20 @@ const BACK_ROW_REACH = 143;
  */
 const SCORE = { width: SIZE.scorePlate.w, height: SIZE.scorePlate.h };
 /** 카메라 리셋 버튼. 단어가 아니라 아이콘이므로 정사각. */
-const ICON = SIZE.buttonIcon.w;
+/**
+ * 아이콘 버튼 한 변. 좁은 프레임에서는 줄어든다.
+ *
+ * 토큰의 64 는 640 폭 프레임 기준이다. 세로 화면의 프레임은 312 폭이라 아이콘 두
+ * 개가 폭의 41% 를 먹었고, 그 결과 턴 플레이트에 92 픽셀만 남아 "PLAYER 1" 이
+ * "PLAYE" 로 잘렸다.
+ *
+ * 하한이 44 인 것은 손가락 때문이다. `MIN_CSS_PX_PER_FRAME_PX` 가 1.25 이므로 44
+ * 프레임 픽셀은 최소 55 CSS 픽셀이고, 그건 44pt 터치 타깃 기준을 넘는다. 그 아래로는
+ * 어떤 프레임 폭에서도 내려가지 않는다.
+ */
+function iconSize(frameW) {
+  return Math.round(Math.max(44, Math.min(SIZE.buttonIcon.w, frameW * 0.15)));
+}
 const ICON_GAP = SPACE.sm;
 const TURN = { width: SIZE.turnPlate.w, height: SIZE.turnPlate.h };
 const SCORE_GAP = SPACE.xs;
@@ -389,6 +404,14 @@ export class HudLayer {
     const ui = this.config.ui;
     const halfW = HUD_FRAME.width / 2;
     const halfH = HUD_FRAME.height / 2;
+    const frameW = halfW * 2;
+    /**
+     * 아이콘 크기는 프레임에 따라 변하므로 텍스처도 그 크기로 구워야 한다.
+     * `this._icon` 에 남기는 것은 `_updateButtons` 가 나중에 같은 값을 써야 하기
+     * 때문이다 — 판 크기와 텍스처 크기가 어긋나면 아이콘이 리샘플된다.
+     */
+    const ICON = iconSize(frameW);
+    this._icon = ICON;
 
     /**
      * MARGIN, per edge, with whatever the device has taken added on.
@@ -456,8 +479,28 @@ export class HudLayer {
      * 줄을 나눠 쓴다. 순서가 중요도이기도 하다: 점수는 화면 밖에서도 읽혀야 하고,
      * 누구 차례인지는 그 다음이고, 버튼은 찾을 때만 필요하다.
      */
-    const rowTwoY =
+    /**
+     * ── 아래 줄은 점수판이 실제로 보일 때만 그 자리를 비켜 준다 ─────────────
+     * 점수판은 최소 줌에서만 나타난다 — `_updateScore` 를 보라 — 그래서 경기
+     * 대부분의 시간 동안 화면에 없다. 그런데 자리는 계속 잡아먹고 있었고, 그
+     * 결과 800x459 창(프레임 421x316)에서 턴 플레이트가 화면의 59% 지점, 즉
+     * 한가운데보다 **아래**에 떠 있었다. 위 여백의 내역이 이랬다:
+     *
+     *     상대 손패 48 + 간격 8 + 점수판 84 + 간격 14 + 턴 절반 22 = 186
+     *
+     * 316 높이의 절반이 158 이므로, 두 줄을 쌓는 것만으로 이미 중앙을 넘는다.
+     *
+     * 자리를 무조건 비워 두었던 이유는 튐이었다: 점수가 나타날 때 턴 플레이트가
+     * 순간이동하면 그게 더 나쁘다. 그래서 비우지 않고 **미끄러지게** 한다.
+     * `_scoreShown` 은 이미 `scoreFadeSeconds` 에 걸쳐 0..1 로 움직이므로, 두 Y
+     * 사이를 같은 값으로 보간하면 점수가 페이드인하는 동안 턴 줄이 함께 내려온다.
+     * 튐이 아니라 한 동작이 된다.
+     */
+    this._rowTwoUp = scoreTop - Math.max(TURN.height, ICON) / 2;
+    this._rowTwoDown =
       this._scoreHome.y - SCORE.height / 2 - SPACE.sm - Math.max(TURN.height, ICON) / 2;
+    const rowTwoY = this._rowTwoDown;
+    this._rowTwoY = undefined;
 
     /**
      * ── 프레임 폭은 640 이 아니다. 창에 따라 변한다 ─────────────────────────
@@ -469,7 +512,6 @@ export class HudLayer {
      * 그래서 두 판은 프레임에 반응한다. 토큰 값은 상한이고, 좁은 프레임에서는
      * 비율이 이긴다. 텍스처는 이 폭으로 구워지므로 글자가 리샘플되지 않는다.
      */
-    const frameW = halfW * 2;
     this._scoreWidth = Math.min(SCORE.width, frameW * 0.55);
     // 턴 플레이트는 오른쪽 컨트롤 무리에 닿기 전에서 멈춘다.
     const controlsLeft = halfW - edgeRight - ICON * 2 - ICON_GAP;
@@ -665,9 +707,39 @@ export class HudLayer {
     // rather than as a size change that then relaxes.
     const bump = Math.sin(Math.PI * this._pulse) * ui.scorePulseScale;
     const shown = smoothstep(this._scoreShown);
-    this.score.scale.set(SCORE.width * (1 + bump), SCORE.height * (1 + bump), 1);
+    /**
+     * 너비는 `layout()` 이 프레임에 맞춰 정한 값에서 출발한다.
+     *
+     * 여기서 `SCORE.width` 를 그대로 쓰면 좁은 프레임에서의 반응형 축소가 매
+     * 프레임 덮어써진다 — `layout()` 이 231 로 잡아 놓은 것을 첫 프레임에 300 으로
+     * 되돌리는 식이라, 화면에서는 축소가 아예 없던 것처럼 보였다.
+     */
+    const scoreW = this._scoreWidth ?? SCORE.width;
+    this.score.scale.set(scoreW * (1 + bump), SCORE.height * (1 + bump), 1);
     this.score.userData.base = shown;
     this.score.userData.want = shown > 0.004;
+
+    // 아래 줄은 점수판이 나타나는 만큼 내려간다. `_rowTwoUp`/`_rowTwoDown` 의
+    // 주석에 왜 자리를 비워 두지 않고 미끄러지게 했는지 적혀 있다.
+    this._applyRowTwo(shown);
+  }
+
+  /** 아래 줄(턴 플레이트, 두 컨트롤, 시계, 알림)을 `shown` 위치에 놓는다. */
+  _applyRowTwo(shown) {
+    if (this._rowTwoUp === undefined || this._rowTwoDown === undefined) return;
+    const y = this._rowTwoUp + (this._rowTwoDown - this._rowTwoUp) * shown;
+    if (y === this._rowTwoY) return;
+    const dy = y - (this._rowTwoY ?? this._rowTwoDown);
+    this._rowTwoY = y;
+    this.turn.position.y += dy;
+    this.exit.position.y += dy;
+    this.recenter.position.y += dy;
+    this.timerTrack.position.y += dy;
+    this.timerFill.position.y += dy;
+    this._timerY += dy;
+    this._noteY += dy;
+    this.note.position.y += dy;
+    for (const h of this._hits) h.mesh.position.y = h.plate.position.y;
   }
 
   _updateTurn(match, labelFor, nameFor, outcomeFor) {
@@ -847,12 +919,12 @@ export class HudLayer {
     this.exit.material.uniforms.uMap.value = iconButtonTexture(
       'exit',
       this.hovered === 'exit' ? 'hover' : 'idle',
-      { size: ICON, scale: ui.textureScale },
+      { size: this._icon ?? SIZE.buttonIcon.w, scale: ui.textureScale },
     );
     this.recenter.material.uniforms.uMap.value = iconButtonTexture(
       'recenter',
       this.hovered === 'recenter' ? 'hover' : 'idle',
-      { size: ICON, scale: ui.textureScale },
+      { size: this._icon ?? SIZE.buttonIcon.w, scale: ui.textureScale },
     );
   }
 
