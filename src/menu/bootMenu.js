@@ -1395,5 +1395,8 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
     get marks() { return marks; }, get settings() { return settings; },
     get editor() { return editor; },
     get opponent() { return opponent; },
+    // 온라인만 빠져 있었다. 이 화면은 세션과 함께 만들어지고 함께 버려지므로
+    // getter 여야 하고, 없으면 화면이 떠 있는데 핸들이 `undefined` 다.
+    get online() { return online; },
   };
 }

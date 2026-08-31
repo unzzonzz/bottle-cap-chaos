@@ -1,10 +1,11 @@
 import { Group, Mesh, PlaneGeometry, Raycaster, Vector2 } from 'three';
 import { createSpriteMaterial } from './menuMaterials.js';
-import { menuPlateTexture, titleTexture } from './menuTextures.js';
+import { menuPlateTexture, panelTexture, titleTexture } from './menuTextures.js';
 import { OnlineSession, SESSION_PHASE } from '../net/OnlineSession.js';
 import { defaultServerUrl } from '../net/Transport.js';
 import { ERR, isValidCode, normaliseCode } from '../net/protocol.js';
-import { PLATE_TEXEL_SCALE, solveColumn } from './columnLayout.js';
+import { ROLE } from '../core/tokens.js';
+import { solvePanel } from './panelLayout.js';
 
 /**
  * Finding somebody to play.
@@ -24,21 +25,29 @@ import { PLATE_TEXEL_SCALE, solveColumn } from './columnLayout.js';
  * `refresh` from `session.phase`, so there is one place that decides what this
  * screen says, which is the rule `SettingsScene._labelFor` sets.
  *
- * ── the code is the TITLE ─────────────────────────────────────────────────
+ * ── the code is the READOUT, and the readout is the first row ─────────────
  * A six-character code that somebody has to read out loud over a phone is the
  * most important thing on the screen while it is on it, and a 15px plate label
- * is not the place for it. `titleTexture` sizes to fit and is already twice the
- * height, so the heading becomes the code and the sub-line says what it is.
+ * is not the place for it. `titleTexture` sizes to fit and is twice the height,
+ * so the top row of the content is drawn with it: the code when there is one,
+ * and what the relay is doing when there is not.
+ *
+ * 부록 B 전에는 이것이 화면의 **제목**이었다. 제목 자리가 상태에 따라 바뀌면
+ * 그건 제목이 아니다 — 화면의 이름은 언제나 `온라인` 이고, 그건 이제 탭에 있다.
  */
 
 const L = {
-  titleHeight: 72,
+  /** 상태 줄은 두 배 높다. 초대 코드가 여기 들어온다. */
+  readoutHeight: 84,
   rows: [
     { id: 'status', kind: 'readout' },
     { id: 'create' },
     { id: 'join' },
     { id: 'random' },
-    { id: 'back' },
+  ],
+  /** 푸터. 이 화면에 COMMIT 은 없다 — 세 줄이 각각 스스로 실행된다. */
+  footer: [
+    { id: 'back', role: ROLE.RETREAT, side: -1 },
   ],
 };
 
@@ -80,15 +89,20 @@ export class OnlineScene {
 
     this.session = session ?? new OnlineSession({ config });
     this.notice = '';
-    this._titleText = null;
 
-    this.title = new Mesh(
+    /**
+     * 화면의 바탕. 모든 줄보다 뒤에 그려진다 — `SettingsScene` 의 같은 줄에
+     * `renderOrder` 로 정하는 이유가 적혀 있다.
+     */
+    this.panel = new Mesh(
       new PlaneGeometry(1, 1),
       createSpriteMaterial(retro, { map: null }),
     );
-    this.root.add(this.title);
+    this.panel.renderOrder = -1;
+    this.root.add(this.panel);
 
     this.items = L.rows.map((row) => this._plate(row));
+    this.footer = L.footer.map((row) => this._plate(row));
     this.layout(u);
 
     this._ray = new Raycaster();
@@ -128,6 +142,11 @@ export class OnlineScene {
     return { ...def, mesh, maps: {}, label: null, size: null };
   }
 
+  /** 열과 푸터를 한 줄로. */
+  get _all() {
+    return [...this.items, ...this.footer];
+  }
+
   /**
    * 제목과 다섯 줄을 하나의 열로 쌓는다. `columnLayout.js` 가 푼다.
    *
@@ -139,30 +158,50 @@ export class OnlineScene {
     const u = unitsPerPixel ?? this._u;
     this._u = u;
 
-    const box = solveColumn([
-      { id: '#title', h: L.titleHeight },
-      ...L.rows.map((r) => ({ id: r.id })),
-    ]);
+    const box = solvePanel({
+      title: true,
+      caption: !!this.modeName,
+      rows: L.rows.map((r) => ({ id: r.id, h: r.kind === 'readout' ? L.readoutHeight : undefined })),
+      footer: L.footer.length,
+    });
     this._box = box;
     const at = (id) => box.rows.find((r) => r.id === id);
 
-    const title = at('#title');
-    this.title.scale.set(box.plate.width * u, title.h * u, 1);
-    this.title.position.set(0, title.y * u, 0);
-    this._titleHeight = title.h;
+    this.panel.scale.set(box.panel.w * u, box.panel.texH * u, 1);
+    this.panel.position.set(0, 0, 0);
 
     for (const item of this.items) {
       const row = at(item.id);
-      item.size = { width: box.plate.width, height: row.h, scale: PLATE_TEXEL_SCALE };
+      item.size = { width: box.plate.width, height: row.h, scale: box.scale };
       item.mesh.scale.set(box.plate.width * u, row.h * u, 1);
       item.mesh.position.set(0, row.y * u, 0);
     }
 
-    const key = `${box.plate.width}x${box.plate.height}`;
-    if (key !== this._plateKey) {
-      this._plateKey = key;
-      for (const item of this.items) item.label = null;
-      this._titleText = null;
+    const fb = box.footer.button;
+    for (const item of this.footer) {
+      item.size = { width: fb.w, height: fb.h, scale: box.scale };
+      item.mesh.scale.set(fb.w * u, fb.h * u, 1);
+      const x = item.side < 0 ? box.footer.left : box.footer.right;
+      item.mesh.position.set(x * u, box.footer.y * u, 0);
+    }
+
+    const key = `${box.panel.w}x${box.panel.texH}`;
+    if (key !== this._panelKey) {
+      this._panelKey = key;
+      for (const item of this._all) item.label = null;
+      const old = this.panel.material.uniforms.uMap.value;
+      this.panel.material.uniforms.uMap.value = panelTexture({
+        w: box.panel.w,
+        h: box.panel.h,
+        tabHeight: box.panel.tabHeight,
+        title: '온라인',
+        caption: this.modeName,
+        footerHeight: box.footer.height,
+        padTop: box.pad.top,
+        padX: box.pad.x,
+        scale: box.scale,
+      });
+      old?.dispose();
     }
     this.refresh();
   }
@@ -262,36 +301,46 @@ export class OnlineScene {
   }
 
   refresh() {
-    // The heading carries the invite code while there is one, because reading it
-    // out is the only thing the player is doing at that moment.
-    const wantTitle =
-      this.session.phase === SESSION_PHASE.WAITING_CODE && this.session.code
-        ? `${this.session.code}|초대 코드`
-        : `온라인|${this.modeName}`;
-    if (wantTitle !== this._titleText) {
-      const [t, s] = wantTitle.split('|');
-      this.title.material.uniforms.uMap.value?.dispose();
-      this.title.material.uniforms.uMap.value = titleTexture(t, s, {
-        width: this._box.plate.width,
-        height: this._titleHeight,
-        scale: PLATE_TEXEL_SCALE,
-      });
-      this._titleText = wantTitle;
-    }
+    for (const item of this._all) {
+      /**
+       * 상태 줄은 판이 아니라 **큰 글자**다.
+       *
+       * 초대 코드는 전화기 너머로 소리 내어 읽는 여섯 글자이고, 그 순간 화면에서
+       * 가장 중요한 것이다. 15픽셀 판 라벨에 들어갈 것이 아니라서 예전에는 화면의
+       * 제목 자리를 썼다 — 부록 B 가 제목을 탭으로 못박았으므로, 이제 내용의 첫
+       * 줄로 내려왔다. 그리는 함수는 그대로다.
+       */
+      if (item.kind === 'readout') {
+        const want = this._readout();
+        if (want !== item.label) {
+          item.maps.idle?.dispose();
+          const [t, sub] = want.split('|');
+          item.maps.idle = titleTexture(t, sub, {
+            width: item.size.width,
+            height: item.size.height,
+            scale: item.size.scale,
+            plate: false,
+          });
+          item.label = want;
+        }
+        item.mesh.material.uniforms.uMap.value = item.maps.idle;
+        continue;
+      }
 
-    for (const item of this.items) {
       const label = this._labelFor(item.id);
-      if (label !== item.label) {
+      const role = item.role ?? ROLE.CHOICE;
+      const key = `${label}|${role}`;
+      if (key !== item.label) {
         item.maps.idle?.dispose();
         item.maps.hover?.dispose();
         item.maps.disabled?.dispose();
-        item.maps.idle = menuPlateTexture(label, 'idle', item.size);
-        item.maps.hover = menuPlateTexture(label, 'hover', item.size);
+        item.maps.idle = menuPlateTexture(label, { role, state: 'idle' }, item.size);
+        item.maps.hover = menuPlateTexture(label, { role, state: 'hover' }, item.size);
         // `dimmed`, not `disabled`: these rows are unavailable for a moment
         // because a room or a queue is already pending, which is not the same
         // claim as "준비 중" — see the skin table in `menuTextures`.
-        item.maps.disabled = menuPlateTexture(label, 'dimmed', item.size);
-        item.label = label;
+        item.maps.disabled = menuPlateTexture(label, { role, state: 'dimmed' }, item.size);
+        item.label = key;
       }
       const dead = this._deadFor(item.id);
       /**
@@ -306,11 +355,24 @@ export class OnlineScene {
        * Nothing is lost: `pick` skips readouts entirely, so the row cannot be
        * pressed regardless of what it looks like.
        */
-      const flat = item.kind === 'readout';
-      const hot = !dead && !flat && this._hovered === item.id;
+      const hot = !dead && this._hovered === item.id;
       item.mesh.material.uniforms.uMap.value =
-        !flat && dead ? item.maps.disabled : hot ? item.maps.hover : item.maps.idle;
+        dead ? item.maps.disabled : hot ? item.maps.hover : item.maps.idle;
     }
+  }
+
+  /**
+   * 상태 줄의 내용. `큰 글자|작은 글자` 로 돌려준다.
+   *
+   * 한 문자열인 것은 이것이 캐시 키이기도 하기 때문이다 — `titleTexture` 는
+   * 호출마다 캔버스와 텍스처를 새로 만들고 아무도 캐시하지 않으므로, 같은 것을
+   * 다시 굽지 않는 유일한 방법이 이 비교다.
+   */
+  _readout() {
+    if (this.session.phase === SESSION_PHASE.WAITING_CODE && this.session.code) {
+      return `${this.session.code}|초대 코드`;
+    }
+    return `${this._labelFor('status')}|`;
   }
 
   // ── pointer ──────────────────────────────────────────────────────────────
@@ -324,7 +386,7 @@ export class OnlineScene {
     );
     this._ray.setFromCamera(this._ndc, camera);
     this.root.updateMatrixWorld(true);
-    for (const item of this.items) {
+    for (const item of this._all) {
       if (item.kind === 'readout') continue;
       if (this._ray.intersectObject(item.mesh, false).length) return { id: item.id };
     }
@@ -423,10 +485,10 @@ export class OnlineScene {
     for (const un of this._unsubs) un();
     this._unsubs = [];
     this.session.dispose();
-    this.title.geometry.dispose();
-    this.title.material.uniforms.uMap.value?.dispose();
-    this.title.material.dispose();
-    for (const item of this.items) {
+    this.panel.geometry.dispose();
+    this.panel.material.uniforms.uMap.value?.dispose();
+    this.panel.material.dispose();
+    for (const item of this._all) {
       item.mesh.geometry.dispose();
       item.mesh.material.dispose();
       item.maps.idle?.dispose();

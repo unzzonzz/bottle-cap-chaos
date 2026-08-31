@@ -112,6 +112,14 @@ export const SIZE = {
   buttonChoice: { w: 400, h: 64 },
   /** COMMIT / RETREAT / DESTRUCTIVE. 푸터 안. */
   buttonFooter: { w: 150, h: 52 },
+  /**
+   * 제목 탭 아래 부제 한 줄이 차지하는 높이.
+   *
+   * `TYPE.caption.size * 1.4` 다. 그리는 쪽과 자리를 비우는 쪽이 서로 다른
+   * 파일이라 — `ui/glass.dialogPanel` 과 `menu/panelLayout` — 둘이 같은 수를
+   * 따로 계산하면 언젠가 한 픽셀씩 어긋난다.
+   */
+  captionLine: 21,
   cardExposure: 72,
 
   modal: { w: 440, h: 260 },

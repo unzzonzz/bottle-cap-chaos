@@ -1,9 +1,10 @@
 import { Group, Mesh, PlaneGeometry, Raycaster, Vector2 } from 'three';
 import { createSpriteMaterial } from './menuMaterials.js';
-import { menuPlateTexture, titleTexture } from './menuTextures.js';
+import { menuPlateTexture, panelTexture } from './menuTextures.js';
 import { toMarkTexture } from '../marks/markTextures.js';
 import { PALETTE } from '../core/palette.js';
-import { PLATE_TEXEL_SCALE, solveColumn } from './columnLayout.js';
+import { ROLE } from '../core/tokens.js';
+import { solvePanel } from './panelLayout.js';
 import { gelButton, roundRectPath } from '../ui/glass.js';
 
 /**
@@ -46,21 +47,30 @@ import { gelButton, roundRectPath } from '../ui/glass.js';
  *
  * A 브러시 소리 row sat below it until the stroke tick was removed on the
  * player's instruction. Its absence is why the two link rows moved up.
+ *
+ * ── 부록 B: 제목이 탭이 되고, 뒤로 가기가 열에서 나갔다 ─────────────────────
+ * 조사표가 이 화면을 두고 "푸터도 구분선도 없고, 뒤로 가기가 열의 마지막 줄이며
+ * 크기도 같다" 고 적었다. 그 상태에서 `◀ 메뉴로` 는 고를 수 있는 설정 항목 중
+ * 하나로 읽힌다 — 위의 다섯 줄과 판도 크기도 색도 같으니 그렇게 읽지 않을 근거가
+ * 없다.
+ *
+ * 지금은 골격이 넷으로 나뉜다: 이름은 패널 모서리에 걸친 **탭**, 고르는 것은
+ * 패널 안의 **열**, 화면을 떠나는 것은 구분선 아래 **푸터**의 RETREAT 다.
+ * 세 구역의 좌표는 `menu/panelLayout.solvePanel` 이 푼다.
  */
 
 /**
- * 이 화면만의 크기. 세로 배치는 `columnLayout.solveColumn` 이 푼다.
+ * 이 화면만의 크기. 나머지 세로 배치는 `panelLayout.solvePanel` 이 푼다.
  *
  * ── 좌표가 아니라 순서를 저술한다 ───────────────────────────────────────────
  * 예전에는 titleY 176, 행 y 가 124 / 22 / -36 / -94 / -152 / -210 이었다. 위에서
  * 아래까지 452 픽셀이고 480 짜리 프레임에서는 들어간다. 800x459 창의 프레임은
- * 316 이라 제목도 마지막 두 줄도 화면 밖이었다. 이유와 해법은 `columnLayout.js`
+ * 316 이라 제목도 마지막 두 줄도 화면 밖이었다. 이유와 해법은 `panelLayout.js`
  * 머리말에 있다.
  */
 const L = {
   chip: { width: 22, height: 22, gap: 5 },
   steps: 10,
-  titleHeight: 64,
 };
 
 /**
@@ -85,7 +95,18 @@ const ROWS = [
    */
   { id: 'server', kind: 'action', debugOnly: true },
   { id: 'marks', kind: 'link' },
-  { id: 'back', kind: 'link' },
+];
+
+/**
+ * 푸터. 부록 B2.2-1 — RETREAT 는 **왼쪽**이다.
+ *
+ * 이 화면에 COMMIT 이 없는 것은 여기서 고른 것이 즉시 적용되기 때문이다. 확인할
+ * 것이 없는 화면에 확인 버튼을 두면 그 버튼은 아무것도 하지 않으면서 오른쪽
+ * 자리만 차지하고, 그러면 다음 화면에서 그 자리에 진짜 COMMIT 이 나타났을 때
+ * 둘이 같은 것으로 읽힌다.
+ */
+const FOOTER = [
+  { id: 'back', role: ROLE.RETREAT, side: -1 },
 ];
 
 /** `?debug=1` 인가. 모듈 로드 시 한 번. */
@@ -127,11 +148,19 @@ export class SettingsScene {
     this._box = null;
     this._chip = L.chip;
 
-    this.title = new Mesh(
+    /**
+     * 화면의 바탕. 모든 줄보다 **뒤에** 그려진다.
+     *
+     * `renderOrder` 로 정한다. 여기 메시는 전부 z=0 의 같은 평면이고
+     * `createSpriteMaterial` 은 깊이를 쓰지 않으므로, 순서를 정하지 않으면
+     * 그리는 차례가 씬 그래프에 넣은 순서에 달린다 — 그건 우연이다.
+     */
+    this.panel = new Mesh(
       new PlaneGeometry(1, 1),
       createSpriteMaterial(retro, { map: null }),
     );
-    this.root.add(this.title);
+    this.panel.renderOrder = -1;
+    this.root.add(this.panel);
 
     /** @type {Array<{id: string, kind: string, mesh: object, maps: object, label: string}>} */
     this.items = [];
@@ -144,6 +173,9 @@ export class SettingsScene {
       if (def.debugOnly && !DEBUG) continue;
       this.items.push(this._buildRow(def));
     }
+
+    /** @type {Array<{id: string, role: string, side: number, mesh: object, maps: object, label: string}>} */
+    this.footer = FOOTER.map((def) => this._buildRow(def));
 
     /** @type {Array<{index: number, mesh: object}>} */
     this.chips = [];
@@ -207,47 +239,73 @@ export class SettingsScene {
     this._u = u;
     const hasChips = this.chips.length > 0;
 
-    const slots = [{ id: '#title', h: L.titleHeight }];
+    const slots = [];
     for (const item of this.items) {
       slots.push({ id: item.id });
       if (hasChips && item.id === 'volume') slots.push({ id: '#chips', h: L.chip.height });
     }
 
-    const box = solveColumn(slots);
+    const box = solvePanel({ title: true, rows: slots, footer: FOOTER.length });
     this._box = box;
     const at = (id) => box.rows.find((r) => r.id === id);
 
-    const title = at('#title');
-    this.title.scale.set(box.plate.width * u, title.h * u, 1);
-    this.title.position.set(0, title.y * u, 0);
-    this._titleHeight = title.h;
+    this.panel.scale.set(box.panel.w * u, box.panel.texH * u, 1);
+    this.panel.position.set(0, 0, 0);
 
     for (const item of this.items) {
       const row = at(item.id);
+      item.size = { width: box.plate.width, height: row.h, scale: box.scale };
       item.mesh.scale.set(box.plate.width * u, row.h * u, 1);
       item.mesh.position.set(0, row.y * u, 0);
     }
 
     if (hasChips) {
       const row = at('#chips');
-      const cw = Math.round(L.chip.width * box.k);
-      const cg = Math.round(L.chip.gap * box.k);
-      const span = L.steps * cw + (L.steps - 1) * cg;
+      /**
+       * 칩 줄은 **내용 폭**에 맞춘다. 세로 축소와는 무관하다.
+       *
+       * 열 개가 나란히 놓이는 유일한 줄이라 가로가 먼저 모자란다. 세로 축소율을
+       * 쓰면 좁고 높은 프레임에서 칩이 이유 없이 작아진다.
+       */
+      const span = L.steps * L.chip.width + (L.steps - 1) * L.chip.gap;
+      const kc = Math.min(1, box.plate.width / span);
+      const cw = Math.max(3, Math.round(L.chip.width * kc));
+      const cg = Math.max(1, Math.round(L.chip.gap * kc));
+      const used = L.steps * cw + (L.steps - 1) * cg;
       this._chip = { width: cw, height: Math.min(row.h, cw), gap: cg };
       this.chips.forEach((chip, i) => {
-        const x = -span / 2 + cw / 2 + i * (cw + cg);
+        const x = -used / 2 + cw / 2 + i * (cw + cg);
         chip.mesh.scale.set(this._chip.width * u, this._chip.height * u, 1);
         chip.mesh.position.set(x * u, row.y * u, 0);
       });
     }
 
+    const fb = box.footer.button;
+    for (const item of this.footer) {
+      item.size = { width: fb.w, height: fb.h, scale: box.scale };
+      item.mesh.scale.set(fb.w * u, fb.h * u, 1);
+      const x = item.side < 0 ? box.footer.left : box.footer.right;
+      item.mesh.position.set(x * u, box.footer.y * u, 0);
+    }
+
     // 판 크기가 바뀌었으면 텍스처를 다시 굽는다. `refresh` 는 라벨이 같으면
     // 건너뛰므로, 라벨을 지워서 강제한다.
-    const key = `${box.plate.width}x${box.plate.height}`;
-    if (key !== this._plateKey) {
-      this._plateKey = key;
-      for (const item of this.items) item.label = null;
-      this._titleKey = null;
+    const key = `${box.panel.w}x${box.panel.texH}`;
+    if (key !== this._panelKey) {
+      this._panelKey = key;
+      const old = this.panel.material.uniforms.uMap.value;
+      this.panel.material.uniforms.uMap.value = panelTexture({
+        w: box.panel.w,
+        h: box.panel.h,
+        tabHeight: box.panel.tabHeight,
+        title: '설정',
+        footerHeight: box.footer.height,
+        padTop: box.pad.top,
+        padX: box.pad.x,
+        scale: box.scale,
+      });
+      old?.dispose();
+      for (const item of [...this.items, ...this.footer]) item.label = null;
       chipCache.clear();
     }
     this.refresh();
@@ -298,27 +356,14 @@ export class SettingsScene {
    * one. A row whose text did not change is left entirely alone.
    */
   refresh() {
-    const box = this._box;
-    const size = { width: box.plate.width, height: box.plate.height, scale: PLATE_TEXEL_SCALE };
-
-    if (this._titleKey !== `${box.plate.width}x${this._titleHeight}`) {
-      this._titleKey = `${box.plate.width}x${this._titleHeight}`;
-      const old = this.title.material.uniforms.uMap.value;
-      this.title.material.uniforms.uMap.value = titleTexture('설정', '', {
-        width: box.plate.width,
-        height: this._titleHeight,
-        scale: PLATE_TEXEL_SCALE,
-      });
-      old?.dispose();
-    }
-
-    for (const item of this.items) {
+    for (const item of [...this.items, ...this.footer]) {
       const label = this._labelFor(item.id);
       if (label !== item.label) {
         item.maps.idle?.dispose();
         item.maps.hover?.dispose();
-        item.maps.idle = menuPlateTexture(label, 'idle', size);
-        item.maps.hover = menuPlateTexture(label, 'hover', size);
+        const spec = { role: item.role ?? ROLE.CHOICE };
+        item.maps.idle = menuPlateTexture(label, { ...spec, state: 'idle' }, item.size);
+        item.maps.hover = menuPlateTexture(label, { ...spec, state: 'hover' }, item.size);
         item.label = label;
       }
       const hot = this._hovered === item.id;
@@ -353,7 +398,7 @@ export class SettingsScene {
     for (const chip of this.chips) {
       if (this._ray.intersectObject(chip.mesh, false).length) return { id: `vol:${chip.index}` };
     }
-    for (const item of this.items) {
+    for (const item of [...this.items, ...this.footer]) {
       // A readout is not a control. It must not answer a press, or the row
       // showing the volume would swallow one aimed at the chips below it.
       if (item.kind === 'readout') continue;
@@ -489,10 +534,10 @@ export class SettingsScene {
   dispose() {
     this._off?.();
     this._offProfile?.();
-    this.title.geometry.dispose();
-    this.title.material.uniforms.uMap.value.dispose();
-    this.title.material.dispose();
-    for (const item of this.items) {
+    this.panel.geometry.dispose();
+    this.panel.material.uniforms.uMap.value?.dispose();
+    this.panel.material.dispose();
+    for (const item of [...this.items, ...this.footer]) {
       item.mesh.geometry.dispose();
       item.mesh.material.dispose();
       // Safe to dispose: `menuTextures` has no cache and allocated these for us.

@@ -1,5 +1,5 @@
 import { PALETTE, mix, toRgb, withAlpha } from '../core/palette.js';
-import { ELEVATION, PANEL, RADIUS, ROLE, SPACE, TYPE } from '../core/tokens.js';
+import { ELEVATION, PANEL, RADIUS, ROLE, SIZE, SPACE, TYPE } from '../core/tokens.js';
 import { FONT_FAMILY } from './fonts.js';
 
 /**
@@ -635,10 +635,11 @@ export function applyTracking(ctx, tracking) {
  */
 export function dialogPanel(ctx, o) {
   const {
-    w, h, title = '', footerHeight = PANEL.footerHeight,
+    w, h, title = '', caption = '', footerHeight = PANEL.footerHeight,
+    tabHeight = PANEL.titleTabHeight, padTop = PANEL.padTop, padX = PANEL.padX,
     accent = PALETTE.accent.cyan,
   } = o;
-  const tabH = title ? PANEL.titleTabHeight : 0;
+  const tabH = title ? tabHeight : 0;
 
   /**
    * 탭 폭은 글자에 맞춘다. 고정 폭이면 짧은 제목이 상자 안에서 떠다니고 긴
@@ -653,6 +654,7 @@ export function dialogPanel(ctx, o) {
       w - PANEL.titleTabInset * 2,
       Math.ceil(ctx.measureText(title).width) + PANEL.titleTabPadX * 2,
     );
+    tabW = Math.max(tabW, tabH * 2);
     ctx.restore();
   }
 
@@ -725,6 +727,29 @@ export function dialogPanel(ctx, o) {
     applyTracking(ctx, 0);
   }
 
+  /**
+   * 부제. 탭 바로 아래, 내용 위.
+   *
+   * 탭은 화면의 **이름**이고 이것은 그 화면이 지금 무엇에 대한 것인가다 — 어느
+   * 모드의 상대를 고르는 중인가, 어느 모드로 접속하는가. 탭에 이어 붙이면 탭이
+   * 길어져 이름으로 읽히지 않고, 내용 열에 넣으면 누를 수 있는 것으로 읽힌다.
+   */
+  let capH = 0;
+  if (caption) {
+    capH = SIZE.captionLine;
+    ctx.save();
+    ctx.font = fontSpec(TYPE.caption);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = PALETTE.ui.textMuted;
+    applyTracking(ctx, TYPE.caption.tracking);
+    const fitted = fitText(ctx, caption, TYPE.caption, w - padX * 2);
+    ctx.font = fitted.font;
+    ctx.fillText(fitted.text, w / 2, bodyY + padTop * 0.5 + capH * 0.5);
+    ctx.restore();
+    applyTracking(ctx, 0);
+  }
+
   // ── 푸터 구분선.
   const footerTop = bodyY + h - footerHeight;
   if (footerHeight > 0) {
@@ -740,7 +765,7 @@ export function dialogPanel(ctx, o) {
 
   return {
     tabHeight: tabH,
-    contentTop: bodyY + PANEL.padTop,
+    contentTop: bodyY + padTop + capH,
     contentBottom: footerTop,
     footerTop,
   };

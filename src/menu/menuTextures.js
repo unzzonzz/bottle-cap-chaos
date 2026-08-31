@@ -4,6 +4,7 @@ import { ELEVATION, RADIUS, ROLE, SPACE, TYPE } from '../core/tokens.js';
 import { drawIcon } from '../ui/icons.js';
 import {
   applyTracking,
+  dialogPanel,
   fitText,
   fontSpec,
   gelButton,
@@ -742,6 +743,32 @@ export function menuPlateTexture(label, state, { width = 256, height = 52, scale
 
 
 /**
+ * 화면 하나의 바탕 — 제목 탭 · 몸통 · 푸터 구분선.
+ *
+ * 그림은 전부 `glass.dialogPanel` 이 그리고 여기는 캔버스와 텍스처만 만든다.
+ * 나누는 이유는 `ui/ModalLayer` 도 같은 골격을 2D 캔버스에 직접 그리기 때문이다 —
+ * 골격이 두 벌이 되면 두 화면이 다른 모양으로 갈라진다.
+ *
+ * 크기는 `menu/panelLayout.solvePanel` 이 푼 것을 그대로 받는다. 여기서 다시
+ * 계산하지 않는 것은, 메시를 놓는 쪽과 그리는 쪽이 같은 수를 따로 구하면
+ * 반드시 어긋나기 때문이다.
+ */
+export function panelTexture(o) {
+  const {
+    w, h, tabHeight = 0, title = '', caption = '',
+    footerHeight = 0, padTop = 0, padX = 0, scale = 1,
+  } = o;
+  const texH = tabHeight + h;
+  const { canvas, ctx } = makeCanvas(Math.round(w * scale), Math.round(texH * scale));
+  ctx.scale(scale, scale);
+  dialogPanel(ctx, { w, h, title, caption, tabHeight, footerHeight, padTop, padX });
+  const tex = toTexture(canvas);
+  tex.userData = { width: w, height: texH };
+  return tex;
+}
+
+
+/**
  * 한 줄에 안 들어가는 제목을 최대 `maxRows` 줄로 접는다.
  *
  * 단어 경계에서만 접는다 — 한 단어를 잘라 넘기면 그건 접은 것이 아니라 부순 것이다.
@@ -833,19 +860,30 @@ export function iconPlateTexture(icon, state = 'idle', { size = 64, scale = 1 } 
  * 있으므로 두 줄 다 `ui.text` 로 돌아간다 — 이 함수의 옛 주석이 PHASE 6 에서
  * 그렇게 될 것이라고 적어 둔 그대로다.
  */
-export function titleTexture(text, sub, { width = 256, height = 80, scale = 1 } = {}) {
+export function titleTexture(text, sub, { width = 256, height = 80, scale = 1, plate = true } = {}) {
   const { canvas, ctx } = makeCanvas(Math.round(width * scale), Math.round(height * scale));
   ctx.scale(scale, scale);
 
-  glassPanel(ctx, {
-    x: 0,
-    y: 0,
-    w: width,
-    h: height,
-    radius: RADIUS.panel,
-    accent: PALETTE.accent.cyan,
-    elevation: ELEVATION.raised,
-  });
+  /**
+   * 판은 선택이다.
+   *
+   * 이것이 화면 전체에 홀로 떠 있는 제목일 때는 판이 있어야 한다 — 배경이
+   * 하늘이라 글자만으로는 대비가 모자란다. 부록 B 의 패널 **안**에 들어가는
+   * 읽기 전용 줄일 때는 없어야 한다: 떠 보이는 둥근 판은 그 자체로 누를 수
+   * 있다는 말이고, 누를 수 없는 것에 그 말을 붙이는 것이 부록 B 가 없애려는
+   * 바로 그 혼동이다.
+   */
+  if (plate) {
+    glassPanel(ctx, {
+      x: 0,
+      y: 0,
+      w: width,
+      h: height,
+      radius: RADIUS.panel,
+      accent: PALETTE.accent.cyan,
+      elevation: ELEVATION.raised,
+    });
+  }
 
   /**
    * 머리글은 줄이기 전에 **접는다**.

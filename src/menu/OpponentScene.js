@@ -1,12 +1,12 @@
 import { Group, Mesh, PlaneGeometry, Raycaster, Vector2 } from 'three';
 import { buildCapGeometry, CAP_DEFAULTS, CAP_GROUP } from '../cap/capGeometry.js';
 import { createSpriteMaterial } from './menuMaterials.js';
-import { menuPlateTexture, titleTexture } from './menuTextures.js';
+import { menuPlateTexture, panelTexture } from './menuTextures.js';
 import { MarkTextures } from '../marks/markTextures.js';
 import { PLAYER_COLORS } from '../render/playerColors.js';
 import { PALETTE } from '../core/palette.js';
-import { FRAME } from '../core/frame.js';
-import { PLATE_TEXEL_SCALE, solveColumn } from './columnLayout.js';
+import { ROLE } from '../core/tokens.js';
+import { solvePanel } from './panelLayout.js';
 
 /**
  * 상대 선택 — two caps facing each other, and who is behind the far one.
@@ -40,44 +40,50 @@ import { PLATE_TEXEL_SCALE, solveColumn } from './columnLayout.js';
  */
 
 /**
- * Frame pixels. The whole layout, in one place, as `SettingsScene` does it.
+ * 이 화면만의 크기. 나머지는 `menu/panelLayout.solvePanel` 이 푼다.
  *
- * ── every plate is 256x52, and that is not laziness ────────────────────────
- * `menuPlateTexture` authors against a 256-wide plate and scales everything —
- * type included — by `width / 256`. So a 120-wide plate does not get a smaller
- * BOX with the same label in it, it gets an 11px font. Measured on the first
- * pass: 시작 and 메뉴로 were built at 168 and 120 and came out with type half the
- * size of the rows above them, reading as a different and broken control.
+ * ── 부록 B: 고르는 것과 하는 것을 갈랐다 ────────────────────────────────────
+ * 조사표가 이 화면에 대해 적은 것은 두 가지다. 하나, `시작` 이 열 안에 있어서
+ * 세 선택지와 같은 판·같은 크기로 보인다 — 그러니 넷 중 하나를 고르는 화면으로
+ * 읽힌다. 둘, 선택은 `▶` 라는 **글자 하나**로만 표시된다.
  *
- * One size is also what "기존 UI 스타일 그대로" means here — it is the size every
- * other row in this menu is, and matching it costs nothing.
- */
-/**
- * ── the column was RE-CENTRED for the third choice, not extended ───────────
- * These `y` values are absolute hand-placed pixels, so adding 온라인 at the
- * existing pitch of 58 would have put 메뉴로 at −248 — past the −240 half-height
- * of the 480-tall frame, i.e. off the bottom of the screen. Appending a row to a
- * hand-placed column is exactly the edit that looks free and is not.
- *
- * So everything moved up together and the caps and title came with it. The
- * wider gap that used to sit before 시작 is gone as part of that: three choices
- * already read as a group by being three, and the space it bought is the space
- * the third row needed. 메뉴로 now sits at −212, whose plate bottom is −238.
+ * 지금은 셋만 열에 남고, `시작` 은 푸터 오른쪽의 COMMIT, `메뉴로` 는 푸터
+ * 왼쪽의 RETREAT 다. 선택은 링(`roleButton` 의 `selected`)이 말한다 — 글자가
+ * 아니라 판의 상태이므로, 라벨을 다시 짜지 않아도 어느 것이 골라졌는지 보인다.
  */
 const L = {
-  /** 카드 두 장이 마주 보는 줄. 판 높이의 배수로 잡는다. */
-  capRow: 100,
-  /** How far out from the middle each cap sits, as a share of the frame width. */
-  capXShare: 0.19,
-  /** Cap width in frame pixels. The two are the same — it is a match. */
-  capWidth: 72,
-  titleHeight: 72,
+  /** 뚜껑 두 장이 마주 보는 줄. 열의 슬롯 하나로 참여한다. */
+  capRow: 104,
+  /**
+   * 가운데에서 얼마나 벌어지는가. **뚜껑 지름**에 대한 비율이다.
+   *
+   * 프레임 폭의 0.19 였다. 그러면 뚜껑 크기와 벌어짐이 서로 모르는 값이 되고,
+   * 좁은 패널에서 둘이 서로를 파고들었다 — 212 폭 패널에서 지름 83 짜리 두 장이
+   * ±40 에 놓였다.
+   */
+  capXShare: 0.85,
+  /**
+   * 뚜껑 지름, 프레임 픽셀. 둘은 같다 — 대결이니까.
+   *
+   * 72 였고, 그건 256 폭 열에 맞춘 값이다. 패널이 448 이 되면서 같은 72 가
+   * 버튼 옆에서 작아 보였다 — 화면의 주인공이 두 뚜껑인데 버튼보다 작으면
+   * 그렇게 읽히지 않는다.
+   *
+   * 한 번 104 까지 올렸다가 되돌렸다. 뚜껑은 프레임 한가운데보다 위에 있고,
+   * 원근 투영에서 축을 벗어난 원은 중심에서 멀어지는 방향으로 늘어난다 —
+   * 커질수록 그 왜곡이 같이 커져서 뚜껑이 세로로 긴 덩어리로 보였다.
+   */
+  capWidth: 88,
+  /** 열에 남는 것. 고르는 것만이다. */
   rows: [
     { id: 'human' },
     { id: 'ai' },
     { id: 'online' },
-    { id: 'start' },
-    { id: 'back' },
+  ],
+  /** 푸터. 부록 B2.2-1 — RETREAT 왼쪽, COMMIT 오른쪽. */
+  footer: [
+    { id: 'back', role: ROLE.RETREAT, side: -1 },
+    { id: 'start', role: ROLE.COMMIT, side: 1 },
   ],
 };
 
@@ -115,11 +121,16 @@ export class OpponentScene {
     this.choice = 'human';
 
     this._modeName = modeName ?? '';
-    this.title = new Mesh(
+    /**
+     * 화면의 바탕. 모든 줄보다 뒤에 그려진다 — `SettingsScene` 의 같은 줄에
+     * `renderOrder` 로 정하는 이유가 적혀 있다.
+     */
+    this.panel = new Mesh(
       new PlaneGeometry(1, 1),
       createSpriteMaterial(retro, { map: null }),
     );
-    this.root.add(this.title);
+    this.panel.renderOrder = -1;
+    this.root.add(this.panel);
 
     /**
      * The marks, baked per player exactly as the board bakes them.
@@ -179,6 +190,8 @@ export class OpponentScene {
 
     /** @type {{id: string, mesh: Mesh, maps: object, label: string|null}[]} */
     this.items = L.rows.map((row) => this._plate(row.id));
+    /** @type {{id: string, role: string, side: number, mesh: Mesh, maps: object}[]} */
+    this.footer = L.footer.map((row) => ({ ...this._plate(row.id), ...row }));
     this.layout(u);
 
     this._ray = new Raycaster();
@@ -196,6 +209,11 @@ export class OpponentScene {
     return { id, mesh, maps: { idle: null, hover: null }, label: null, size: null };
   }
 
+  /** 열과 푸터를 한 줄로. 여덟 군데가 두 배열을 이어 붙이고 있었다. */
+  get _all() {
+    return [...this.items, ...this.footer];
+  }
+
   /**
    * 제목 · 뚜껑 두 개 · 다섯 줄을 하나의 열로 쌓는다.
    *
@@ -207,22 +225,28 @@ export class OpponentScene {
     const u = unitsPerPixel ?? this._u;
     this._u = u;
 
-    const box = solveColumn([
-      { id: '#title', h: L.titleHeight },
-      { id: '#caps', h: L.capRow },
-      ...L.rows.map((r) => ({ id: r.id })),
-    ]);
+    const box = solvePanel({
+      title: true,
+      caption: !!this._modeName,
+      rows: [{ id: '#caps', h: L.capRow }, ...L.rows.map((r) => ({ id: r.id }))],
+      footer: L.footer.length,
+    });
     this._box = box;
     const at = (id) => box.rows.find((r) => r.id === id);
 
-    const title = at('#title');
-    this.title.scale.set(box.plate.width * u, title.h * u, 1);
-    this.title.position.set(0, title.y * u, 0);
-    this._titleHeight = title.h;
+    this.panel.scale.set(box.panel.w * u, box.panel.texH * u, 1);
+    this.panel.position.set(0, 0, 0);
 
     const caps = at('#caps');
-    const capWidth = Math.min(L.capWidth * box.k, caps.h * 0.72);
-    const capX = FRAME.width * L.capXShare;
+    /**
+     * 뚜껑은 **내용 폭**과 줄 높이 둘 다에 갇힌다.
+     *
+     * 예전에는 프레임 폭을 봤고, 그때는 열이 화면 전체를 쓰는 화면이었으므로
+     * 맞았다. 이제 뚜껑은 패널 안에 있으므로 패널이 좁아지면 같이 좁아져야
+     * 한다 — 안 그러면 두 장이 서로를, 혹은 패널의 옆벽을 파고든다.
+     */
+    const capWidth = Math.min(L.capWidth, box.plate.width * 0.28, caps.h * 0.8);
+    const capX = capWidth * L.capXShare;
     const perCapUnit = (capWidth / (this._capRadius * 2)) * u;
     this.caps.forEach((pivot, player) => {
       pivot.position.set((player === 0 ? -capX : capX) * u, caps.y * u, 0);
@@ -231,20 +255,34 @@ export class OpponentScene {
 
     for (const item of this.items) {
       const row = at(item.id);
-      item.size = { width: box.plate.width, height: row.h, scale: PLATE_TEXEL_SCALE };
+      item.size = { width: box.plate.width, height: row.h, scale: box.scale };
       item.mesh.scale.set(box.plate.width * u, row.h * u, 1);
       item.mesh.position.set(0, row.y * u, 0);
     }
 
-    const key = `${box.plate.width}x${box.plate.height}`;
-    if (key !== this._plateKey) {
-      this._plateKey = key;
-      for (const item of this.items) item.label = null;
-      const old = this.title.material.uniforms.uMap.value;
-      this.title.material.uniforms.uMap.value = titleTexture('상대 선택', this._modeName, {
-        width: box.plate.width,
-        height: this._titleHeight,
-        scale: PLATE_TEXEL_SCALE,
+    const fb = box.footer.button;
+    for (const item of this.footer) {
+      item.size = { width: fb.w, height: fb.h, scale: box.scale };
+      item.mesh.scale.set(fb.w * u, fb.h * u, 1);
+      const x = item.side < 0 ? box.footer.left : box.footer.right;
+      item.mesh.position.set(x * u, box.footer.y * u, 0);
+    }
+
+    const key = `${box.panel.w}x${box.panel.texH}`;
+    if (key !== this._panelKey) {
+      this._panelKey = key;
+      for (const item of this._all) item.label = null;
+      const old = this.panel.material.uniforms.uMap.value;
+      this.panel.material.uniforms.uMap.value = panelTexture({
+        w: box.panel.w,
+        h: box.panel.h,
+        tabHeight: box.panel.tabHeight,
+        title: '상대 선택',
+        caption: this._modeName,
+        footerHeight: box.footer.height,
+        padTop: box.pad.top,
+        padX: box.pad.x,
+        scale: box.scale,
       });
       old?.dispose();
     }
@@ -257,10 +295,9 @@ export class OpponentScene {
    * is decided and the selection marker cannot go stale against it.
    */
   _labelFor(id) {
-    const pick = (on, text) => `${on ? '▶ ' : '   '}${text}`;
     switch (id) {
       case 'human':
-        return pick(this.choice === 'human', '플레이어');
+        return '플레이어';
       case 'ai':
         /**
          * Just "AI", greyed or not.
@@ -272,7 +309,7 @@ export class OpponentScene {
          * the unfinished main-menu items wear — so saying it twice was both
          * unreadable and a second vocabulary for one idea.
          */
-        return pick(this.aiAvailable && this.choice === 'ai', 'AI');
+        return 'AI';
       case 'online':
         /**
          * Never greyed. Every mode is playable online — "3개 모드 모두 지원한다"
@@ -281,7 +318,7 @@ export class OpponentScene {
          * have that problem because the network does not care what is being
          * simulated.
          */
-        return pick(this.choice === 'online', '온라인');
+        return '온라인';
       case 'start':
         return '시작';
       case 'back':
@@ -291,45 +328,48 @@ export class OpponentScene {
     }
   }
 
+  /**
+   * 판 하나를 다시 굽는다. 라벨과 **상태**가 둘 다 캐시 키다.
+   *
+   * ── 왜 라벨만으로는 부족해졌나 ──────────────────────────────────────────
+   * 예전에는 선택이 라벨 안의 `▶` 였다. 그래서 라벨이 바뀌면 선택도 바뀌었고,
+   * 라벨 하나만 비교하면 충분했다. 지금 선택은 링이고 링은 라벨에 없다 —
+   * 라벨만 비교하면 플레이어에서 AI 로 옮겨도 두 판 다 예전 그림 그대로다.
+   */
+  _bake(item) {
+    const label = this._labelFor(item.id);
+    const role = item.role ?? ROLE.CHOICE;
+    const chosen = item.id === this.choice;
+    const dead = item.id === 'ai' && !this.aiAvailable;
+    const key = `${label}|${role}|${chosen}|${dead}`;
+    if (key === item.label) return { chosen, dead };
+    item.maps.idle?.dispose();
+    item.maps.hover?.dispose();
+    item.maps.disabled?.dispose();
+    const spec = { role, selected: chosen };
+    item.maps.idle = menuPlateTexture(label, { ...spec, state: 'idle' }, item.size);
+    item.maps.hover = menuPlateTexture(label, { ...spec, state: 'hover' }, item.size);
+    // Built for every row rather than only the AI one: it costs a canvas
+    // that is never sampled on the other three, and branching here would
+    // mean `dead` and the texture set could disagree about which rows can
+    // be greyed.
+    item.maps.disabled = menuPlateTexture(label, { ...spec, state: 'disabled' }, item.size);
+    item.label = key;
+    return { chosen, dead };
+  }
+
   refresh() {
-    for (const item of this.items) {
-      const label = this._labelFor(item.id);
-      if (label !== item.label) {
-        item.maps.idle?.dispose();
-        item.maps.hover?.dispose();
-        item.maps.disabled?.dispose();
-        item.maps.idle = menuPlateTexture(label, 'idle', item.size);
-        item.maps.hover = menuPlateTexture(label, 'hover', item.size);
-        // Built for every row rather than only the AI one: it costs a canvas
-        // that is never sampled on the other three, and branching here would
-        // mean `dead` and the texture set could disagree about which rows can
-        // be greyed.
-        item.maps.disabled = menuPlateTexture(label, 'disabled', item.size);
-        item.label = label;
-      }
+    for (const item of this._all) {
+      const { chosen, dead } = this._bake(item);
       /**
-       * The SELECTED row wears the hover skin whether or not the pointer is on
-       * it.
+       * 선택된 줄은 **링**을 두른다. 밝은 스킨이 아니다.
        *
-       * There is no third plate state in this menu's vocabulary and inventing
-       * one would be designing a new control — "기존 UI 스타일 그대로". The
-       * brighter skin plus the ▶ in the label is enough to say which of two rows
-       * is chosen, and the arrow is what still reads once the quantiser has been
-       * at the two backgrounds.
+       * 예전에는 선택된 줄이 호버 스킨을 입었다. 그때는 그것 말고 표현할 방법이
+       * 없었고 — 판 상태가 idle/hover/disabled 셋뿐이었다 — 그래서 라벨에 `▶`
+       * 까지 붙여야 했다. 부록 B 가 `selected` 를 판의 상태로 만들었으므로
+       * 이제 둘 다 필요 없다. 호버 스킨은 어차피 idle 과 같은 것을 돌려준다.
        */
-      /**
-       * Compared against the choice directly rather than enumerated.
-       *
-       * This was two hard-coded `id === '...' && choice === '...'` clauses, which
-       * silently does the wrong thing the moment a third option exists: 온라인
-       * would have been selectable and never drawn as selected. The rows that
-       * are not choices — 시작, 메뉴로 — never match a choice value, so they are
-       * excluded by the comparison rather than by a list that has to be kept in
-       * step with `L.rows`.
-       */
-      const chosen = item.id === this.choice;
-      const dead = item.id === 'ai' && !this.aiAvailable;
-      const hot = !dead && (this._hovered === item.id || chosen);
+      const hot = !dead && this._hovered === item.id;
       item.mesh.material.uniforms.uMap.value = dead
         ? item.maps.disabled
         : hot
@@ -350,7 +390,7 @@ export class OpponentScene {
     );
     this._ray.setFromCamera(this._ndc, camera);
     this.root.updateMatrixWorld(true);
-    for (const item of this.items) {
+    for (const item of this._all) {
       if (this._ray.intersectObject(item.mesh, false).length) return { id: item.id };
     }
     return null;
@@ -395,7 +435,7 @@ export class OpponentScene {
   update() {}
 
   dispose() {
-    for (const item of this.items) {
+    for (const item of this._all) {
       item.mesh.geometry.dispose();
       item.mesh.material.dispose();
       item.maps.idle?.dispose();
@@ -408,9 +448,9 @@ export class OpponentScene {
       }
     }
     this._geometry.dispose();
-    this.title.geometry.dispose();
-    this.title.material.uniforms.uMap.value.dispose();
-    this.title.material.dispose();
+    this.panel.geometry.dispose();
+    this.panel.material.uniforms.uMap.value?.dispose();
+    this.panel.material.dispose();
     this.root.clear();
   }
 }
