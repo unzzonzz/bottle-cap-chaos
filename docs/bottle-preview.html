@@ -11,6 +11,7 @@
   }
   #ui label { display: block; }
   #ui input { width: 180px; vertical-align: middle; }
+  #ui .bad { color: #b8231f; font-weight: 700; }
 </style>
 <div id="ui">
   <label>lean Z <input id="lz" type="range" min="-40" max="40" step="1" value="8" /> <b id="lzv">8</b>°</label>
@@ -18,6 +19,7 @@
   <label>fill <input id="fill" type="range" min="40" max="185" step="1" value="150" /> <b id="fillv">150</b></label>
   <label>shake <input id="sh" type="range" min="0" max="1" step="0.01" value="0" /> <b id="shv">0</b></label>
   <label><input id="wire" type="checkbox" /> wireframe</label>
+  <label>넘침 <b id="over">0.000</b> mm <span id="overmax">(최대 0.000)</span></label>
 </div>
 <script type="module">
   import * as THREE from 'three';
@@ -107,6 +109,40 @@
   addEventListener('resize', fit);
   fit();
 
+  /**
+   * 액체가 유리를 뚫었는가. 밀리미터로, 매 프레임.
+   *
+   * ── 왜 눈이 아니라 숫자여야 하는가 ──────────────────────────────────────
+   * 이 결함은 세 번 나왔다. 처음에는 반지름을 높이에 따라 풀지 않아서, 두 번째는
+   * 어깨에서 고정점 반복이 발산해서, 세 번째는 출렁임이 y 를 옮긴 뒤 반지름을
+   * 다시 자르지 않아서다. 셋 다 **정지 상태에서는 보이지 않았다** — 앞의 둘은
+   * 특정 기울기·채움에서만, 마지막 것은 흔드는 동안에만 나온다. 그러니 눈으로
+   * 훑어서는 없다고 말할 수 없다.
+   *
+   * 정점 하나하나를 자기 높이에서의 벽과 비교한다. 벽은 `envelopeAt` 이고, 그건
+   * 유리 래스가 실제로 쓰는 프로파일 행을 선형 보간한 값이다 — 이상적인 곡선이
+   * 아니라 **그려지는 유리**와 비교한다는 뜻이다.
+   */
+  const overEl = document.getElementById('over');
+  const overMaxEl = document.getElementById('overmax');
+  let overMax = 0;
+  function measureOverflow() {
+    const base = bottle._surfaceBase;
+    if (!base) return 0;
+    const attr = base.attr;
+    const inset = bottle.profile.params.liquidInset;
+    let over = 0;
+    for (let i = 0; i < attr.count; i++) {
+      const x = attr.getX(i);
+      const y = attr.getY(i);
+      const z = attr.getZ(i);
+      const r = Math.hypot(x, z);
+      const wall = bottle.profile.envelopeAt(y / MM) * inset * MM;
+      if (r - wall > over) over = r - wall;
+    }
+    return over / MM;
+  }
+
   let last = performance.now();
   renderer.setAnimationLoop(() => {
     const now = performance.now();
@@ -116,5 +152,12 @@
     // 매 프레임 다시 맞춘다. 기울기와 채움을 바꾸면 경계가 달라지고, 이건 도구다.
     fit();
     renderer.render(scene, camera);
+
+    const over = measureOverflow();
+    if (over > overMax) overMax = over;
+    overEl.textContent = over.toFixed(3);
+    overEl.className = over > 0.005 ? 'bad' : '';
+    overMaxEl.textContent = `(최대 ${overMax.toFixed(3)})`;
+    overMaxEl.className = overMax > 0.005 ? 'bad' : '';
   });
 </script>

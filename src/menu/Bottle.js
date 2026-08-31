@@ -803,9 +803,22 @@ export class Bottle {
       const { r, y } = solve(kx * c + kz * sn);
       // 출렁임은 수평면 **위에** 얹힌다. 기울기와 같은 축을 돌므로, 기울어진 병에서
       // 술이 낮은 쪽으로 몰리지 아무 상관 없는 쪽으로 몰리지 않는다.
-      const yy = Math.max(floorY, Math.min(ceil, y + c * amp));
-      attr.setXYZ(base.surfaceRim + i, r * c, yy, r * sn);
-      if (wall !== undefined) attr.setXYZ(wall + i, r * c, yy, r * sn);
+      const yy = clampY(y + c * amp);
+      /**
+       * 출렁임이 y 를 옮겼으면 반지름도 **다시** 자른다.
+       *
+       * `solve` 가 (r, y) 한 쌍을 풀고 벽에 맞춰 잘라 주지만, 그 뒤에 `amp` 가
+       * y 를 위아래로 밀면 그 짝이 깨진다. 위로 밀린 쪽은 병이 좁아진 자리에
+       * 넓은 원이 놓이고, 그게 유리를 뚫는다.
+       *
+       * 정지 상태에서는 `amp` 가 0 이라 아무 일도 없다. 그래서 앞선 수정으로도
+       * 멈춰 있는 병은 멀쩡했고, 흔들리는 동안에만 아주 살짝 삐져나왔다 —
+       * 사용자가 "자꾸 아주 살짝" 이라고 한 것이 그 상태다. 실측으로 최대
+       * 0.5 mm.
+       */
+      const rr = Math.min(r, this.profile.envelopeAt(yy / MM) * inset * MM);
+      attr.setXYZ(base.surfaceRim + i, rr * c, yy, rr * sn);
+      if (wall !== undefined) attr.setXYZ(wall + i, rr * c, yy, rr * sn);
     }
     // 가운데는 기울기의 피벗이다. 수평면도 출렁임도 여기서는 0 이므로 움직이지
     // 않고, 그것이 이것을 기울기로 만든다 — 액면 전체가 위아래로 까딱이는 것이 아니라.
