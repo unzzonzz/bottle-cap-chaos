@@ -598,22 +598,66 @@ export class Bottle {
     const cols = data.foamCols;
     const stride = data.foamStride;
 
-    for (let j = 0; j < rows; j++) {
-      const y = fillY + ((topY - fillY) * j) / (rows - 1);
-      const r = this.profile.envelopeAt(y / MM) * inset * MM;
-      for (let i = 0; i <= cols; i++) {
-        const th = (i / cols) * Math.PI * 2;
-        const v = j * stride + i;
-        pos.setXYZ(v, r * Math.cos(th), y, r * Math.sin(th));
+    /**
+     * ── 거품은 **액면 위에** 앉는다. 병 바닥에 대해 수평이 아니라 ────────────
+     * 밑줄이 `y = fillY` 인 평평한 링이었다. 그건 병 축에 수직인 면이고, 액면은
+     * `_slosh` 가 중력에서 푸는 월드 수평면이다. 병이 20도 기울면 두 면이 20도
+     * 어긋나서 같은 높이에 서로 다른 각도의 경계가 **둘** 생긴다 — 한쪽은 액면
+     * 위에 떠 있고 다른 쪽은 액체에 잠긴다. 화면에서는 어깨에서 액체가 한 겹 더
+     * 삐져나온 것처럼 보였고, 실제로 사용자가 그렇게 읽었다.
+     *
+     * 밑줄을 액면의 **바로 그 정점에서** 읽는다. 같은 값을 다시 계산하지 않는
+     * 이유는 액면에 출렁임까지 얹혀 있기 때문이다 — 다시 풀면 그 항이 빠져서
+     * 흔드는 동안 실밥만 한 틈이 계속 생긴다.
+     *
+     * 머리도 같은 평면으로 기운다. 목에서는 반지름이 작아 기울기가 덜 보이지만,
+     * 밑은 기울고 위는 안 기울면 기둥이 비틀린 것으로 보인다.
+     */
+    const base = this._surfaceBase;
+    const surfAttr = base?.attr;
+    const surfRim = base?.surfaceRim;
+    const surfCols = base?.surfaceCols ?? cols;
+    const kx = this._surfKx ?? 0;
+    const kz = this._surfKz ?? 0;
+    const ceil = (this.profile.height - 2) * MM;
+    const clampY = (v) => Math.max(2 * MM, Math.min(ceil, v));
+
+    const headR = this.profile.envelopeAt(topY / MM) * inset * MM;
+
+    for (let i = 0; i <= cols; i++) {
+      const th = (i / cols) * Math.PI * 2;
+      const c = Math.cos(th);
+      const sn = Math.sin(th);
+
+      // 이 컬럼에서 액면이 어디 있는가. 없으면(액면 링이 아직 없으면) 채움 높이.
+      let footY = fillY;
+      let footR = this.profile.envelopeAt(fillY / MM) * inset * MM;
+      if (surfAttr && surfRim !== undefined) {
+        const v = surfRim + (i % surfCols);
+        const sx = surfAttr.getX(v);
+        const sz = surfAttr.getZ(v);
+        footY = surfAttr.getY(v);
+        footR = Math.hypot(sx, sz);
+      }
+
+      // 머리도 같은 평면 위. 그 컬럼에서 액면보다 낮으면 거품이 없다는 뜻이다.
+      const capY = Math.max(footY, clampY(topY + (kx * c + kz * sn) * headR));
+
+      for (let j = 0; j < rows; j++) {
+        const t = j / (rows - 1);
+        const y = footY + (capY - footY) * t;
+        // 밑줄만 액면의 반지름을 그대로 쓴다. 그래야 이음매가 없다.
+        const r = j === 0 ? footR : this.profile.envelopeAt(y / MM) * inset * MM;
+        pos.setXYZ(j * stride + i, r * c, y, r * sn);
+      }
+
+      if (i < cols) {
+        const rimY = Math.max(footY, clampY(topY + (kx * c + kz * sn) * headR));
+        pos.setXYZ(data.headRim + i, headR * c, rimY, headR * sn);
       }
     }
 
-    const headR = this.profile.envelopeAt(topY / MM) * inset * MM;
     pos.setXYZ(data.headCentre, 0, topY, 0);
-    for (let i = 0; i < cols; i++) {
-      const th = (i / cols) * Math.PI * 2;
-      pos.setXYZ(data.headRim + i, headR * Math.cos(th), topY, headR * Math.sin(th));
-    }
     pos.needsUpdate = true;
   }
 
@@ -726,6 +770,17 @@ export class Bottle {
     const level = Math.abs(upy) > 1e-3;
     const kx = level ? -this._surfUp.x / upy : 0;
     const kz = level ? -this._surfUp.z / upy : 0;
+    /**
+     * 평형면의 기울기를 남겨 둔다. 거품이 이것을 읽는다.
+     *
+     * 거품 기둥의 밑면은 액면 **위에** 앉아야 하는데, 액면은 월드에서 수평이고
+     * 거품은 병 축에 수직인 링이었다. 병이 기울면 둘이 그 각도만큼 어긋나고,
+     * 화면에서는 같은 높이에 서로 다른 각도의 면이 둘 보인다 — 한쪽은 액면 위에
+     * 떠 있고 다른 쪽은 액체에 잠긴다. 사용자가 "요소를 겹쳐서 이중으로" 라고
+     * 지적한 것이 그 상태다.
+     */
+    this._surfKx = kx;
+    this._surfKz = kz;
 
     /**
      * 액면이 유리 밖으로 나가지 않게 묶는다.
