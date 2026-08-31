@@ -427,6 +427,9 @@ export class MarksScreen {
     if (hit.kind === 'trash') {
       this.confirm.ask('이 마크를 삭제하시겠습니까?', {
         onConfirm: () => this.book.clearSlot(hit.ref),
+        // 되돌릴 수 없다. 그림은 이 슬롯에만 있다.
+        confirmLabel: '삭제',
+        destructive: true,
       });
       return true;
     }

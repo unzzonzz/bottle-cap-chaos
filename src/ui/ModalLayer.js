@@ -3,7 +3,7 @@ import { FRAME as SHARED_FRAME, frameCamera, frameScale, refitFrameCamera } from
 import { HudMaterials } from './HudMaterial.js';
 import { buttonTexture, modalTexture, slotTexture } from './hudTextures.js';
 import { PALETTE, toRgb } from '../core/palette.js';
-import { MOTION, SIZE, SPACE, TYPE } from '../core/tokens.js';
+import { MOTION, ROLE, SIZE, SPACE, TYPE } from '../core/tokens.js';
 import { approach, easeOut, overshoot } from './motion.js';
 import { FONT_FAMILY } from './fonts.js';
 
@@ -157,9 +157,22 @@ export class ModalLayer {
       title,
       body,
       accent: danger ? PALETTE.ui.danger : PALETTE.accent.cyan,
+      /**
+       * 부록 B2.2-1 — RETREAT 왼쪽, 실행 오른쪽. 순서가 곧 화면 순서다.
+       *
+       * `tone: 'hover'` 로 오른쪽을 강조하던 것은 없앴다. 그 시절에는 판 상태가
+       * idle/hover 둘뿐이라 "이쪽이 기본 답" 을 말할 방법이 그것뿐이었고,
+       * `skinFor` 가 호버를 idle 과 같은 스킨으로 접은 뒤로는 아무 말도 하지
+       * 않고 있었다. 지금은 역할이 말한다.
+       */
       buttons: [
-        { id: 'cancel', label: cancelLabel, value: false },
-        { id: 'ok', label: confirmLabel, value: true, tone: 'hover' },
+        { id: 'cancel', label: cancelLabel, value: false, role: ROLE.RETREAT },
+        {
+          id: 'ok',
+          label: confirmLabel,
+          value: true,
+          role: danger ? ROLE.DESTRUCTIVE : ROLE.COMMIT,
+        },
       ],
       fallback: false,
     });
@@ -171,7 +184,7 @@ export class ModalLayer {
       title,
       body,
       accent: PALETTE.accent.cyan,
-      buttons: [{ id: 'ok', label: okLabel, value: undefined, tone: 'hover' }],
+      buttons: [{ id: 'ok', label: okLabel, value: undefined, role: ROLE.COMMIT }],
       fallback: undefined,
     });
   }
@@ -198,13 +211,13 @@ export class ModalLayer {
       field: { initial, placeholder, maxLength },
       validate,
       buttons: [
-        { id: 'cancel', label: '취소', value: null },
+        { id: 'cancel', label: '취소', value: null, role: ROLE.RETREAT },
         // `submit` rather than a sentinel VALUE: this button runs the validator
         // and reads the field, which is a different action from "resolve with
         // this value" and deserves to say so. It replaces a magic string that
         // was also, unnoticed, carrying a NUL byte — which made the whole file
         // register as binary and invisible to grep.
-        { id: 'ok', label: confirmLabel, submit: true, tone: 'hover' },
+        { id: 'ok', label: confirmLabel, submit: true, role: ROLE.COMMIT },
       ],
       fallback: null,
     });
@@ -294,14 +307,21 @@ export class ModalLayer {
      * 네 물체로 보였다. 판이 셋을 다 담으면 그게 하나의 질문으로 읽힌다.
      */
     const fieldH = spec.field ? FIELD.height + Math.round(SPACE.md * k) : 0;
-    const extra = fieldH + drop + btnH;
+    /**
+     * 판이 자기 안에 비워 두어야 하는 두 공간이, 이제 둘로 나뉜다.
+     *
+     * `extra` 는 **내용**이고(입력 칸), `footerHeight` 는 구분선 아래의 **푸터**다.
+     * 예전에는 하나였고, 그래서 구분선을 그릴 자리를 아무도 몰랐다.
+     */
+    const footerH = padIn + btnH + drop;
 
     const tex = modalTexture({
       title: spec.title,
       body,
       width: PANEL_WIDTH,
       scale,
-      extra,
+      extra: fieldH,
+      footerHeight: footerH,
       k,
       accent: this._error ? PALETTE.ui.danger : spec.accent,
     });
@@ -360,20 +380,26 @@ export class ModalLayer {
       // — 취소, 확인 on a plain message — is always live.
       b.disabled = !!def.submit && !this._valid;
       b.baseTone = b.disabled ? 'disabled' : (def.tone ?? 'idle');
+      b.role = def.role ?? null;
       const x = -span / 2 + btnW / 2 + i * (btnW + gap);
       b.mesh.scale.set(btnW, btnH, 1);
       b.mesh.position.set(x, rowY, 1);
       b.mesh.visible = true;
       const tone = !b.disabled && this.hovered === def.id ? 'hover' : b.baseTone;
-      if (b.label !== def.label || b.tone !== tone || b.width !== btnW || b.height !== btnH) {
+      const stale =
+        b.label !== def.label || b.tone !== tone || b.width !== btnW
+        || b.height !== btnH || b.baked !== b.role;
+      if (stale) {
         b.label = def.label;
         b.tone = tone;
         b.width = btnW;
         b.height = btnH;
+        b.baked = b.role;
         b.mesh.material.uniforms.uMap.value = buttonTexture(def.label, tone, {
           width: btnW,
           height: btnH,
           scale,
+          role: b.role,
         });
       }
     });

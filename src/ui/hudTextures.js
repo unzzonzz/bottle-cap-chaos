@@ -1,14 +1,17 @@
 import { CanvasTexture, ClampToEdgeWrapping, LinearFilter, SRGBColorSpace } from 'three';
 import { darken, PALETTE, withAlpha } from '../core/palette.js';
 import { registerTextureCache } from './fonts.js';
-import { ELEVATION, RADIUS, SIZE, SPACE, TYPE } from '../core/tokens.js';
+import { ELEVATION, PANEL, RADIUS, SIZE, SPACE, TYPE } from '../core/tokens.js';
 import {
   applyTracking,
   fitText,
   focusRing,
   fontSpec,
+  dialogPanel,
   gelButton,
   glassPanel,
+  roleButton,
+  roleSkin,
   roundRectPath,
   skinFor,
 } from './glass.js';
@@ -233,10 +236,15 @@ function inkFor(color) {
  * background toward the text and cost contrast exactly when the player is
  * looking at it.
  *
- * @param {'idle'|'hover'} state
+ * ── 부록 B: 역할을 받는다 ──────────────────────────────────────────────────
+ * 없으면 예전 그대로 `gelButton` — 역할이 없던 시절의 그림이고, 이 파일이 그리는
+ * 것 중에는 아직 역할이 없는 표면도 있다. 역할이 오면 `roleButton` 이 그린다.
+ *
+ * @param {'idle'|'hover'|'pressed'} state
+ * @param {string} [o.role]  `ROLE.*`. 없으면 역할 없는 젤 버튼
  */
-export function buttonTexture(label, state, { width, height, scale = 1 }) {
-  const key = `btn:${label}:${state}:${width}x${height}@${scale}`;
+export function buttonTexture(label, state, { width, height, scale = 1, role = null }) {
+  const key = `btn:${label}:${state}:${width}x${height}@${scale}:${role ?? '-'}`;
   const hit = cache.get(key);
   if (hit) return hit;
 
@@ -257,15 +265,9 @@ export function buttonTexture(label, state, { width, height, scale = 1 }) {
    * 있는 것처럼 보인다.
    */
   const pad = 6;
-  gelButton(ctx, {
-    x: pad,
-    y: pad,
-    w: width - pad * 2,
-    h: height - pad * 2,
-    label,
-    state,
-    align: 'center',
-  });
+  const box = { x: pad, y: pad, w: width - pad * 2, h: height - pad * 2, label, state };
+  if (role) roleButton(ctx, { ...box, role, radius: RADIUS.pill });
+  else gelButton(ctx, { ...box, align: 'center' });
 
   const tex = toTexture(canvas);
   cache.set(key, tex);
@@ -294,8 +296,8 @@ export function buttonTexture(label, state, { width, height, scale = 1 }) {
  * @param {'recenter'} icon
  * @param {'idle'|'hover'} state
  */
-export function iconButtonTexture(icon, state, { size, scale = 1 }) {
-  const key = `icon:${icon}:${state}:${size}@${scale}`;
+export function iconButtonTexture(icon, state, { size, scale = 1, role = null }) {
+  const key = `icon:${icon}:${state}:${size}@${scale}:${role ?? '-'}`;
   const hit = cache.get(key);
   if (hit) return hit;
 
@@ -305,7 +307,9 @@ export function iconButtonTexture(icon, state, { size, scale = 1 }) {
 
   const pad = 6;
   const box = size - pad * 2;
-  gelButton(ctx, { x: pad, y: pad, w: box, h: box, state, radius: RADIUS.panel });
+  const frame = { x: pad, y: pad, w: box, h: box, state, radius: RADIUS.panel };
+  if (role) roleButton(ctx, { ...frame, role });
+  else gelButton(ctx, frame);
 
   /**
    * 아이콘은 `icons.js` 의 벡터다. 사각형으로 손으로 찍던 것을 대체했다.
@@ -319,7 +323,9 @@ export function iconButtonTexture(icon, state, { size, scale = 1 }) {
     x: pad + (box - inner) / 2,
     y: pad + (box - inner) / 2,
     size: inner,
-    color: skinFor(state).text,
+    // 역할이 있으면 그 스킨의 글자색. RETREAT 는 채워지지 않으므로 획이 흐린
+    // 판 위에 그대로 놓이고, 그때 `skinFor` 의 색은 대비가 다르다.
+    color: (role ? roleSkin(role, state) : skinFor(state)).text,
   });
 
   const tex = toTexture(canvas);
@@ -655,9 +661,12 @@ function wrapText(ctx, text, maxWidth) {
  * caller has to scale its quad to match or the type is resampled.
  */
 export function modalTexture(
-  { title, body, width = 320, scale = 1, accent = PALETTE.accent.cyan, extra = 0, k = 1 },
+  {
+    title, body, width = 320, scale = 1, accent = PALETTE.accent.cyan,
+    extra = 0, footerHeight = 0, k = 1,
+  },
 ) {
-  const key = `modal:${title}:${body}:${width}:${accent}:${extra}:${k}@${scale}`;
+  const key = `modal:${title}:${body}:${width}:${accent}:${extra}:${footerHeight}:${k}@${scale}`;
   const hit = cache.get(key);
   if (hit) return hit;
 
@@ -667,7 +676,6 @@ export function modalTexture(
    * 하나만 줄이면 비율이 무너진다: 여백만 줄이면 글자가 판을 꽉 채우고, 글자만
    * 줄이면 작은 글씨가 넓은 여백 안에서 헤엄친다.
    */
-  const title2 = { ...TYPE.title, size: Math.round(TYPE.title.size * k) };
   const body2 = { ...TYPE.body, size: Math.round(TYPE.body.size * k) };
   const pad = Math.round(SPACE.lg * k);
 
@@ -677,7 +685,6 @@ export function modalTexture(
   const inner = width - pad * 2;
   const lines = body ? wrapText(probe.ctx, body, inner) : [];
 
-  const titleH = title ? title2.size + Math.round(SPACE.sm * k) : 0;
   const lineH = body2.size + Math.round(SPACE.xs * k);
   /**
    * `extra` 는 판이 **자기 안에** 비워 두어야 하는 아래쪽 공간이다.
@@ -686,7 +693,26 @@ export function modalTexture(
    * 어두운 스크림 위에서 판 하나 · 홈 하나 · 버튼 두 개가 서로 관계없이 흩어져
    * 보였다. 한 장의 카드 안에 들어가면 그게 하나의 질문이 된다.
    */
-  const frameH = Math.round(pad * 2 + titleH + lines.length * lineH + extra);
+  /**
+   * 부록 B 의 골격. 제목은 **탭**이고 버튼 줄 위에는 **구분선**이 있다.
+   *
+   * 예전에는 제목이 판 안의 첫 줄이었고, 그러면 그것은 이름이 아니라 첫 번째
+   * 내용이다. 버튼 줄과 본문 사이에는 아무 경계도 없어서, 판 하나에 글 두 줄과
+   * 버튼 두 개가 같은 무게로 들어 있었다.
+   *
+   * 그림은 `glass.dialogPanel` 이 그린다 — 메뉴 네 화면이 쓰는 바로 그 함수다.
+   * 골격이 두 벌이 되면 두 화면이 다른 모양으로 갈라진다.
+   */
+  const tabH = title ? Math.round(PANEL.titleTabHeight * k) : 0;
+  /**
+   * 본문과 구분선 사이의 숨. 없으면 선이 마지막 줄의 디센더를 지나간다.
+   *
+   * `dialogPanel` 은 푸터를 판 **아래에서** 재므로, 내용의 끝과 구분선이 정확히
+   * 같은 y 가 된다 — 위쪽 여백(`pad`)만 있고 아래쪽 여백이 없었다는 뜻이다.
+   */
+  const bodyGap = Math.round(SPACE.md * k);
+  const bodyH = Math.round(pad + lines.length * lineH + extra + bodyGap + footerHeight);
+  const frameH = tabH + bodyH;
 
   const w = Math.round(width * scale);
   const h = Math.round(frameH * scale);
@@ -703,31 +729,18 @@ export function modalTexture(
    * `ELEVATION.modal` 은 이 화면에서 가장 높이 뜨는 것이다 — 모달은 뒤의 모든 것을
    * 막고 있으므로, 그림자도 그만큼 깊어야 뒤에 무언가가 있다는 것이 읽힌다.
    */
-  glassPanel(ctx, {
-    x: 0,
-    y: 0,
+  const geom = dialogPanel(ctx, {
     w: width,
-    h: frameH,
-    radius: RADIUS.panel,
+    h: bodyH,
+    title,
+    tabHeight: tabH,
+    footerHeight,
+    padTop: pad,
+    padX: pad,
     accent,
-    alpha: 1,
-    elevation: ELEVATION.modal,
   });
 
-  let y = pad + title2.size * 0.82;
-  if (title) {
-    applyTracking(ctx, title2.tracking);
-    drawText(ctx, {
-      text: title,
-      x: width / 2,
-      y,
-      font: fontSpec(title2),
-      color: PALETTE.ui.text,
-      align: 'center',
-    });
-    applyTracking(ctx, 0);
-    y += titleH;
-  }
+  let y = geom.contentTop + body2.size * 0.82;
   applyTracking(ctx, body2.tracking);
   for (const line of lines) {
     drawText(ctx, {

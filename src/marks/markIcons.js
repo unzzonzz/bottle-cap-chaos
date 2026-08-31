@@ -226,8 +226,8 @@ export function badgeTexture(player, on, { width = 30, height = 20 } = {}) {
  * this helper is deliberately not general: one line, centred, no wrapping. A
  * question that does not fit is a question that should be shorter.
  */
-export function messageTexture(text, { width = 300, height = 44, tone = 'idle' } = {}) {
-  const key = `msg:${text}:${width}x${height}:${tone}`;
+export function messageTexture(text, { width = 300, height = 44, tone = 'idle', plate = true } = {}) {
+  const key = `msg:${text}:${width}x${height}:${tone}:${plate}`;
   const hit = cache.get(key);
   if (hit) return hit;
 
@@ -237,15 +237,22 @@ export function messageTexture(text, { width = 300, height = 44, tone = 'idle' }
   const ctx = canvas.getContext('2d');
   ctx.imageSmoothingEnabled = true;
 
-  glassPanel(ctx, {
-    x: 0,
-    y: 0,
-    w: width,
-    h: height,
-    radius: RADIUS.panel,
-    accent: tone === 'disabled' ? PALETTE.ui.danger : PALETTE.accent.cyan,
-    alpha: 1,
-  });
+  /**
+   * 판은 선택이다. `menuTextures.titleTexture` 의 같은 옵션과 같은 이유다 —
+   * 부록 B 의 패널 **안**에 들어가는 문장에 떠 보이는 둥근 판을 두르면, 누를
+   * 수 없는 것이 누를 수 있다고 말하게 된다.
+   */
+  if (plate) {
+    glassPanel(ctx, {
+      x: 0,
+      y: 0,
+      w: width,
+      h: height,
+      radius: RADIUS.panel,
+      accent: tone === 'disabled' ? PALETTE.ui.danger : PALETTE.accent.cyan,
+      alpha: 1,
+    });
+  }
 
   const probe = document.createElement('canvas').getContext('2d');
   const fitted = fitText(probe, text, TYPE.label, width - SPACE.lg * 2);

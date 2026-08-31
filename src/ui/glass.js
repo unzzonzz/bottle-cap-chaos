@@ -757,8 +757,8 @@ export function dialogPanel(ctx, o) {
     ctx.strokeStyle = withAlpha(PALETTE.ui.edge, 0.9);
     ctx.lineWidth = PANEL.dividerWeight;
     ctx.beginPath();
-    ctx.moveTo(PANEL.padX, footerTop + 0.5);
-    ctx.lineTo(w - PANEL.padX, footerTop + 0.5);
+    ctx.moveTo(padX, footerTop + 0.5);
+    ctx.lineTo(w - padX, footerTop + 0.5);
     ctx.stroke();
     ctx.restore();
   }

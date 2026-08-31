@@ -1,7 +1,7 @@
 import { Mesh, PlaneGeometry, Raycaster, Scene, Vector2 } from 'three';
 import { FRAME, frameCamera, refitFrameCamera } from '../core/frame.js';
 import { CARD_ASPECT, cardScale, handExposure } from '../render/CardHand.js';
-import { easeInOut } from './motion.js';
+import { controlScale, controlState, easeInOut, stepControl } from './motion.js';
 import { MATCH_STATE } from '../game/Match.js';
 import { scoreboardFor } from '../game/modes.js';
 import { PLAYER_COLORS } from '../render/playerColors.js';
@@ -13,7 +13,7 @@ import {
   turnPlateTexture,
 } from './hudTextures.js';
 import { PALETTE } from '../core/palette.js';
-import { SIZE, SPACE } from '../core/tokens.js';
+import { ROLE, SIZE, SPACE } from '../core/tokens.js';
 
 /**
  * The readouts, as meshes.
@@ -280,8 +280,8 @@ export class HudLayer {
      * and a press that lands on it must fall through to whatever is underneath.
      */
     this._hits = [
-      { id: 'exit', mesh: this._hitQuad(), plate: this.exit },
-      { id: 'recenter', mesh: this._hitQuad(), plate: this.recenter },
+      { id: 'exit', mesh: this._hitQuad(), plate: this.exit, motion: controlState() },
+      { id: 'recenter', mesh: this._hitQuad(), plate: this.recenter, motion: controlState() },
     ];
 
     this._ray = new Raycaster();
@@ -510,32 +510,53 @@ export class HudLayer {
      * 비율이 이긴다. 텍스처는 이 폭으로 구워지므로 글자가 리샘플되지 않는다.
      */
     this._scoreWidth = Math.min(SCORE.width, frameW * 0.55);
-    // 턴 플레이트는 오른쪽 컨트롤 무리에 닿기 전에서 멈춘다.
-    const controlsLeft = halfW - edgeRight - ICON * 2 - ICON_GAP;
+    /**
+     * 턴 플레이트가 쓸 수 있는 폭. 양쪽 컨트롤 사이다.
+     *
+     * 오른쪽은 리센터 하나, 왼쪽은 나가기 하나. 예전에는 둘 다 오른쪽에 있었고
+     * 왼쪽은 프레임 가장자리였다.
+     */
+    const controlsLeft = halfW - edgeRight - ICON - ICON_GAP;
+    const turnLeft = -halfW + edgeLeft + ICON + ICON_GAP;
     this._turnMax = Math.max(
       TURN.height * 2,
-      Math.min(TURN.width, controlsLeft - (-halfW + edgeLeft) - SPACE.md),
+      Math.min(TURN.width, controlsLeft - turnLeft - SPACE.md),
     );
 
-    // 아래 줄 오른쪽 끝: 나가기, 그 왼쪽에 리센터.
-    const right = halfW - edgeRight - ICON / 2 + ui.exitOffsetX;
+    /**
+     * 나가기는 HUD 의 **왼쪽 끝**이다. 부록 B1.3 — 물러나는 것은 왼쪽이다.
+     *
+     * 예전에는 리센터와 나란히 오른쪽 끝에 붙어 있었다. 그 모서리는 "지금 이
+     * 화면에서 할 수 있는 일" 의 자리이고, 나가기는 그 중 하나가 아니라 화면을
+     * 떠나는 것이다. 둘이 같은 모서리에서 같은 크기·같은 스킨으로 붙어 있으면
+     * 그 차이가 어디에도 없다 — 조사표가 두 화면에서 같은 지적을 했다.
+     *
+     * ── 점수판 줄이 아니라 이 줄인 이유 ────────────────────────────────────
+     * 처음에는 점수판 줄의 왼쪽 끝에 두었다. 실제로 겹쳤다: 점수판은 최소 줌에서만
+     * 나타나므로 대부분의 시간 동안 아래 줄이 **위로 미끄러져 올라와** 점수판
+     * 자리를 쓰고, 그 줄의 왼쪽 끝에는 턴 플레이트가 있다.
+     *
+     * 그래서 같은 줄의 왼쪽 끝을 나가기가 가져가고, 턴 플레이트가 그만큼 오른쪽에서
+     * 시작한다. 줄이 하나뿐이라면 그 줄의 왼쪽이 화면의 왼쪽이다.
+     */
+    const left = -halfW + edgeLeft + ICON / 2 + ui.exitOffsetX;
     this.exit.scale.set(ICON, ICON, 1);
-    this.exit.position.set(right, rowTwoY + ui.exitOffsetY, 0);
+    this.exit.position.set(left, rowTwoY + ui.exitOffsetY, 0);
 
     /**
-     * 카메라 리셋. 나가기 바로 왼쪽, 같은 줄.
+     * 카메라 리셋. 아래 줄 오른쪽 끝.
      *
-     * "나가기 버튼 근처. 겹치지 않게." 아래가 아니라 옆인 이유는, 아래에 두면
-     * 정사각 아이콘이 판 두 개 아래 매달려 세 번째 고장난 버튼처럼 읽히기
-     * 때문이다. 옆에 두면 사람이 이미 컨트롤을 찾는 모서리 무리에 함께 있게 되고,
-     * 카드 팬은 중앙에 모여 있어 여기까지 오지 않는다.
+     * 도구다 — 지금 화면을 다시 잡아 주는 것이지 화면을 떠나는 것이 아니다.
+     * 그래서 나가기가 왼쪽 위로 간 뒤에도 여기 남는다: 사람이 컨트롤을 찾는
+     * 모서리이고, 카드 팬은 중앙에 모여 있어 여기까지 오지 않는다.
      */
+    const right = halfW - edgeRight - ICON / 2;
     this.recenter.scale.set(ICON, ICON, 1);
-    this.recenter.position.set(right - ICON - ICON_GAP, rowTwoY + ui.exitOffsetY, 0);
+    this.recenter.position.set(right, rowTwoY, 0);
 
-    // 아래 줄 왼쪽.
+    // 아래 줄 왼쪽 — 나가기 다음이다.
     this.turn.scale.set(Math.min(TURN.width, this._turnMax ?? TURN.width), TURN.height, 1);
-    this.turn.position.set(-halfW + edgeLeft + TURN.width / 2, rowTwoY, 0);
+    this.turn.position.set(turnLeft + TURN.width / 2, rowTwoY, 0);
     /**
      * The plate's LEFT edge, kept because the plate is no longer a fixed width.
      *
@@ -544,7 +565,7 @@ export class HudLayer {
      * screen. `_updateTurn` re-centres it against this every time the width
      * changes.
      */
-    this._turnLeft = -halfW + edgeLeft;
+    this._turnLeft = turnLeft;
 
     // Directly under the turn plate, the same width, so the clock reads as
     // belonging to the name above it rather than as a separate instrument.
@@ -556,7 +577,14 @@ export class HudLayer {
 
     for (const h of this._hits) {
       const pad = Math.max(0, ui.hitMargin);
-      h.mesh.scale.set(h.plate.scale.x + pad * 2, h.plate.scale.y + pad * 2, 1);
+      /**
+       * 판정 영역은 **저술 크기**에서 잰다. 판의 현재 배율이 아니라.
+       *
+       * 부록 B 가 되돌린 배율 피드백 때문이다 — `_updateButtons` 가 매 프레임
+       * 판을 눌린 만큼 줄이므로, 눌린 프레임에 `layout()` 이 돌면 판정 영역이
+       * 그 줄어든 크기를 물려받아 그대로 굳는다.
+       */
+      h.mesh.scale.set(ICON + pad * 2, ICON + pad * 2, 1);
       h.mesh.position.copy(h.plate.position);
     }
   }
@@ -612,7 +640,7 @@ export class HudLayer {
     this._updateScore(dt, match, gameCamera);
     this._updateTurn(match, labelFor, nameFor, outcomeFor);
     this._updateTimer(turnClock);
-    this._updateButtons();
+    this._updateButtons(dt);
 
     /**
      * Last, over the top of whatever each updater decided for itself.
@@ -855,7 +883,7 @@ export class HudLayer {
    * opacity exists. Hover brings it back to full and swaps in the brighter
    * plate.
    */
-  _updateButtons() {
+  _updateButtons(dt) {
     this.exit.userData.want = true;
     this.recenter.userData.want = true;
     const ui = this.config.ui;
@@ -892,21 +920,50 @@ export class HudLayer {
      * 남는 피드백은 흐리기다 — 줌인 상태의 `dimOpacity` 와 호버 시의 복귀. 그건
      * 상호작용의 장식이 아니라 "이 버튼이 지금 얼마나 중요한가" 라서 남긴다.
      */
+    /**
+     * 크기는 눌린 만큼 줄고 얹힌 만큼 는다. 부록 B1.2 — 경기 화면은 예외다.
+     *
+     * 메뉴 판은 아무것도 하지 않는다. 여기가 다른 이유는 `ui/motion.js` 의
+     * `controlState` 주석에 있다: 이 버튼들은 손가락으로 눌리고, 누르는 동안
+     * 손가락이 판을 가린다. 색은 손가락 밑에서 바뀌고 크기는 테두리에서 바뀐다.
+     *
+     * 히트 쿼드는 따라가지 않는다. 눌러서 작아진 버튼의 판정 영역까지 같이
+     * 작아지면, 가장자리를 누른 손가락이 누르는 순간 버튼 밖으로 나간다.
+     */
     const size = this._icon ?? SIZE.buttonIcon.w;
-    for (const mesh of [this.exit, this.recenter]) mesh.scale.set(size, size, 1);
+    for (const h of this._hits) {
+      stepControl(
+        h.motion,
+        { hovered: this.hovered === h.id, pressed: this._pressed === h.id },
+        dt,
+      );
+      const s = size * controlScale(h.motion);
+      h.plate.scale.set(s, s, 1);
+    }
 
     const key = `${this.hovered ?? '-'}|${ui.textureScale}|${size}`;
     if (key === this._buttonKey) return;
     this._buttonKey = key;
+    /**
+     * 둘 다 RETREAT 다 — 채우지 않은, 뜨지 않은 판.
+     *
+     * 부록 B: 나가기는 물러나는 것이고, 리센터는 도구다. 둘 중 어느 것도 이
+     * 화면이 권하는 행동이 아니므로 채워진 판을 줄 이유가 없다. 채워진 판은
+     * 경기 중에 딱 하나 — 카드 — 여야 하고, 그게 눈이 가야 할 곳이다.
+     *
+     * 둘을 가르는 것은 스킨이 아니라 **자리**다. 나가기는 왼쪽 위, 리센터는
+     * 오른쪽 아래. 예전처럼 같은 모서리에 나란히 두면 자리도 스킨도 같아진다.
+     */
+    const iconBox = { size: this._icon ?? SIZE.buttonIcon.w, scale: ui.textureScale, role: ROLE.RETREAT };
     this.exit.material.uniforms.uMap.value = iconButtonTexture(
       'exit',
       this.hovered === 'exit' ? 'hover' : 'idle',
-      { size: this._icon ?? SIZE.buttonIcon.w, scale: ui.textureScale },
+      iconBox,
     );
     this.recenter.material.uniforms.uMap.value = iconButtonTexture(
       'recenter',
       this.hovered === 'recenter' ? 'hover' : 'idle',
-      { size: this._icon ?? SIZE.buttonIcon.w, scale: ui.textureScale },
+      iconBox,
     );
   }
 

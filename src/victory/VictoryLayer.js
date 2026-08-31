@@ -12,8 +12,9 @@ import { ringTexture, trailTexture } from '../render/fxTextures.js';
 import { HudMaterials } from '../ui/HudMaterial.js';
 import { buttonTexture, notePlateTexture, victoryPlateTexture } from '../ui/hudTextures.js';
 import { VICTORY_STAGE, VictoryClock } from './VictoryClock.js';
+import { controlScale, controlState, stepControl } from '../ui/motion.js';
 import { PALETTE, toRgb } from '../core/palette.js';
-import { SPACE } from '../core/tokens.js';
+import { ROLE, SPACE } from '../core/tokens.js';
 
 /**
  * Who won, as a thing that happens on screen.
@@ -100,14 +101,21 @@ const NOTE_GAP = 10;
 /**
  * The buttons, in the existing UI's style and sized to their own labels.
  *
- * Not one shared width. `buttonTexture` left-aligns its label at a fixed inset,
- * exactly as the in-game buttons do, so a 재시작 padded out to the width of
- * 메뉴로 나가기 would be three glyphs adrift in a box — the plate has to be as
- * wide as what it says, which is the same conclusion `notePlateTexture` reached.
+ * Not one shared width. The plate has to be as wide as what it says, which is
+ * the same conclusion `notePlateTexture` reached — a 재시작 padded out to the
+ * width of 메뉴로 나가기 would be three glyphs adrift in a box.
+ *
+ * ── 부록 B: 좌우가 반대였다 ─────────────────────────────────────────────────
+ * 조사표가 잡아낸 두 위반 중 나머지 하나가 여기다. 재시작이 왼쪽, 나가기가
+ * 오른쪽이었다. B2.2-1 은 그 반대를 요구한다 — 물러나는 것이 왼쪽이고, 이 화면이
+ * 권하는 것은 한 판 더다.
+ *
+ * **배열 순서가 곧 화면 순서다.** `layout` 이 왼쪽부터 차례로 놓으므로, 이
+ * 규칙을 지키는 일은 두 줄을 맞바꾸는 것이다.
  */
 const BUTTONS = [
-  { id: 'restart', label: '재시작', width: 120, height: 40 },
-  { id: 'exit', label: '메뉴로 나가기', width: 192, height: 40 },
+  { id: 'exit', label: '메뉴로 나가기', width: 192, height: 40, role: ROLE.RETREAT },
+  { id: 'restart', label: '재시작', width: 120, height: 40, role: ROLE.COMMIT },
 ];
 /** Frame pixels between the two plates. */
 const BUTTON_GAP = 18;
@@ -412,7 +420,7 @@ export class VictoryLayer {
       this.scene.add(hit);
       // `aw`/`ah` 는 저술 크기(640 프레임 기준), `width`/`height` 는 실제 크기다.
       // `layout()` 이 `frameScale()` 을 곱해 후자를 채운다.
-      return { ...spec, aw: spec.width, ah: spec.height, plate, hit };
+      return { ...spec, aw: spec.width, ah: spec.height, plate, hit, motion: controlState() };
     });
 
     this._ray = new Raycaster();
@@ -862,7 +870,7 @@ export class VictoryLayer {
     this._updateCaps(dt);
     this._updateSprites();
     this._updateShake();
-    this._updateType();
+    this._updateType(dt);
     this._updateFlash();
     this._refreshTextures();
   }
@@ -1166,7 +1174,7 @@ export class VictoryLayer {
     );
   }
 
-  _updateType() {
+  _updateType(dt = 0) {
     const c = this.config.victory;
     const inUi = this.clock.atOrPast(VICTORY_STAGE.UI);
     const t = this.clock.done ? 1 : inUi ? this.clock.t : 0;
@@ -1203,6 +1211,23 @@ export class VictoryLayer {
       b.plate.material.uniforms.uOpacity.value = k;
       b.plate.visible = k > 0.004;
       b.hit.visible = c.showHitAreas && this.interactive;
+
+      /**
+       * 배율 피드백. 부록 B1.2 — 경기 화면 버튼은 유지한다.
+       *
+       * 등장 창(`k`)과는 곱해서 겹친다. 등장은 화면이 하는 일이고 배율은 손이
+       * 하는 일이므로, 둘 중 하나가 다른 하나를 덮으면 안 된다 — 올라오는 중에
+       * 눌러도 눌린 것이 보여야 한다.
+       *
+       * 히트 쿼드는 따라가지 않는다. `HudLayer` 의 같은 자리에 이유가 있다.
+       */
+      stepControl(
+        b.motion,
+        { hovered: this.hovered === b.id, pressed: this._pressed === b.id },
+        dt,
+      );
+      const s = controlScale(b.motion);
+      b.plate.scale.set(b.width * s, b.height * s, 1);
     }
   }
 
@@ -1317,7 +1342,7 @@ export class VictoryLayer {
       b.plate.material.uniforms.uMap.value = buttonTexture(
         b.label,
         this.hovered === b.id ? 'hover' : 'idle',
-        { width: b.width, height: b.height, scale },
+        { width: b.width, height: b.height, scale, role: b.role },
       );
     }
 

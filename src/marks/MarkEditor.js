@@ -786,6 +786,9 @@ export class MarkEditor {
     this.confirm.ask(
       existed ? '이 마크를 수정하시겠습니까?' : '이 마크를 저장하시겠습니까?',
       {
+        // 저장은 COMMIT 이다. 덮어쓰는 경우에도, 잃는 것은 화면 밖의 예전
+        // 그림이 아니라 방금까지 그린 것을 남기지 않는 쪽이다.
+        confirmLabel: existed ? '수정' : '저장',
         onConfirm: () => {
           this.book.setSlot(this.ref, this.canvas.toDataURL('image/png'));
           this._savedAt = this._historyAt;
@@ -807,7 +810,12 @@ export class MarkEditor {
       this.onExit();
       return;
     }
-    this.confirm.ask('저장하지 않고 나가시겠습니까?', { onConfirm: () => this.onExit() });
+    this.confirm.ask('저장하지 않고 나가시겠습니까?', {
+      onConfirm: () => this.onExit(),
+      // 그린 것이 사라진다. 이 화면에서 유일하게 되돌릴 수 없는 것이다.
+      confirmLabel: '나가기',
+      destructive: true,
+    });
   }
 
   // ── per frame ─────────────────────────────────────────────────────────────

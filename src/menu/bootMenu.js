@@ -452,8 +452,12 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
      * 창이 바뀌면 — 폰을 돌리면 — 판 크기와 간격이 둘 다 달라져야 하는데,
      * 예전에는 아무도 말해 주지 않아서 옛 프레임의 배치가 그대로 남았다. 지금은
      * 설정 화면만 `layout` 을 갖고 있으므로 선택적으로 부른다.
+     *
+     * `confirm` 도 여기 있다. 화면이 아니라 화면 위에 뜨는 것이지만, 부록 B 이후
+     * 크기를 `solvePanel` 에서 받으므로 프레임이 바뀌면 다시 풀어야 하는 것은
+     * 똑같다.
      */
-    for (const scene of [settings, opponent, online, marks, editor]) {
+    for (const scene of [settings, opponent, online, marks, editor, confirm]) {
       scene?.layout?.(u);
     }
     // The pool goes under the BOTTLE, not under the middle of the frame. It is

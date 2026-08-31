@@ -1007,8 +1007,7 @@ async function boot(canvas) {
     // one, which is where starting over belongs: after a result, not during.
     //
     // The same fade the menu's own return uses, so leaving a match looks the
-    // same however you got here. No confirmation step: the brief rules one out
-    // for now, and releasing off the button is the way back from a misplaced tap.
+    // same however you got here.
     //
     // The sound is faded on the AUDIO clock rather than from the loop, because
     // this document is thrown away 180 ms from now and a context torn down
@@ -1030,8 +1029,7 @@ async function boot(canvas) {
         leaveOnline();
         return;
       }
-      audio.fadeOutForNavigation();
-      fadeOut(() => location.assign(menuUrl()));
+      leaveLocal();
     },
     /**
      * The camera reset, and it is deliberately not a camera call.
@@ -1746,6 +1744,31 @@ async function boot(canvas) {
    * then sit through the heartbeat timeout instead of being told immediately.
    * Reported as a forfeit rather than a disconnect so they get the right message.
    */
+  /**
+   * Leave a local match on purpose.
+   *
+   * ── 부록 B: 이제 묻는다 ──────────────────────────────────────────────────
+   * 예전에는 바로 나갔고, 근거는 "브리프가 확인 단계를 배제한다. 버튼에서
+   * 손을 떼면 잘못 누른 것은 되돌릴 수 있다" 였다. 그 근거의 뒷부분은 여전히
+   * 참이지만, 손을 떼는 것은 **누르는 동안** 알아차렸을 때만 듣는다.
+   *
+   * 부록 B 는 나가기를 DESTRUCTIVE 로 못박았다. 진행 중인 경기는 저장되지 않고,
+   * 이 문서는 곧 버려진다 — 되돌릴 수 없다는 뜻이고, 되돌릴 수 없는 것은 묻는다.
+   * 온라인이 이미 그렇게 하고 있었으므로(몰수패), 다른 것은 문장뿐이다.
+   */
+  async function leaveLocal() {
+    const go = await modal.confirm({
+      title: '게임 나가기',
+      body: '진행 중인 경기는 저장되지 않습니다. 나가시겠습니까?',
+      confirmLabel: '나가기',
+      cancelLabel: '계속하기',
+      danger: true,
+    });
+    if (!go) return;
+    audio.fadeOutForNavigation();
+    fadeOut(() => location.assign(menuUrl()));
+  }
+
   async function leaveOnline() {
     const go = await modal.confirm({
       title: '게임 나가기',

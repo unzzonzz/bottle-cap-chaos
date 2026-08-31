@@ -44,12 +44,59 @@ export function approach(value, target, dt, seconds) {
 }
 
 /**
- * ── 호버·프레스 진행도를 밀던 것들이 여기 있었다 ────────────────────────────
- * `controlState` / `stepControl` / `controlScale` / `hoverPlates` 넷이 있었고,
- * 넷 다 없어졌다. 버튼이 상호작용에 반응하지 않기로 했으므로 — `glass.skinFor` 의
- * 호버 분기에 그 결정과 근거가 적혀 있다 — 밀 진행도가 없다.
+ * 컨트롤 하나의 호버·프레스 진행도.
  *
- * 남은 것은 곡선 셋과 `approach` 다. 그쪽은 여전히 쓰인다: 모달의 등장, HUD 아래
- * 줄의 미끄러짐, 메뉴 열의 호버 진행도(값을 읽는 곳은 없지만 열이 호버를 안다는
- * 사실은 남는다).
+ * ── 한 번 없앴다가 되돌린 것이다. 범위가 다르기 때문이다 ────────────────────
+ * 사용자가 "버튼이 커지거나 border 가 강조되는 효과 없애줘", "translate 도
+ * 없애줘" 라고 했고, 그래서 `controlState`/`stepControl`/`controlScale`/
+ * `hoverPlates` 넷을 지웠다. 그 지시가 가리킨 것은 **메뉴 판**이다 — 그때 화면에
+ * 있던 것이 그것이고, `glass.skinFor` 가 호버와 프레스를 idle 로 접은 것도 거기다.
+ *
+ * 부록 B 는 그 규칙의 범위를 메뉴 판으로 못박고, 경기 화면의 버튼과 카드는 v2
+ * §9.2 의 배율 피드백을 유지한다고 적었다. 경기 화면은 사정이 다르다: 마우스가
+ * 아니라 손가락으로 누르고, 누르는 순간 손가락이 버튼을 가린다. 색이 바뀌는 것은
+ * 손가락 밑에서 일어나므로 보이지 않고, 크기가 바뀌는 것은 테두리에서 일어나므로
+ * 보인다. 카드는 이미 `hoverScale`/`hoverLift` 로 그렇게 하고 있었다.
+ *
+ * 그래서 메뉴는 여전히 아무것도 하지 않고, 여기 있는 것은 경기 화면 전용이다.
+ * 호버 +4% / 프레스 −3%.
  */
+
+/** @returns {{hover: number, press: number}} */
+export function controlState() {
+  return { hover: 0, press: 0 };
+}
+
+/**
+ * 한 프레임만큼 민다.
+ *
+ * 켜지는 시간과 꺼지는 시간이 다르다. 켜지는 것은 사람의 동작에 대한 응답이라
+ * 즉시여야 하고, 꺼지는 것은 그 동작이 끝났다는 보고라 여유가 있어도 된다 —
+ * 같은 시간으로 하면 포인터가 버튼 위를 지나가기만 해도 깜빡인다.
+ */
+export function stepControl(state, { hovered = false, pressed = false }, dt) {
+  state.hover = approach(state.hover, hovered ? 1 : 0, dt, hovered ? MOTION.hover : MOTION.release);
+  state.press = approach(state.press, pressed ? 1 : 0, dt, pressed ? MOTION.press : MOTION.release);
+  return state;
+}
+
+/**
+ * 진행도를 배율로. 1 을 중심으로 위아래.
+ *
+ * 진행도에 곡선을 씌우는 것은 **읽는 쪽**이다 — `approach` 의 주석에 왜 진행도
+ * 자체는 선형이어야 하는지 적혀 있다.
+ */
+export function controlScale(state) {
+  const press = easeOut(state.press);
+  /**
+   * 눌림이 얹힘을 **덮는다**. 더하지 않는다.
+   *
+   * 처음에는 `1 + 0.04*hover - 0.03*press` 였고, 그러면 눌린 상태는 두 항이 같이
+   * 켜져 있으므로 1.01 이다 — 실측했다. 손가락에는 호버가 없어서 누르는 순간 둘이
+   * 동시에 켜지고, 결과는 1% 다. 아무도 못 본다.
+   *
+   * 눌림이 켜지는 만큼 얹힘을 끄면 누른 것은 언제나 0.97 이다. §9.2 가 두 숫자로
+   * 말하려던 것 — 가리키면 커지고 누르면 작아진다 — 이 그제서야 화면에 나온다.
+   */
+  return 1 + 0.04 * easeOut(state.hover) * (1 - press) - 0.03 * press;
+}
