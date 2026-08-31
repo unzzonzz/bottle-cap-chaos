@@ -1,7 +1,7 @@
 import { Color, Group, Mesh, PerspectiveCamera, PlaneGeometry, Scene, Vector3 } from 'three';
 import { RetroMaterials } from '../core/RetroMaterial.js';
-import { RetroPass } from '../core/RetroPass.js';
 import { DISPLAY_ASPECT, Viewport } from '../core/Viewport.js';
+import { SceneComposer } from '../core/Composer.js';
 import { BOARD_ASPECT, FRAME } from '../core/frame.js';
 import { aimedLaunchDirection, Bottle, CAP_COLOR } from './Bottle.js';
 import { PALETTE, withAlpha } from '../core/palette.js';
@@ -38,20 +38,18 @@ import { MenuAudio } from '../audio/MenuAudio.js';
  *
  * ── the render order, and why it is this one ────────────────────────────────
  *
- *     viewport.bind()                  the low-res target
- *     render(world, perspective)       floor, bottle, plates
- *     clearDepth()                     the wipe is not part of the room
- *     render(overlay, orthographic)    the cap
- *     viewport.unbind()
- *     retroPass.render(...)            one upscale, one dither, one quantiser
+ *     camera.layers.set(WORLD)         floor, bottle, liquid, fizz
+ *     composer.render()                MSAA target -> bloom -> canvas
+ *     camera.layers.set(UI)            the plates, unbloomed
+ *     clearDepth(); render(scene)
+ *     wipe.render(); modal.render()    their own overlay scenes
  *
- * That is `main.js`'s card arrangement, unchanged, for the reason `CardLayer`
- * gives at length: the dither threshold is keyed to the low-res texel grid, so
- * it is a property of the FRAMEBUFFER and not of any object in it. Anything
- * drawn into the target before the pass comes out on the same 4x4 lattice as
- * everything else. A cap composited after the pass — or worse, as a DOM element
- * over the canvas — would be the one smooth thing on the screen at the exact
- * moment the whole screen is made of it.
+ * That is `main.js`'s arrangement with one addition: here the plates are WORLD
+ * objects rather than a separate scene, so the split between what bloom touches
+ * and what it does not is done with layers instead. See `asUiLayer`.
+ *
+ * The wipe stays an overlay drawn last for the reason it always was: it has the
+ * screen while it runs, and what it hands over to is the other document.
  *
  * ── two ways out, and only one of them is a navigation ──────────────────────
  * 설정 swaps scene roots in place, so the whole four-stage run happens in one
@@ -72,6 +70,36 @@ import { MenuAudio } from '../audio/MenuAudio.js';
  *   see the note there. Absent, every call below is optional-chained and the
  *   menu is exactly what it was.
  */
+/**
+ * Which layer an object is drawn on, and therefore whether bloom touches it.
+ *
+ * ── the menu's UI lives in the WORLD scene, unlike the match page's ─────────
+ * On the match page the HUD, the cards and the victory screen are separate
+ * scenes with their own orthographic cameras, so keeping them out of the bloom
+ * chain is just a matter of rendering them afterwards. Here the plates ARE world
+ * objects: real quads in the perspective scene, sitting in front of the bottle,
+ * because that is what gives them the slight yaw and the hover shift that make
+ * them read as panels standing in a room.
+ *
+ * So the separation is done with layers instead of scenes. The world draws on
+ * layer 0 through the bloom chain, the plates draw on layer 1 straight to the
+ * canvas afterwards, and one camera serves both by having its mask flipped
+ * between the two passes.
+ *
+ * Without this the four menu plates — which are white, and therefore about as
+ * far above the bloom threshold as a surface can be — merge into one glowing
+ * block and the labels on them stop being readable. That is the exact failure
+ * §0.4 names: bloom must not bleed into UI text.
+ */
+const WORLD_LAYER = 0;
+const UI_LAYER = 1;
+
+/** Put an object and everything under it on the no-bloom layer. */
+function asUiLayer(root) {
+  root.traverse((o) => o.layers.set(UI_LAYER));
+  return root;
+}
+
 export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
   const cfg = MENU_CONFIG;
 
@@ -90,14 +118,10 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
   // Portrait, like the match page. The menu has no board to keep square, so it
   // simply takes the window's shape and the arrangement below stacks instead of
   // sitting side by side. See src/core/frame.js.
-  const viewport = new Viewport({ canvas, mode: cfg.view.renderMode, portrait: true });
-  const retroPass = new RetroPass({ resolution: viewport.resolution });
+  const viewport = new Viewport({ canvas, portrait: true });
   const retro = new RetroMaterials({ resolution: viewport.resolution });
 
-  viewport.onResize(({ resolution }) => {
-    retroPass.setResolution(resolution);
-    retro.setResolution(resolution);
-  });
+  viewport.onResize(({ resolution }) => retro.setResolution(resolution));
 
   // Same fire-and-forget as `main.js`: the menu bakes its plates into cached
   // canvas textures too, and this is what stops them being baked in the
@@ -108,6 +132,12 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
   scene.background = new Color(PALETTE.bg.skyTop);
 
   const camera = new PerspectiveCamera(cfg.camera.fov, DISPLAY_ASPECT, 1, 400);
+
+  /**
+   * The menu's own bloom chain. Same parameters as the match page's, so the two
+   * sides of the cap wipe are the same picture — see `MENU_CONFIG.view.bloom`.
+   */
+  const composer = new SceneComposer({ viewport, scene, camera, bloom: cfg.view.bloom });
 
   /**
    * The authored arrangement, kept so the portrait one can be undone.
@@ -190,7 +220,7 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
   // other is placed by a world position every frame. Parenting either would add
   // the float to it twice.
   const menuRoot = new Group();
-  menuRoot.add(floor, bottle.root, bottle.shadow, bottle.burst, items.root);
+  menuRoot.add(floor, bottle.root, bottle.shadow, bottle.burst, asUiLayer(items.root));
   scene.add(menuRoot);
 
   let settings = null;
@@ -935,7 +965,7 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
           runWipe(() => navigateTo(url));
         },
       });
-      scene.add(online.root);
+      scene.add(asUiLayer(online.root));
       current = 'online';
       return;
     }
@@ -962,7 +992,7 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
         // The mode's own answer. See `MODES.knockout.ai`.
         aiAvailable: !!MODES[pendingMode]?.ai,
       });
-      scene.add(opponent.root);
+      scene.add(asUiLayer(opponent.root));
       current = 'opponent';
       return;
     }
@@ -978,7 +1008,7 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
           modal,
         });
       }
-      scene.add(settings.root);
+      scene.add(asUiLayer(settings.root));
       current = 'settings';
       return;
     }
@@ -1003,15 +1033,15 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
       }
       // The dialog belongs to whichever screen is up: it is a child of that
       // root, so it is only drawn while that root is in the scene.
-      if (confirm) marks.root.add(confirm.root);
-      scene.add(marks.root);
+      if (confirm) marks.root.add(asUiLayer(confirm.root));
+      scene.add(asUiLayer(marks.root));
       current = 'marks';
       return;
     }
 
     if (id === 'editor') {
-      if (confirm) editor.root.add(confirm.root);
-      scene.add(editor.root);
+      if (confirm) editor.root.add(asUiLayer(confirm.root));
+      scene.add(asUiLayer(editor.root));
       current = 'editor';
       return;
     }
@@ -1028,7 +1058,7 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
     items,
     transition,
     retro,
-    retroPass,
+    composer,
     viewport,
     overlay: wipe.scene,
     onRebuild: () => bottle.rebuild(),
@@ -1115,7 +1145,6 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
   const shakeOffset = new Vector3();
 
   function tick(dt) {
-    retro.shared.uSnapAmount.value = cfg.view.vertexSnap;
 
     const state = transition.update(dt);
     const shake = Math.pow(state.shake, cfg.bottle.shakeCurve);
@@ -1184,20 +1213,44 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
   // The same console handle the match page exposes as `__cap`. The menu had
   // none, which meant every question about its camera or its frame had to be
   // answered by reading source instead of by asking the running page.
-  window.__menu = { viewport, camera, scene, cfg, items, bottle, placeCamera };
+  window.__menu = { viewport, composer, camera, scene, cfg, items, bottle, placeCamera };
 
   function render() {
     const r = viewport.renderer;
-    viewport.bind();
+
+    // 1. The world — bottle, liquid, fizz, floor — through the bloom chain.
+    //    This page is almost entirely the glossy surfaces that pass exists for.
+    camera.layers.set(WORLD_LAYER);
+    composer.render();
+
+    // 2. The plates, on top and unbloomed. See `asUiLayer`.
+    //
+    //    `scene.background` has to come off for this pass, and that is not
+    //    optional. A scene with a Colour background forces a colour clear
+    //    inside `render()` REGARDLESS of `autoClear` — three sets `forceClear`
+    //    when it paints one — so rendering the same scene a second time
+    //    repaints the sky over the bloomed world and the bottle disappears.
+    //    That is exactly what it did. The match page never hits this because
+    //    its overlays are separate scenes with no background of their own.
+    camera.layers.set(UI_LAYER);
+    const sky = scene.background;
+    scene.background = null;
+    r.autoClear = false;
+    r.clearDepth();
     r.render(scene, camera);
+    scene.background = sky;
+
+    // 3. The wipe and the modal, which own their own scenes. The wipe's cap is
+    //    a 3D object that would take bloom happily, but it carries the game's
+    //    logo at 800 frame pixels and that is type; the modal is nothing but
+    //    type.
     wipe.render(r);
-    // Last, and inside the bound target: a question has the screen while it is
-    // up, and it gets the same dither lattice and the same five bits a channel
-    // as the menu behind it. Drawn after the pass it would be the one smooth
-    // thing on the screen — which is what it was, as a DOM panel.
     modal.render(r);
-    viewport.unbind();
-    retroPass.render(r, viewport.renderTarget.texture);
+    r.autoClear = true;
+
+    // Back to the world layer, so anything that reads the camera between frames
+    // — a raycast, a projection — sees the mask it expects.
+    camera.layers.set(WORLD_LAYER);
   }
 
   function frame(now) {

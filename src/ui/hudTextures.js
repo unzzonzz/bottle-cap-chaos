@@ -1,4 +1,4 @@
-import { CanvasTexture, ClampToEdgeWrapping, NearestFilter } from 'three';
+import { CanvasTexture, ClampToEdgeWrapping, NearestFilter, SRGBColorSpace } from 'three';
 import { darken, PALETTE } from '../core/palette.js';
 import { registerTextureCache } from './fonts.js';
 
@@ -44,6 +44,7 @@ function makeCanvas(w, h) {
 
 function toTexture(canvas) {
   const tex = new CanvasTexture(canvas);
+  tex.colorSpace = SRGBColorSpace;
   tex.magFilter = NearestFilter;
   tex.minFilter = NearestFilter;
   tex.generateMipmaps = false;

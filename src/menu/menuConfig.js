@@ -264,8 +264,19 @@ export const MENU_CONFIG = {
   },
 
   view: {
-    /** The same target the game runs at, so the two sides of the wipe match. */
-    renderMode: '640x480',
-    vertexSnap: 1,
+    /**
+     * The same bloom the game runs, so the two sides of the cap wipe match.
+     *
+     * The menu is the one screen that is nothing BUT glossy surfaces — glass,
+     * liquid, bubbles, a metal cap — so it is where the threshold gets judged.
+     * If it looks right here and hazy in a match, the match's lighting is too
+     * hot rather than the bloom being wrong.
+     */
+    bloom: {
+      enabled: true,
+      threshold: 0.72,
+      strength: 0.45,
+      radius: 0.6,
+    },
   },
 };

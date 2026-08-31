@@ -1,4 +1,4 @@
-import { CanvasTexture, NearestFilter, RepeatWrapping } from 'three';
+import { CanvasTexture, NearestFilter, RepeatWrapping, SRGBColorSpace } from 'three';
 
 /**
  * The console's texture cache was 128x128 pages, and nothing in this project is
@@ -29,6 +29,18 @@ export function makeCanvasTexture(size, draw, options = {}) {
   draw(ctx, edge);
 
   const texture = new CanvasTexture(canvas);
+  /**
+   * The canvas holds sRGB values, so it has to say so.
+   *
+   * A `CanvasTexture` defaults to no colour space, which three treats as already
+   * being in the linear working space. Every one of these canvases was painted
+   * with sRGB hex literals out of the palette, so leaving the default tells the
+   * renderer that `#dcb27a` is a linear value — it converts it to sRGB on output
+   * and the whole frame comes out washed pale. This is the one line that stops
+   * that, and it only started mattering when colour management was switched on
+   * in PHASE 1.
+   */
+  texture.colorSpace = SRGBColorSpace;
   texture.magFilter = NearestFilter;
   texture.minFilter = NearestFilter; // mipmaps would reintroduce filtering
   texture.generateMipmaps = false;

@@ -105,7 +105,7 @@ export class CardMaterials {
      */
     this.shared = {
       uTargetRes: { value: new Vector2().copy(resolution) },
-      uSnapAmount: { value: 1 },
+      uSnapAmount: { value: 0 },
       uFade: { value: 1 },
     };
     this._materials = new Set();

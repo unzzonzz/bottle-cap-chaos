@@ -85,7 +85,7 @@ export class HudMaterials {
      */
     this.shared = {
       uTargetRes: { value: new Vector2().copy(resolution) },
-      uSnapAmount: { value: 1 },
+      uSnapAmount: { value: 0 },
     };
     this._materials = new Set();
   }

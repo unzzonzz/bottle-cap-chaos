@@ -1,7 +1,7 @@
 import { Color, Scene, Vector3 } from 'three';
 import { RetroMaterials } from './core/RetroMaterial.js';
-import { RetroPass } from './core/RetroPass.js';
 import { Viewport } from './core/Viewport.js';
+import { SceneComposer } from './core/Composer.js';
 import { initRapier } from './physics/rapier.js';
 import { PhysicsWorld } from './physics/PhysicsWorld.js';
 import { CONFIG, CONFIG_DEFAULTS } from './game/config.js';
@@ -241,31 +241,13 @@ async function boot(canvas) {
   // ortho cameras), but there is one unresolved rendering artefact in the bottom
   // band, so it ships OFF until that is chased down. Off, every number in the
   // pipeline is what it was before core/frame.js existed.
-  const viewport = new Viewport({ canvas, mode: CONFIG.view.renderMode, portrait: true });
-  const retroPass = new RetroPass({ resolution: viewport.resolution });
-  /**
-   * The WORLD's materials snap to the BOARD's grid, not the whole target's.
-   *
-   * These two used to be the same number and are not any more. `uTargetRes`
-   * drives the vertex snap — `vec2 grid = uTargetRes * 0.5` — and the grid a
-   * vertex must land on is the one belonging to the VIEWPORT it is rasterised
-   * into, which for the world is the board's 4:3 band. Handing it the full
-   * frame's height would quantise vertical positions on a lattice two and a half
-   * times too coarse in portrait, which is a visible wobble on every cap.
-   *
-   * `retroPass` is the opposite case: it is a fullscreen quad over the whole
-   * target, so it wants the whole target's resolution, and it keys the dither
-   * lattice off it.
-   */
-  const retro = new RetroMaterials({ resolution: viewport.boardResolution });
+  const viewport = new Viewport({ canvas, portrait: true });
+  const retro = new RetroMaterials({ resolution: viewport.resolution });
 
   const scene = new Scene();
   scene.background = new Color(PALETTE.bg.skyTop);
 
-  viewport.onResize(({ resolution }) => {
-    retroPass.setResolution(resolution);
-    retro.setResolution(viewport.boardResolution);
-  });
+  viewport.onResize(({ resolution }) => retro.setResolution(resolution));
 
   // ── the cap, measured once ───────────────────────────────────────────────
   // The collider is sized off the geometry's own userData rather than off the mm
@@ -570,6 +552,20 @@ async function boot(canvas) {
     ...zoomRangeFor(match.mode),
   });
   const preview = new TrajectoryPreview(CONFIG);
+
+  /**
+   * The world's post-processing chain.
+   *
+   * Built here rather than beside the viewport because it needs the camera, and
+   * the camera needs the arena's extents. Only the WORLD goes through it — see
+   * `core/Composer.js` for why the UI deliberately does not.
+   */
+  const composer = new SceneComposer({
+    viewport,
+    scene,
+    camera: gameCamera.camera,
+    bloom: CONFIG.view.bloom,
+  });
 
   /** The mode's fixed camera angle, if it has one. */
   function pitchFor(mode) {
@@ -1430,7 +1426,7 @@ async function boot(canvas) {
         tracker: camTracker,
         router,
         retro,
-        retroPass,
+        composer,
         viewport,
         config: CONFIG,
         preview,
@@ -2313,103 +2309,44 @@ async function boot(canvas) {
     return { x: hand.root.position.x, y: hand.root.position.y };
   }
 
-  function renderOverlays() {
+  function render() {
+    /**
+     * Two stages, and the split is the whole shape of this function.
+     *
+     * ── 1. the world, through the bloom chain ────────────────────────────
+     * `composer.render()` draws the scene into an MSAA half-float target, runs
+     * the bright-pass and the blur pyramid over it, converts to sRGB and writes
+     * the canvas. It leaves the renderer on the default framebuffer.
+     *
+     * ── 2. the overlays, straight onto that ──────────────────────────────
+     * `autoClear` off and one `clearDepth`, then each overlay scene in order.
+     * They do NOT go through the composer: bloom on UI text is unreadable UI
+     * text, and white type on a white plate is precisely what a bright-pass is
+     * looking for.
+     *
+     * ── the ORDER below is load-bearing and must not be rearranged ───────
+     * It matches `PointerRouter`'s hit-test order, which tests cards before the
+     * HUD. Draw the HUD last and you get a button that is visibly on top of a
+     * card and cannot be pressed, because the card is still winning the press.
+     * The three after them are each modal over the last: the victory screen has
+     * taken the screen, match-found is handing the screen over, and a modal
+     * question is the last thing on it. The wipes cover everything because they
+     * are the transition out.
+     */
+    composer.setCamera(gameCamera.camera);
+    composer.render();
+
     const r = viewport.renderer;
-    r.clearDepth();
     r.autoClear = false;
+    r.clearDepth();
     r.render(hud.scene, hud.camera);
     r.render(cards.scene, cards.camera);
+    victory.render(r);
+    matchFound?.render(r);
+    modal.render(r);
+    wipeOut?.render(r);
+    wipeIn?.render(r);
     r.autoClear = true;
-  }
-
-  function render() {
-    const camera = gameCamera.camera;
-
-    if (CONFIG.view.ps1) {
-      retro.shared.uSnapAmount.value = CONFIG.view.vertexSnap;
-      /**
-       * The whole frame is cleared FIRST, and that is not redundant.
-       *
-       * `renderer.render` clears for itself, but a clear obeys the scissor box —
-       * so once the board is scissored to its own band, its clear only covers
-       * that band and the bands above and below are never written at all. They
-       * then show whatever was in the target: uninitialised memory, or the
-       * previous frame smeared. That is exactly what it looked like — a giant
-       * stretched cap under the board — and it is why this clear exists.
-       *
-       * Costs one full-target clear a frame, which is the cheapest operation in
-       * the pass, and it is a no-op in landscape where the board IS the frame.
-       */
-      viewport.bindFull();
-      viewport.renderer.clear();
-
-      // The board draws into its own 4:3 band; everything laid out in frame
-      // pixels then draws over the whole frame. Both are the whole target when
-      // there are no bands, so this is the normal path, not a portrait branch.
-      viewport.bindBoard();
-      // `autoClear` off so the scene does not clear again inside the board rect
-      // — it would be harmless, but it would also undo nothing and cost a second
-      // clear. The clear above is the one that counts.
-      viewport.renderer.autoClear = false;
-      viewport.renderer.render(scene, camera);
-      viewport.renderer.autoClear = true;
-
-      viewport.bindFull();
-      renderOverlays();
-      /**
-       * The victory screen, over the finished frame and INSIDE the bound target.
-       *
-       * Over the cards as well as the HUD, because it is not competing with
-       * either — it has taken the screen. And inside the target for the reason
-       * every other overlay here is: the retro pass upscales ONE image, so the
-       * caps flying about up there get the identical dither lattice and the
-       * identical five bits a channel as the board they are flying over. Drawn
-       * after the pass — the obvious alternative — the whole sequence would be
-       * the one smooth thing on a deliberately crunchy screen.
-       *
-       * It also carries the colour-inversion flash, which is a blend against
-       * whatever is already in this target: game, HUD, cards and caps all flip
-       * together, which is the only version of a full-frame flash that does not
-       * look like a rendering fault.
-       */
-      victory.render(viewport.renderer);
-      /**
-       * The match-found sequence, over everything and inside the target.
-       *
-       * Call order IS the stacking here, and this goes last of the overlays
-       * because while it runs it has the screen — the board behind it is the
-       * board it is about to hand over to, not something it is competing with.
-       */
-      matchFound?.render(viewport.renderer);
-      // Over the sequence as well: a question is the last thing on screen.
-      modal.render(viewport.renderer);
-      // Inside the bound target, so the arriving cap gets the same dither
-      // lattice and the same five bits a channel as the pitch it is uncovering.
-      wipeOut?.render(viewport.renderer);
-      wipeIn?.render(viewport.renderer);
-      viewport.unbind();
-      retroPass.render(viewport.renderer, viewport.renderTarget.texture);
-    } else {
-      // Straight to the canvas at its native size. Snapping goes off with it —
-      // it is a consequence of the low-res framebuffer, so leaving it on while
-      // bypassing the framebuffer would quantise to a grid that is not there.
-      // The cards' own snap goes off for exactly the same reason, and is put
-      // back from the config on the next frame that runs the chain.
-      retro.shared.uSnapAmount.value = 0;
-      cards.materials.shared.uSnapAmount.value = 0;
-      hud.materials.shared.uSnapAmount.value = 0;
-      // Both of the victory screen's material sets, for the same reason: its
-      // type is on the UI's dial and its sprites are on the effects', and either
-      // left snapping would quantise to a grid that is not there.
-      victory.uiMaterials.shared.uSnapAmount.value = 0;
-      victory.fxMaterials.shared.uSnapAmount.value = 0;
-      viewport.unbind();
-      viewport.renderer.render(scene, camera);
-      renderOverlays();
-      victory.render(viewport.renderer);
-      wipeOut?.render(viewport.renderer);
-      wipeIn?.render(viewport.renderer);
-    }
   }
 
   // The panel's readouts change on turn boundaries and on rebuilds, not per

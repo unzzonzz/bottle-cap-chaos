@@ -765,9 +765,7 @@ export class VictoryLayer {
     const ui = this.config.ui;
     // The same dial the rest of the UI is on, so "텍스트만 강도를 낮춘다" is one
     // slider and not a second one that has to be kept in step with it.
-    this.uiMaterials.shared.uSnapAmount.value = ui.vertexSnap;
     // And the effects are on the effects' dial, for the same reason.
-    this.fxMaterials.shared.uSnapAmount.value = this.config.cardFx.vertexSnap;
 
     this._now += dt;
 

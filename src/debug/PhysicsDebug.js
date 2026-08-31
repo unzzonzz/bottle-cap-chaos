@@ -1,6 +1,4 @@
 import GUI from 'lil-gui';
-import { PS1_COLOR_LEVELS } from '../core/RetroPass.js';
-import { RENDER_MODES } from '../core/Viewport.js';
 import { describeCapColliders, nestingClearance } from '../physics/capCollider.js';
 import { resetConfig } from '../game/config.js';
 import { MODES, MODE_KEYS } from '../game/modes.js';
@@ -53,7 +51,7 @@ export function bootPhysicsDebug({
   tracker,
   router,
   retro,
-  retroPass,
+  composer,
   viewport,
   config,
   preview,
@@ -974,29 +972,27 @@ export function bootPhysicsDebug({
     .add(config.view, 'wireframe')
     .name('와이어프레임')
     .onChange((v) => view.setWireframe(v));
-  look.add(config.view, 'ps1').name('PS1 셰이더');
-  // Worth having next to the wireframe toggle rather than buried: a cap is 84
-  // columns around, so at 320x240 its wireframe is finer than the pixels and
-  // collapses into a solid disc. Step the internal target up and the mesh reads
-  // again — including which way up a cap is lying, which is a solid ring one way
-  // and an open starburst of flutes the other.
-  look
-    .add(config.view, 'renderMode', Object.keys(RENDER_MODES))
-    .name('내부 렌더 해상도')
-    .onChange((v) => {
-      viewport.setMode(v);
-      // The cards are drawn into that target too, so their texel budget just
-      // changed even though nothing in the card folder was touched.
-      refreshTexels();
-    });
   look.add(config.view, 'slowmo', 0.05, 2, 0.05).name('물리 슬로모션');
-  look.add(config.view, 'vertexSnap', 0, 1, 0.01).name('버텍스 스냅');
-  look
-    .add({ quantise: true }, 'quantise')
-    .name('컬러 양자화 (15bit)')
-    .onChange((v) => {
-      retroPass.uniforms.uColorLevels.value = v ? PS1_COLOR_LEVELS : 255;
-    });
+
+  /**
+   * Bloom, live.
+   *
+   * The three that matter and no more. All of them move the world's look
+   * substantially and none of them reaches the simulation — the chain runs after
+   * the step, on whatever the frame produced.
+   *
+   * `threshold` is the one to reach for first: it decides WHAT glows, and every
+   * complaint about bloom is really a complaint about the threshold being low
+   * enough to catch a diffuse surface.
+   */
+  const bloom = look.addFolder('블룸');
+  bloom.add(config.view.bloom, 'enabled').name('켜기').onChange(applyBloom);
+  bloom.add(config.view.bloom, 'threshold', 0, 1.5, 0.01).name('임계값').onChange(applyBloom);
+  bloom.add(config.view.bloom, 'strength', 0, 1.5, 0.01).name('세기').onChange(applyBloom);
+  bloom.add(config.view.bloom, 'radius', 0, 1.5, 0.01).name('반경').onChange(applyBloom);
+  function applyBloom() {
+    composer?.configure(config.view.bloom);
+  }
 
   // ── cards ────────────────────────────────────────────────────────────────
   // All live: the hand is on screen while these move, which is the only way to

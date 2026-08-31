@@ -1,4 +1,4 @@
-import { CanvasTexture, ClampToEdgeWrapping, NearestFilter } from 'three';
+import { CanvasTexture, ClampToEdgeWrapping, NearestFilter, SRGBColorSpace } from 'three';
 import { CAP_PANEL_RATIO } from '../cap/capGeometry.js';
 import { DEFAULT_MARK, isSlotRef } from './MarkStorage.js';
 import { PALETTE } from '../core/palette.js';
@@ -142,6 +142,7 @@ export function bakeCapPanel(
 /** The project's texture settings. Every mark texture goes through here. */
 export function toMarkTexture(canvas) {
   const tex = new CanvasTexture(canvas);
+  tex.colorSpace = SRGBColorSpace;
   tex.magFilter = NearestFilter;
   tex.minFilter = NearestFilter;
   tex.generateMipmaps = false;

@@ -162,10 +162,20 @@ export class RetroMaterials {
     /** Uniform objects shared by every material this factory makes. */
     this.shared = {
       uTargetRes: { value: new Vector2().copy(resolution) },
-      uSnapAmount: { value: 1.0 },
+      /**
+       * Zero. The vertex snap and the affine warp are off for good.
+       *
+       * They are the two artefacts the console produced by accident — integer
+       * vertex positions and no perspective correction on UVs — and both are
+       * banned by the current direction: "정점 떨림" and warped textures are
+       * exactly what a smooth, glossy look must not have. The uniforms survive
+       * PHASE 1 only because the shader still reads them; PHASE 2 replaces this
+       * material with a `MeshPhysicalMaterial` and they go with it.
+       */
+      uSnapAmount: { value: 0.0 },
       uSnapGrid: { value: 1.0 },
       // Full affine: no perspective correction, which is what the spec asks for.
-      uAffineAmount: { value: 1.0 },
+      uAffineAmount: { value: 0.0 },
       // The gloss switch. 0 is a dead matte cap; painted crown stock is not
       // matte, so this is on by default.
       uGloss: { value: 0.55 },

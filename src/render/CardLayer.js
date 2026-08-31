@@ -8,28 +8,20 @@ import { lockTexture } from './fxTextures.js';
 /**
  * The card scene: its own scene, its own orthographic camera, its own raycaster.
  *
- * ── it is drawn into the SAME low-resolution target ──────────────────────────
- * This is the point of the whole conversion, so it is worth being exact about
- * why. `RetroPass` keys its dither threshold to the low-res texel grid:
+ * ── it is drawn OUTSIDE the bloom chain, and that is a reversal ─────────────
+ * The cards used to be drawn into the same low-resolution target as the world,
+ * so that both took one dither lattice, one 5-bit quantiser and one nearest
+ * upscale — sharing a single image was the entire point, and compositing the
+ * cards separately would have put them on their own lattice at their own phase.
  *
- *     float bayer = bayer4(floor(uv * uTargetRes));
+ * Sharing one image is now the problem. The world goes through a bloom chain and
+ * a card face is a white plate with dark type on it, which is precisely the
+ * input a bright-pass is looking for: at any strength worth having on the world,
+ * the cards halate into mush. So the order is:
  *
- * The pattern is therefore a property of the FRAMEBUFFER, not of any object in
- * it. Anything drawn into that framebuffer before the pass runs comes out on the
- * same 4x4 lattice as the pitch, quantised to the same 5-bit levels, upscaled by
- * the same nearest-neighbour blit — one continuous image. Post-processing the
- * cards separately, or compositing them after the pass, would put them on their
- * own lattice with its own phase, and the seam between card and pitch would be
- * the most visible thing on screen.
- *
- * So the render order is:
- *
- *     viewport.bind()                    // the 640x480 target
- *     render(game scene, game camera)
- *     clearDepth()                       // cards are not part of the world
- *     render(card scene, ortho camera)
- *     viewport.unbind()
- *     retroPass.render(...)              // one upscale covers both
+ *     composer.render()                  // world -> MSAA target -> bloom
+ *     autoClear = false; clearDepth()    // cards are not part of the world
+ *     render(card scene, ortho camera)   // straight to the canvas, no bloom
  *
  * ── orthographic, and what follows from it ──────────────────────────────────
  * A perspective camera would put the cards at the edges of the hand into
@@ -385,7 +377,6 @@ export class CardLayer {
       return;
     }
     for (const h of this.hands) h.root.visible = true;
-    this.materials.shared.uSnapAmount.value = cfg.vertexSnap;
     this._enabled = enabled;
 
     // Pinned, the seat is a constant and the swap simply never has anywhere to

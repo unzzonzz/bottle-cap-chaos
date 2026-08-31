@@ -396,7 +396,6 @@ export class CardFx {
    */
   update({ dt, match, camera }) {
     this._now += dt;
-    this.materials.shared.uSnapAmount.value = this.config.cardFx.vertexSnap;
 
     // The match's own effect wins; the panel's demo fills in when there is none.
     const live = match?.cardFx ?? null;

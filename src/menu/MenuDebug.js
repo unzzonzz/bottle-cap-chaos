@@ -1,7 +1,5 @@
 import GUI from 'lil-gui';
 import { Mesh, PlaneGeometry, ShaderMaterial } from 'three';
-import { PS1_COLOR_LEVELS } from '../core/RetroPass.js';
-import { RENDER_MODES } from '../core/Viewport.js';
 import { WIPE_FRAME } from './CapWipe.js';
 import { STAGE } from './Transition.js';
 import { CONFIG } from '../game/config.js';
@@ -51,7 +49,7 @@ export function bootMenuDebug(ctx) {
     return { frame() {}, gui: null };
   }
 
-  const { config, bottle, wipe, transition, retro, retroPass, viewport, overlay } = ctx;
+  const { config, bottle, wipe, transition, retro, composer, viewport, overlay } = ctx;
   /** Frame counter for the audio readouts' slow poll. See the return below. */
   let audioTick = 0;
   const gui = new GUI({ title: 'MENU / 병 + 전환' });
@@ -218,29 +216,16 @@ export function bootMenuDebug(ctx) {
   menu.add(config.camera, 'distance', 20, 140, 0.5).name('카메라 거리').onChange(relayout);
   menu.add(config.camera, 'height', -10, 20, 0.1).name('카메라 높이').onChange(relayout);
 
-  // ── ps1 ──────────────────────────────────────────────────────────────────
-  const ps1 = gui.addFolder('PS1');
-  ps1.add(config.view, 'vertexSnap', 0, 1, 0.01).name('버텍스 스냅');
-  ps1.add(retro.shared.uSnapGrid, 'value', 0.1, 2, 0.01).name('스냅 격자 (1 = 네이티브)');
-  ps1.add(retro.shared.uAffineAmount, 'value', 0, 1, 0.01).name('아핀 텍스처 매핑');
-  ps1
-    .add({ mode: viewport.mode }, 'mode', Object.keys(RENDER_MODES))
-    .name('내부 렌더 해상도')
-    .onChange((v) => viewport.setMode(v));
-
-  const toggles = { dither: true, quantise: true };
-  ps1
-    .add(toggles, 'dither')
-    .name('디더링 (4x4 Bayer)')
-    .onChange((v) => {
-      retroPass.uniforms.uDitherAmount.value = v ? 1 : 0;
-    });
-  ps1
-    .add(toggles, 'quantise')
-    .name('컬러 양자화 (15bit)')
-    .onChange((v) => {
-      retroPass.uniforms.uColorLevels.value = v ? PS1_COLOR_LEVELS : 255;
-    });
+  // ── bloom ────────────────────────────────────────────────────────────────
+  // What replaced the PS1 folder. The chain is one pass now and these are its
+  // only three dials — see `core/Composer.js`.
+  const bloomCfg = config.view.bloom;
+  const bloom = gui.addFolder('블룸');
+  const applyBloom = () => composer?.configure(bloomCfg);
+  bloom.add(bloomCfg, 'enabled').name('켜기').onChange(applyBloom);
+  bloom.add(bloomCfg, 'threshold', 0, 1.5, 0.01).name('임계값').onChange(applyBloom);
+  bloom.add(bloomCfg, 'strength', 0, 1.5, 0.01).name('세기').onChange(applyBloom);
+  bloom.add(bloomCfg, 'radius', 0, 1.5, 0.01).name('반경').onChange(applyBloom);
 
   const glass = gui.addFolder('유리 재질');
   const gm = bottle.glassFrontMaterial.uniforms;

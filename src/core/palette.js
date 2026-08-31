@@ -489,7 +489,13 @@ export const PALETTE = {
      * they are the falloff's shape, not a colour.
      */
     shadow: '#1f4a66',
-    pool: ['#cfeaf7', '#dcf2fa', '#e8f8fd', '#f2fcfe', PAPER],
+    /**
+     * Toned down from near-white once bloom arrived. At the old values every
+     * step was above the bright-pass threshold and the pool stopped reading as
+     * light on a floor and became a hole in it. It is still the brightest thing
+     * on the floor; it is no longer the brightest thing on screen.
+     */
+    pool: ['#9fd0e8', '#b4dcef', '#c8e6f4', '#dcf0f9', '#ecf8fd'],
     meterOn: CYAN,
     meterOff: MIST,
     /** The default cap colour on the opponent screen, before a player picks. */

@@ -1,4 +1,4 @@
-import { CanvasTexture, ClampToEdgeWrapping, NearestFilter } from 'three';
+import { CanvasTexture, ClampToEdgeWrapping, NearestFilter, SRGBColorSpace } from 'three';
 import { PALETTE, withAlpha } from '../core/palette.js';
 
 /**
@@ -81,6 +81,7 @@ export function scoreTagTexture(score, intent, rank) {
   ctx.drawImage(scratch, 0, 0);
 
   const tex = new CanvasTexture(canvas);
+  tex.colorSpace = SRGBColorSpace;
   tex.magFilter = NearestFilter;
   tex.minFilter = NearestFilter;
   tex.generateMipmaps = false;

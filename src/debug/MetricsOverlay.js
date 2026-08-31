@@ -2,12 +2,12 @@
  * The instrument panel. What the iOS verification is actually for.
  *
  * ── why this is DOM and not a mesh ─────────────────────────────────────────────
- * Every other overlay in this project is three.js geometry rendered into the
- * low-res target before the retro pass, and that is exactly why this one must not
- * be. A mesh layer would be dithered and quantised to 15-bit like everything
- * else — unreadable at 11px — it would move with `view.renderMode`, and worst of
- * all it would add draw calls to the very frame it is measuring. A fixed DOM box
- * is composited by the browser outside the WebGL frame and costs nothing the
+ * Every other overlay in this project is three.js geometry drawn inside the
+ * WebGL frame, and that is exactly why this one must not be. A mesh layer would
+ * have to be laid out in frame pixels and rebuilt whenever the frame changed
+ * shape, its type would be baked into a texture at 11px, and worst of all it
+ * would add draw calls to the very frame it is measuring. A fixed DOM box is
+ * composited by the browser outside the WebGL frame and costs nothing the
  * numbers are trying to report.
  *
  * ── why it is not behind ?debug=1 ──────────────────────────────────────────────

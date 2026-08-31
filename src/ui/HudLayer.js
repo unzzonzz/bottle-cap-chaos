@@ -528,7 +528,6 @@ export class HudLayer {
     turnClock = null,
   }) {
     const ui = this.config.ui;
-    this.materials.shared.uSnapAmount.value = ui.vertexSnap;
     this._fade = fade;
 
     if (ui.textureScale !== this._texScale) {

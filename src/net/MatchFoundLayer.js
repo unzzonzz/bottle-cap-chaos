@@ -20,13 +20,11 @@ import { PALETTE } from '../core/palette.js';
  * That is why the exit is a MOVE and not a fade. A fade would say "that screen
  * is over"; the slide says "this is where those two things live".
  *
- * ── it draws into the low-res target, like everything else ───────────────
- * `render` is called between the world and `retroPass`, so this layer goes
- * through the identical dither, the identical five-bits-a-channel quantiser and
- * the identical upscale. `RetroPass` keys its dither to the framebuffer texel
- * grid — the pattern belongs to the FRAMEBUFFER, not to any object in it — so a
- * layer composited after the pass would sit on its own lattice at its own phase
- * and the seam would be the most visible thing on screen.
+ * ── it draws onto the finished frame, like every other overlay ───────────
+ * `render` is called after the world's bloom chain, not inside it. It used to be
+ * the opposite — everything went into one low-resolution target so that the
+ * whole screen took one dither lattice and one quantiser — but this layer is
+ * two caps and a line of type, and type is what a bright-pass ruins.
  *
  * ── the effect vocabulary is the sanctioned one ──────────────────────────
  * Alpha-blended sprites, and that is all of it. No bloom, no particles, no

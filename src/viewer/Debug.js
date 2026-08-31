@@ -1,6 +1,4 @@
 import GUI from 'lil-gui';
-import { PS1_COLOR_LEVELS } from '../core/RetroPass.js';
-import { RENDER_MODES } from '../core/Viewport.js';
 import { CAP_COLOR } from './Cap.js';
 
 /**
@@ -19,7 +17,7 @@ import { CAP_COLOR } from './Cap.js';
 /** The in-game ceiling from the spec. The shell is not measured against it. */
 const TRI_BUDGET = 1500;
 
-export function bootDebug({ cap, orbit, retro, retroPass, viewport }) {
+export function bootDebug({ cap, orbit, retro, composer }) {
   const gui = new GUI({ title: 'BOTTLE CAP CHAOS' });
 
   const stats = { tris: '' };
@@ -77,34 +75,16 @@ export function bootDebug({ cap, orbit, retro, retroPass, viewport }) {
     .onChange((v) => cap.setWireframe(v));
   look.add(orbit, 'autoRotateSpeed', 0, 2, 0.01).name('자동회전 속도 (rad/s)');
 
-  // ── ps1 ──────────────────────────────────────────────────────────────────
-  const ps1 = gui.addFolder('PS1');
-  ps1.add(retro.shared.uSnapAmount, 'value', 0, 1, 0.01).name('버텍스 스냅');
-  ps1
-    .add(retro.shared.uSnapGrid, 'value', 0.1, 2, 0.01)
-    .name('스냅 격자 (1 = 네이티브)');
-  ps1
-    .add({ mode: viewport.mode }, 'mode', Object.keys(RENDER_MODES))
-    .name('내부 렌더 해상도')
-    // The uniforms that depend on the render target are updated by the
-    // viewport's own resize listeners in main.js, not from here.
-    .onChange((v) => viewport.setMode(v));
-
-  const toggles = { dither: true, quantise: true };
-  ps1
-    .add(toggles, 'dither')
-    .name('디더링 (4x4 Bayer)')
-    .onChange((v) => {
-      retroPass.uniforms.uDitherAmount.value = v ? 1 : 0;
-    });
-  ps1
-    .add(toggles, 'quantise')
-    .name('컬러 양자화 (15bit)')
-    .onChange((v) => {
-      // 255 levels is 8 bits per channel — the framebuffer's own depth, so the
-      // quantiser is still running but has nothing left to take away.
-      retroPass.uniforms.uColorLevels.value = v ? PS1_COLOR_LEVELS : 255;
-    });
+  // ── bloom ────────────────────────────────────────────────────────────────
+  // What replaced the PS1 folder. The chain is one pass now and these are its
+  // only three dials — see `core/Composer.js`.
+  const bloomCfg = { enabled: true, threshold: 0.72, strength: 0.45, radius: 0.6 };
+  const bloom = gui.addFolder('블룸');
+  const applyBloom = () => composer?.configure(bloomCfg);
+  bloom.add(bloomCfg, 'enabled').name('켜기').onChange(applyBloom);
+  bloom.add(bloomCfg, 'threshold', 0, 1.5, 0.01).name('임계값').onChange(applyBloom);
+  bloom.add(bloomCfg, 'strength', 0, 1.5, 0.01).name('세기').onChange(applyBloom);
+  bloom.add(bloomCfg, 'radius', 0, 1.5, 0.01).name('반경').onChange(applyBloom);
 
   return { gui, refresh };
 }

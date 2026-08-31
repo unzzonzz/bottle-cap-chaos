@@ -1,4 +1,4 @@
-import { CanvasTexture, ClampToEdgeWrapping, NearestFilter } from 'three';
+import { CanvasTexture, ClampToEdgeWrapping, NearestFilter, SRGBColorSpace } from 'three';
 import { PALETTE } from '../core/palette.js';
 import { registerTextureCache } from '../ui/fonts.js';
 
@@ -340,6 +340,7 @@ export function iconTexture(name, state = 'idle', { size = 28, scale = 1, plate 
   }
 
   const tex = new CanvasTexture(canvas);
+  tex.colorSpace = SRGBColorSpace;
   tex.magFilter = NearestFilter;
   tex.minFilter = NearestFilter;
   tex.generateMipmaps = false;
@@ -549,6 +550,7 @@ export function solidTexture() {
 /** Shared tail: the project's texture settings, cached. */
 function finishIcon(key, canvas, width, height = width) {
   const tex = new CanvasTexture(canvas);
+  tex.colorSpace = SRGBColorSpace;
   tex.magFilter = NearestFilter;
   tex.minFilter = NearestFilter;
   tex.generateMipmaps = false;

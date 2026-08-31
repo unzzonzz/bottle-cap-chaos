@@ -16,9 +16,9 @@ import { PALETTE } from '../core/palette.js';
  * dialog with antialiased type. It is the one smooth thing on a deliberately
  * rough screen.
  *
- * Drawn here, into the bound low-res target before `retroPass`, it gets the
- * same dither lattice, the same quantiser and the same upscale as the board
- * behind it.
+ * Drawn straight onto the finished frame, after the world's bloom chain has
+ * run. A modal is nothing but type on a plate, so it is the last thing that
+ * should be fed to a bright-pass.
  *
  * ── the ONE exception, and why it survives ─────────────────────────────────
  * A text field is still a real `<input>`, positioned over this panel while a

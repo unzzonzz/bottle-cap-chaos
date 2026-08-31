@@ -1,4 +1,4 @@
-import { CanvasTexture, NearestFilter, ClampToEdgeWrapping } from 'three';
+import { CanvasTexture, ClampToEdgeWrapping, NearestFilter, SRGBColorSpace } from 'three';
 import { PALETTE } from '../core/palette.js';
 import { registerTextureCache } from '../ui/fonts.js';
 
@@ -191,6 +191,7 @@ export function cardFaceTexture(card, width) {
   }
 
   const tex = new CanvasTexture(canvas);
+  tex.colorSpace = SRGBColorSpace;
   tex.magFilter = NearestFilter;
   tex.minFilter = NearestFilter;
   tex.generateMipmaps = false;
@@ -241,6 +242,7 @@ export function cardBackTexture(width) {
   });
 
   const tex = new CanvasTexture(canvas);
+  tex.colorSpace = SRGBColorSpace;
   tex.magFilter = NearestFilter;
   tex.minFilter = NearestFilter;
   tex.generateMipmaps = false;
@@ -325,6 +327,7 @@ export function useGuideTexture(width, height) {
   }
 
   const tex = new CanvasTexture(canvas);
+  tex.colorSpace = SRGBColorSpace;
   tex.magFilter = NearestFilter;
   tex.minFilter = NearestFilter;
   tex.generateMipmaps = false;
@@ -376,6 +379,7 @@ export function noticeTexture(text) {
   });
 
   const tex = new CanvasTexture(canvas);
+  tex.colorSpace = SRGBColorSpace;
   tex.magFilter = NearestFilter;
   tex.minFilter = NearestFilter;
   tex.generateMipmaps = false;

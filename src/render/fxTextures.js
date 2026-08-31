@@ -1,4 +1,4 @@
-import { CanvasTexture, ClampToEdgeWrapping, NearestFilter, RepeatWrapping } from 'three';
+import { CanvasTexture, ClampToEdgeWrapping, NearestFilter, RepeatWrapping, SRGBColorSpace } from 'three';
 import { PALETTE } from '../core/palette.js';
 import { registerTextureCache } from '../ui/fonts.js';
 
@@ -42,6 +42,7 @@ function canvas(w, h) {
 
 function finish(key, cv, { repeat = false } = {}) {
   const tex = new CanvasTexture(cv);
+  tex.colorSpace = SRGBColorSpace;
   tex.magFilter = NearestFilter;
   tex.minFilter = NearestFilter;
   tex.generateMipmaps = false;

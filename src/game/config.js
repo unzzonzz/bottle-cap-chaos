@@ -2374,15 +2374,24 @@ export const CONFIG = {
 
   view: {
     /**
-     * Internal render target, by key into RENDER_MODES.
+     * Bloom, over the WORLD only.
      *
-     * 640x480 rather than the authentic 320x240 because this phase is judged by
-     * eye in the top-down wireframe view, and at 320x240 a cap's 84 columns land
-     * inside one pixel and the whole mesh turns to mush. The PS1 chain is
-     * unchanged — same snapping, same dither, same 5-bit channels, just more of
-     * them. Drop it back to 320x240 in the panel to see the shipping look.
+     * The scene is drawn at the device's own resolution now — there is no
+     * internal low-resolution target to name, which is what `renderMode` used to
+     * pick — and the one post-processing pass in the chain is this.
+     *
+     * `threshold` decides WHAT glows and is the dial to reach for first: below
+     * about 0.6 it starts catching diffuse surfaces and the whole frame hazes.
+     * `strength` and `radius` decide how much and how far. See `core/Composer.js`
+     * for why this is deliberately visible rather than the near-invisible bloom
+     * a restrained direction would use.
      */
-    renderMode: '640x480',
+    bloom: {
+      enabled: true,
+      threshold: 0.72,
+      strength: 0.45,
+      radius: 0.6,
+    },
     topDown: true,
     /**
      * Off by default now that the caps carry their panel artwork and the board
@@ -2393,16 +2402,6 @@ export const CONFIG = {
     wireframe: false,
     /** Rapier's own collider outlines, over the top of the visual mesh. */
     colliders: false,
-    /** The whole PS1 chain: low-res target, snapping, dither, quantiser. */
-    ps1: true,
-    /**
-     * How hard the vertex snap bites, when PS1 is on at all.
-     *
-     * Held here rather than written straight onto the shader uniform so that
-     * switching PS1 off can zero the uniform without destroying the setting —
-     * turn the chain back on and the snap comes back where it was.
-     */
-    vertexSnap: 1.0,
     /** Physics time scale. Changes step COUNT per frame, never step LENGTH. */
     slowmo: 1.0,
     /** Degrees above the board for the non-top-down camera. */

@@ -1,8 +1,8 @@
 import { Color, PerspectiveCamera, Scene } from 'three';
 import { RetroMaterials } from '../core/RetroMaterial.js';
 import { PALETTE } from '../core/palette.js';
-import { RetroPass } from '../core/RetroPass.js';
 import { DISPLAY_ASPECT, Viewport } from '../core/Viewport.js';
+import { SceneComposer } from '../core/Composer.js';
 import { Cap } from './Cap.js';
 import { CapOrbit } from './CapOrbit.js';
 import { bootDebug } from './Debug.js';
@@ -17,25 +17,22 @@ import { bootDebug } from './Debug.js';
  */
 
 export function bootViewer(canvas) {
-  const viewport = new Viewport({ canvas, mode: '320x240' });
-  const retroPass = new RetroPass({ resolution: viewport.resolution });
+  const viewport = new Viewport({ canvas });
   const retro = new RetroMaterials({ resolution: viewport.resolution });
 
   const scene = new Scene();
   scene.background = new Color(PALETTE.bg.skyMid);
 
   const camera = new PerspectiveCamera(26, DISPLAY_ASPECT, 1, 80);
+  const composer = new SceneComposer({ viewport, scene, camera });
 
   const cap = new Cap({ retro });
   const orbit = new CapOrbit({ canvas, camera, object: cap.root });
   scene.add(orbit.pitchGroup);
 
-  bootDebug({ cap, orbit, retro, retroPass, viewport });
+  bootDebug({ cap, orbit, retro, composer });
 
-  viewport.onResize(({ resolution }) => {
-    retroPass.setResolution(resolution);
-    retro.setResolution(resolution);
-  });
+  viewport.onResize(({ resolution }) => retro.setResolution(resolution));
 
   let raf = 0;
   let last = 0;
@@ -47,10 +44,7 @@ export function bootViewer(canvas) {
 
     orbit.update(dt);
 
-    viewport.bind();
-    viewport.renderer.render(scene, camera);
-    viewport.unbind();
-    retroPass.render(viewport.renderer, viewport.renderTarget.texture);
+    composer.render();
   }
 
   function start() {
