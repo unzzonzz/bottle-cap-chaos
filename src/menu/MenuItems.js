@@ -86,6 +86,23 @@ export class MenuItems {
     });
 
     this._ray = new Raycaster();
+    /**
+     * 이 레이캐스터는 **모든 레이어**를 본다.
+     *
+     * ── 메뉴 버튼이 눌리지 않던 이유 ──────────────────────────────────────
+     * PHASE 1 이 블룸을 들이면서 `bootMenu.asUiLayer` 가 생겼다. 판에 블룸이 먹으면
+     * 글자가 뭉개지므로, 판과 그 자식 전부를 `UI_LAYER`(1)로 옮기고 월드 패스와 UI
+     * 패스를 카메라 레이어로 갈라 그린다.
+     *
+     * `new Raycaster()` 의 기본 레이어는 0 하나다. 판은 1 에 있으므로 `layers.test`
+     * 가 언제나 거짓이 되고, 광선은 판을 **시험조차 하지 않는다** — 아무 오류도
+     * 나지 않고, 화면은 멀쩡하고, 누르면 아무 일도 일어나지 않는다.
+     *
+     * 여기서 `enableAll` 이 안전한 이유는 이 광선이 언제나 명시적인 객체 목록을
+     * 받기 때문이다. 레이어는 무엇을 **그릴지** 고르는 장치이지 무엇을 **맞힐지**
+     * 고르는 장치가 아니고, 이 파일에서 후자는 목록이 정한다.
+     */
+    this._ray.layers.enableAll();
     this._ndc = new Vector2();
     /** The item under the pointer, or null. */
     this.hovered = null;

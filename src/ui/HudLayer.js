@@ -9,7 +9,6 @@ import { HudMaterials } from './HudMaterial.js';
 import {
   clearHudTextureCache,
   iconButtonTexture,
-  notePlateTexture,
   scorePlateTexture,
   turnPlateTexture,
 } from './hudTextures.js';
@@ -150,7 +149,6 @@ const TIMER_HEIGHT = SIZE.clockBar.h;
 const TIMER_GAP = SPACE.xs;
 /** 이 초 아래로 내려가면 바가 깜박인다. 브리프의 5초. */
 const TIMER_URGENT_SEC = 5;
-const NOTE_HEIGHT = 30;
 const MARGIN = SPACE.screenMargin;
 
 function smoothstep(x) {
@@ -228,7 +226,6 @@ export class HudLayer {
 
     this.score = plate(10);
     this.turn = plate(11);
-    this.note = plate(11);
 
     /**
      * The online turn clock, as two rectangles.
@@ -304,7 +301,6 @@ export class HudLayer {
     /** What the emphasis beat watches. Not the same thing — see `_updateScore`. */
     this._pulseKey = '';
     this._turnKey = '';
-    this._noteKey = '';
     this._buttonKey = '';
     this._texScale = -1;
     /**
@@ -551,7 +547,6 @@ export class HudLayer {
      * changes.
      */
     this._turnLeft = -halfW + edgeLeft;
-    this._noteLeft = -halfW + edgeLeft;
 
     // Directly under the turn plate, the same width, so the clock reads as
     // belonging to the name above it rather than as a separate instrument.
@@ -560,7 +555,6 @@ export class HudLayer {
     this.timerTrack.position.set(this._turnLeft + TURN.width / 2, this._timerY, 0);
     this.timerFill.scale.set(TURN.width, TIMER_HEIGHT, 1);
     this.timerFill.position.copy(this.timerTrack.position);
-    this._noteY = this.turn.position.y - TURN.height - 6;
 
     for (const h of this._hits) {
       const pad = Math.max(0, ui.hitMargin);
@@ -614,13 +608,12 @@ export class HudLayer {
       // ever bound.
       this._texScale = ui.textureScale;
       clearHudTextureCache();
-      this._scoreKey = this._turnKey = this._noteKey = this._buttonKey = '';
+      this._scoreKey = this._turnKey = this._buttonKey = '';
     }
 
     this._updateScore(dt, match, gameCamera);
     this._updateTurn(match, labelFor, nameFor, outcomeFor);
     this._updateTimer(turnClock);
-    this._updateNote(match);
     this._updateButtons(dt);
 
     /**
@@ -634,15 +627,14 @@ export class HudLayer {
     for (const m of [
       this.score,
       this.turn,
-      this.note,
       this.exit,
       this.recenter,
       this.timerTrack,
       this.timerFill,
     ]) {
       // ASSIGNED from the plate's own base, never multiplied into what is
-      // already there. Multiplying looks equivalent and is not: `turn` and
-      // `note` do not rewrite their opacity every frame, so the product
+      // already there. Multiplying looks equivalent and is not: `turn` does
+      // not rewrite its opacity every frame, so the product
       // compounded on each one and both faded to nothing over a second of
       // aiming and never came back.
       const o = m.material.uniforms.uOpacity;
@@ -746,8 +738,6 @@ export class HudLayer {
     this.timerTrack.position.y += dy;
     this.timerFill.position.y += dy;
     this._timerY += dy;
-    this._noteY += dy;
-    this.note.position.y += dy;
     for (const h of this._hits) h.mesh.position.y = h.plate.position.y;
   }
 
@@ -802,8 +792,8 @@ export class HudLayer {
       scale: this.config.ui.textureScale,
     });
     this.turn.material.uniforms.uMap.value = tex;
-    // The plate sizes to its text now, so the quad has to follow it — the same
-    // contract the note line has. Scaling to anything else resamples the type.
+    // The plate sizes to its text now, so the quad has to follow it. Scaling to
+    // anything else resamples the type.
     const w = tex.userData?.width ?? TURN.width;
     this.turn.scale.set(w, TURN.height, 1);
     if (this._turnLeft !== undefined) this.turn.position.x = this._turnLeft + w / 2;
@@ -857,34 +847,6 @@ export class HudLayer {
       tint.set(0.88, 0.76, 0.42);
       this.timerFill.userData.base = 1;
     }
-  }
-
-  _updateNote(match) {
-    const v = match.lastVerdict;
-    const text = match.goalPending
-      ? match.goalPending.note
-      : v
-        ? `${v.note || '변화 없음'}${v.reason === 'timeout' ? '  ⏱ 강제 종료' : ''}`
-        : '';
-    const tone = !match.goalPending && v?.reason === 'timeout' ? 'timeout' : 'normal';
-
-    const key = `${text}|${tone}`;
-    if (key !== this._noteKey) {
-      this._noteKey = key;
-      if (text) {
-        const tex = notePlateTexture(text, tone, {
-          height: NOTE_HEIGHT,
-          scale: this.config.ui.textureScale,
-        });
-        this.note.material.uniforms.uMap.value = tex;
-        const w = tex.userData?.width ?? 120;
-        this.note.scale.set(w, NOTE_HEIGHT, 1);
-        // Left-aligned with the turn plate above it, so the column has an edge.
-        this.note.position.set(this._noteLeft + w / 2, this._noteY, 0);
-      }
-    }
-    this.note.userData.want = !!text;
-    this.note.userData.base = 1;
   }
 
   /**
@@ -1032,7 +994,6 @@ export class HudLayer {
     for (const m of [
       this.score,
       this.turn,
-      this.note,
       this.exit,
       this.recenter,
       this.timerTrack,

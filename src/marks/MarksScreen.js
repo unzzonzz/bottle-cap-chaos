@@ -112,6 +112,9 @@ export class MarksScreen {
     this.layout(u);
 
     this._ray = new Raycaster();
+    // 모든 레이어를 본다. `MenuItems` 의 같은 줄에 왜 필요한지 적혀 있다 —
+    // 판은 `asUiLayer` 때문에 레이어 1 에 있고, 광선의 기본은 레이어 0 뿐이다.
+    this._ray.layers.enableAll();
     this._ndc = new Vector2();
     this._hover = null;
     this._unsubscribe = book.onChange(() => this.refresh());
