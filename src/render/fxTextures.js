@@ -1,4 +1,4 @@
-import { CanvasTexture, ClampToEdgeWrapping, NearestFilter, RepeatWrapping, SRGBColorSpace } from 'three';
+import { CanvasTexture, ClampToEdgeWrapping, LinearFilter, RepeatWrapping, SRGBColorSpace } from 'three';
 import { PALETTE } from '../core/palette.js';
 import { registerTextureCache } from '../ui/fonts.js';
 
@@ -36,15 +36,15 @@ function canvas(w, h) {
   c.width = w;
   c.height = h;
   const ctx = c.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
+  ctx.imageSmoothingEnabled = true;
   return { canvas: c, ctx };
 }
 
 function finish(key, cv, { repeat = false } = {}) {
   const tex = new CanvasTexture(cv);
   tex.colorSpace = SRGBColorSpace;
-  tex.magFilter = NearestFilter;
-  tex.minFilter = NearestFilter;
+  tex.magFilter = LinearFilter;
+  tex.minFilter = LinearFilter;
   tex.generateMipmaps = false;
   tex.anisotropy = 1;
   tex.wrapS = repeat ? RepeatWrapping : ClampToEdgeWrapping;

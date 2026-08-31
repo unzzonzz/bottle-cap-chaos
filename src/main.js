@@ -5,6 +5,7 @@ import { createLightRig } from './core/lighting.js';
 import { createSky } from './core/sky.js';
 import { Viewport } from './core/Viewport.js';
 import { SceneComposer } from './core/Composer.js';
+import { setTextureRenderer } from './core/textures.js';
 import { initRapier } from './physics/rapier.js';
 import { PhysicsWorld } from './physics/PhysicsWorld.js';
 import { CONFIG, CONFIG_DEFAULTS } from './game/config.js';
@@ -245,6 +246,8 @@ async function boot(canvas) {
   // band, so it ships OFF until that is chased down. Off, every number in the
   // pipeline is what it was before core/frame.js existed.
   const viewport = new Viewport({ canvas, portrait: true });
+  // 이방성 상한은 렌더러가 있어야 알 수 있다. 텍스처가 만들어지기 전에.
+  setTextureRenderer(viewport.renderer);
   const retro = new GlossMaterials({ resolution: viewport.resolution });
 
   const scene = new Scene();
@@ -1042,6 +1045,41 @@ async function boot(canvas) {
     reserved: (x, y) => input.hitTest(x, y) >= 0,
   });
   viewport.onResize(({ resolution }) => hud.setResolution(resolution));
+
+  /**
+   * UI 텍스처의 오버샘플 배수를, 화면이 실제로 몇 픽셀인지에서 계산한다.
+   *
+   * ── 왜 상수로 둘 수 없나 ────────────────────────────────────────────────
+   * UI 는 `frame.js` 의 가상 640 폭 좌표계로 그려지고, 그 프레임이 화면에서
+   * 몇 픽셀을 차지하는지는 기기마다 다르다. 3배 폰의 세로 화면에서는 프레임
+   * 픽셀 하나가 화면 픽셀 여러 개가 되므로, 텍스처를 프레임 크기 그대로 구우면
+   * 글자가 흐려진다 — PHASE 4 가 알파 이진화를 없애면서 그 흐림이 가려지지도
+   * 않게 됐다.
+   *
+   * 상한 3 은 성능 안전장치다. 텍스처 면적이 배수의 제곱으로 늘고, 이 캐시에는
+   * 점수판·턴 표시·버튼·카드가 전부 들어 있다.
+   */
+  function syncTextureScale() {
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const perFramePx = viewport.displaySize.x / FRAME.width;
+    const next = Math.max(1, Math.min(3, Math.round(dpr * perFramePx * 2) / 2));
+    if (next === CONFIG.ui.textureScale) return;
+    CONFIG.ui.textureScale = next;
+    /**
+     * 카드만 명시적으로 비운다.
+     *
+     * `HudLayer` 는 매 프레임 `ui.textureScale` 을 자기 사본과 비교해서 달라졌으면
+     * 스스로 캐시를 비운다 — 여기서 또 비우면 같은 일을 두 번 하는 것이다.
+     * `CardLayer` 는 그 감시가 없고 `refreshTextures` 를 불러 줘야 한다.
+     *
+     * 캐시 키에는 이미 배수가 들어 있으므로 잘못된 해상도의 텍스처가 나오지는
+     * 않는다. 비우지 않으면 이전 배수의 항목이 남을 뿐인데, 화면을 회전할 때마다
+     * 한 벌씩 쌓이므로 그것도 누수다.
+     */
+    cards.refreshTextures();
+  }
+  syncTextureScale();
+  viewport.onResize(syncTextureScale);
   // And once for the mode this page opened on. `rebuildAll` does it on every
   // change after that; without this the first match of a cardless mode would
   // hang its score off a hand that is not drawn.

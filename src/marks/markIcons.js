@@ -1,4 +1,4 @@
-import { CanvasTexture, ClampToEdgeWrapping, NearestFilter, SRGBColorSpace } from 'three';
+import { CanvasTexture, ClampToEdgeWrapping, LinearFilter, SRGBColorSpace } from 'three';
 import { PALETTE } from '../core/palette.js';
 import { registerTextureCache } from '../ui/fonts.js';
 
@@ -308,7 +308,7 @@ export function iconTexture(name, state = 'idle', { size = 28, scale = 1, plate 
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
+  ctx.imageSmoothingEnabled = true;
 
   if (plate) {
     ctx.fillStyle = skin.bg;
@@ -341,8 +341,8 @@ export function iconTexture(name, state = 'idle', { size = 28, scale = 1, plate 
 
   const tex = new CanvasTexture(canvas);
   tex.colorSpace = SRGBColorSpace;
-  tex.magFilter = NearestFilter;
-  tex.minFilter = NearestFilter;
+  tex.magFilter = LinearFilter;
+  tex.minFilter = LinearFilter;
   tex.generateMipmaps = false;
   tex.anisotropy = 1;
   tex.wrapS = ClampToEdgeWrapping;
@@ -376,7 +376,7 @@ export function tileTexture(state = 'idle', { size = 76, accent = false } = {}) 
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
+  ctx.imageSmoothingEnabled = true;
 
   ctx.fillStyle = skin.bg;
   ctx.fillRect(0, 0, size, size);
@@ -404,7 +404,7 @@ export function badgeTexture(player, on, { width = 30, height = 20 } = {}) {
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
+  ctx.imageSmoothingEnabled = true;
 
   ctx.fillStyle = skin.bg;
   ctx.fillRect(0, 0, width, height);
@@ -415,20 +415,16 @@ export function badgeTexture(player, on, { width = 30, height = 20 } = {}) {
   // Thresholded, for the reason every other label in this project is: the font
   // rasteriser antialiases regardless of `imageSmoothingEnabled`, and those
   // intermediate values come out of the 5-bit quantiser as coloured fringing.
-  const scratch = document.createElement('canvas');
-  scratch.width = width;
-  scratch.height = height;
-  const sctx = scratch.getContext('2d');
-  sctx.font = `bold 12px ui-monospace, Menlo, monospace`;
-  sctx.textAlign = 'center';
-  sctx.textBaseline = 'alphabetic';
-  sctx.fillStyle = on ? skin.ink : skin.shade;
-  sctx.fillText(`${player + 1}P`, width / 2, height - 6);
-  const img = sctx.getImageData(0, 0, width, height);
-  const d = img.data;
-  for (let i = 3; i < d.length; i += 4) d[i] = d[i] >= 110 ? 255 : 0;
-  sctx.putImageData(img, 0, 0);
-  ctx.drawImage(scratch, 0, 0);
+  // 대상에 바로 그린다. 스크래치 캔버스에 그려 알파를 110 에서 자르고
+  // blit 하던 것을 없앴다 — 그 임계 처리가 막으려던 디더와 5비트 양자화가
+  // 파이프라인에 없다.
+  ctx.save();
+  ctx.font = `bold 12px ui-monospace, Menlo, monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = on ? skin.ink : skin.shade;
+  ctx.fillText(`${player + 1}P`, width / 2, height - 6);
+  ctx.restore();
 
   return finishIcon(key, canvas, width, height);
 }
@@ -450,7 +446,7 @@ export function messageTexture(text, { width = 300, height = 44, tone = 'idle' }
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
+  ctx.imageSmoothingEnabled = true;
 
   ctx.fillStyle = skin.bg;
   ctx.fillRect(0, 0, width, height);
@@ -458,20 +454,16 @@ export function messageTexture(text, { width = 300, height = 44, tone = 'idle' }
   ctx.lineWidth = 2;
   ctx.strokeRect(1, 1, width - 2, height - 2);
 
-  const scratch = document.createElement('canvas');
-  scratch.width = width;
-  scratch.height = height;
-  const sctx = scratch.getContext('2d');
-  sctx.font = 'bold 15px ui-monospace, Menlo, monospace';
-  sctx.textAlign = 'center';
-  sctx.textBaseline = 'alphabetic';
-  sctx.fillStyle = skin.ink;
-  sctx.fillText(text, width / 2, height / 2 + 6);
-  const img = sctx.getImageData(0, 0, width, height);
-  const d = img.data;
-  for (let i = 3; i < d.length; i += 4) d[i] = d[i] >= 110 ? 255 : 0;
-  sctx.putImageData(img, 0, 0);
-  ctx.drawImage(scratch, 0, 0);
+  // 대상에 바로 그린다. 스크래치 캔버스에 그려 알파를 110 에서 자르고
+  // blit 하던 것을 없앴다 — 그 임계 처리가 막으려던 디더와 5비트 양자화가
+  // 파이프라인에 없다.
+  ctx.save();
+  ctx.font = 'bold 15px ui-monospace, Menlo, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = skin.ink;
+  ctx.fillText(text, width / 2, height / 2 + 6);
+  ctx.restore();
 
   return finishIcon(key, canvas, width, height);
 }
@@ -494,7 +486,7 @@ export function saveButtonTexture(state = 'idle', { width = 108, height = 34 } =
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
+  ctx.imageSmoothingEnabled = true;
 
   ctx.fillStyle = skin.bg;
   ctx.fillRect(0, 0, width, height);
@@ -507,20 +499,16 @@ export function saveButtonTexture(state = 'idle', { width = 108, height = 34 } =
   const disk = iconTexture('save', state, { size: height - 10, plate: false });
   ctx.drawImage(disk.image, 6, 5);
 
-  const scratch = document.createElement('canvas');
-  scratch.width = width;
-  scratch.height = height;
-  const sctx = scratch.getContext('2d');
-  sctx.font = 'bold 15px ui-monospace, Menlo, monospace';
-  sctx.textAlign = 'left';
-  sctx.textBaseline = 'alphabetic';
-  sctx.fillStyle = skin.ink;
-  sctx.fillText('저장', height - 2, height / 2 + 6);
-  const img = sctx.getImageData(0, 0, width, height);
-  const d = img.data;
-  for (let i = 3; i < d.length; i += 4) d[i] = d[i] >= 110 ? 255 : 0;
-  sctx.putImageData(img, 0, 0);
-  ctx.drawImage(scratch, 0, 0);
+  // 대상에 바로 그린다. 스크래치 캔버스에 그려 알파를 110 에서 자르고
+  // blit 하던 것을 없앴다 — 그 임계 처리가 막으려던 디더와 5비트 양자화가
+  // 파이프라인에 없다.
+  ctx.save();
+  ctx.font = 'bold 15px ui-monospace, Menlo, monospace';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = skin.ink;
+  ctx.fillText('저장', height - 2, height / 2 + 6);
+  ctx.restore();
 
   return finishIcon(key, canvas, width, height);
 }
@@ -551,8 +539,8 @@ export function solidTexture() {
 function finishIcon(key, canvas, width, height = width) {
   const tex = new CanvasTexture(canvas);
   tex.colorSpace = SRGBColorSpace;
-  tex.magFilter = NearestFilter;
-  tex.minFilter = NearestFilter;
+  tex.magFilter = LinearFilter;
+  tex.minFilter = LinearFilter;
   tex.generateMipmaps = false;
   tex.anisotropy = 1;
   tex.wrapS = ClampToEdgeWrapping;

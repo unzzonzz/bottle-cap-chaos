@@ -1962,12 +1962,19 @@ export const CONFIG = {
     /**
      * Texels per frame pixel for every HUD plate.
      *
-     * 1 puts one texel on one framebuffer pixel at the 640x480 target, which is
-     * what keeps the thresholded type from being resampled into grey. Above 1
-     * authors denser and lets the hardware minify — worse for legibility, which
-     * is why it is a knob to prove that with rather than a setting.
+     * UI 텍스처를 프레임 픽셀의 몇 배로 그릴 것인가.
+     *
+     * ── 1 이었고, 그 이유가 사라졌다 ──────────────────────────────────────
+     * 예전 근거는 "640x480 타겟에서 텍셀 하나가 프레임버퍼 픽셀 하나에 얹혀야
+     * 임계 처리된 글자가 회색으로 리샘플되지 않는다" 였다. 저해상도 타겟도
+     * 임계 처리도 없다. 이제 UI 는 기기 해상도에 그대로 그려지므로, 1 로 두면
+     * 3배 화면에서 프레임 픽셀 하나가 화면 픽셀 세 개가 되고 글자가 흐려진다.
+     *
+     * `main.js` 가 부팅과 리사이즈 때마다 devicePixelRatio 와 캔버스 크기에서
+     * 계산해 덮어쓴다 — 여기 값은 그 전까지의 기본값이자 패널이 손으로 바꿀 때의
+     * 출발점이다. 계산식과 상한은 그쪽 주석에 있다.
      */
-    textureScale: 1,
+    textureScale: 2,
 
     /** Seconds for the score to fade in or out as the zoom crosses. */
     scoreFadeSeconds: 0.22,

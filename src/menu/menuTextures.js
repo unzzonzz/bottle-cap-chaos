@@ -1,4 +1,4 @@
-import { CanvasTexture, ClampToEdgeWrapping, LinearFilter, LinearMipmapLinearFilter, NearestFilter, RepeatWrapping, SRGBColorSpace } from 'three';
+import { CanvasTexture, ClampToEdgeWrapping, LinearFilter, LinearMipmapLinearFilter, RepeatWrapping, SRGBColorSpace } from 'three';
 import { PALETTE, withAlpha } from '../core/palette.js';
 
 /**
@@ -18,22 +18,28 @@ import { PALETTE, withAlpha } from '../core/palette.js';
  * Lifted from `cardTexture.js`, which explains it at length.
  */
 
-const ALPHA_CUT = 110;
 
 function makeCanvas(w, h) {
   const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
   const ctx = c.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
+  ctx.imageSmoothingEnabled = true;
   return { canvas: c, ctx };
 }
 
+/**
+ * UI 텍스처의 필터 정책.
+ *
+ * `LinearFilter` 이고 밉맵은 없다. UI 판은 화면과 거의 1:1 로 대응하는
+ * 쿼드에 붙으므로 축소되는 일이 없고, 밉맵은 만들 이유가 없는 메모리다.
+ * 확대는 일어난다 — 그래서 mag 가 nearest 면 안 된다.
+ */
 function toTexture(canvas, { wrapS = ClampToEdgeWrapping, wrapT = ClampToEdgeWrapping } = {}) {
   const tex = new CanvasTexture(canvas);
   tex.colorSpace = SRGBColorSpace;
-  tex.magFilter = NearestFilter;
-  tex.minFilter = NearestFilter;
+  tex.magFilter = LinearFilter;
+  tex.minFilter = LinearFilter;
   tex.generateMipmaps = false;
   tex.wrapS = wrapS;
   tex.wrapT = wrapT;
@@ -43,15 +49,12 @@ function toTexture(canvas, { wrapS = ClampToEdgeWrapping, wrapT = ClampToEdgeWra
 }
 
 /**
- * A smoothly-filtered texture, for the one thing in this file that needs it.
+ * 밉맵과 이방성이 있는 텍스처. 이 파일에서 그게 필요한 하나를 위해.
  *
- * Everything else here is still `NearestFilter` because PHASE 4 owns the texture
- * rasterisation policy and flipping half of it early would leave the menu
- * looking like two different programs. The label is the exception on purpose:
- * it is a 512x768 decal wrapped onto a curved surface and viewed at a glancing
- * angle down its edges, which is the exact case nearest sampling handles worst —
- * and its alpha edge is cut rather than blended, so a hard-sampled alpha gives a
- * ragged oval no `alphaTest` threshold can rescue.
+ * 나머지는 화면과 거의 1:1 인 UI 판이라 `toTexture` 로 충분하다. 라벨은 다르다 —
+ * 512x768 데칼이 곡면에 감겨 있고 가장자리를 스치듯 보게 되는데, 그건 축소
+ * 필터링이 가장 크게 듣는 경우다. 알파도 블렌딩이 아니라 컷이라, 거칠게 샘플된
+ * 알파는 어떤 `alphaTest` 임계값으로도 구제되지 않는 너덜너덜한 타원이 된다.
  */
 function toSmoothTexture(canvas) {
   const tex = new CanvasTexture(canvas);
@@ -66,32 +69,38 @@ function toSmoothTexture(canvas) {
   return tex;
 }
 
-function crispText(target, scratch, { text, x, y, font, color, align = 'left', slant = 0 }) {
-  const { canvas, ctx } = scratch;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.save();
-  ctx.font = font;
-  ctx.textAlign = align;
-  ctx.textBaseline = 'alphabetic';
-  ctx.fillStyle = color;
+/**
+ * 텍스트를 그린다. 임계 처리 없이, 대상 컨텍스트에 바로.
+ *
+ * ── 스크래치 캔버스와 알파 이진화가 사라졌다 ────────────────────────────────
+ * 예전 이름은 `crispText` 였고, 스크래치 캔버스에 글자를 그린 뒤 알파를 110 에서
+ * 0 아니면 255 로 자르고 그것을 blit 했다. 제자리에서 자르면 밑에 이미 그려진
+ * 그림까지 같이 잘리기 때문에 캔버스가 하나 더 필요했다.
+ *
+ * 그 임계 처리는 저해상도 타겟에 nearest 로 확대되는 파이프라인에서 글자 가장자리의
+ * 중간 알파가 디더와 5비트 양자화를 거치며 지저분해지는 것을 막으려던 것이다. 셋 다
+ * 없다.
+ *
+ * 없애서 얻은 것이 셋이다: 글자가 부드럽고, 고DPI 에서 선명하고, 텍스처 하나마다
+ * 있던 `getImageData` / `putImageData` 왕복이 사라졌다 — 그건 GPU 파이프라인을
+ * 세우는 동기 호출이라 공짜가 아니었다.
+ */
+function drawText(target, { text, x, y, font, color, align = 'left', slant = 0 }) {
+  target.save();
+  target.font = font;
+  target.textAlign = align;
+  target.textBaseline = 'alphabetic';
+  target.fillStyle = color;
   if (slant) {
-    // A shear rather than an italic face: the fonts available are whatever the
-    // machine has, and asking for italic gets a different one on every OS. A
-    // transform is the same lean everywhere.
-    ctx.translate(x, y);
-    ctx.transform(1, 0, -slant, 1, 0, 0);
-    ctx.fillText(text, 0, 0);
+    // 이탤릭 페이스가 아니라 전단. 쓸 수 있는 폰트는 기기에 있는 것뿐이라
+    // italic 을 요구하면 OS 마다 다른 글꼴이 나온다. 변환은 어디서나 같은 기울기다.
+    target.translate(x, y);
+    target.transform(1, 0, -slant, 1, 0, 0);
+    target.fillText(text, 0, 0);
   } else {
-    ctx.fillText(text, x, y);
+    target.fillText(text, x, y);
   }
-  ctx.restore();
-
-  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const d = img.data;
-  for (let i = 3; i < d.length; i += 4) d[i] = d[i] >= ALPHA_CUT ? 255 : 0;
-  ctx.putImageData(img, 0, 0);
-
-  target.drawImage(canvas, 0, 0);
+  target.restore();
 }
 
 /**
@@ -341,7 +350,7 @@ export function capLogoTexture() {
   arc(37, 2, 202, 338, PALETTE.menu.labelCreamAlt);
   arc(37, 2, 22, 158, PALETTE.menu.labelCreamAlt);
 
-  crispText(ctx, scratch, {
+  drawText(ctx, {
     text: 'BOTTLE',
     x: c,
     y: 54,
@@ -350,7 +359,7 @@ export function capLogoTexture() {
     align: 'center',
     slant: 0.22,
   });
-  crispText(ctx, scratch, {
+  drawText(ctx, {
     text: 'CAP',
     x: c,
     y: 76,
@@ -359,7 +368,7 @@ export function capLogoTexture() {
     align: 'center',
     slant: 0.22,
   });
-  crispText(ctx, scratch, {
+  drawText(ctx, {
     text: 'CHAOS',
     x: c,
     y: 92,
@@ -578,7 +587,7 @@ export function menuPlateTexture(label, state, { width = 256, height = 52 } = {}
     size -= 1;
   }
 
-  crispText(ctx, scratch, {
+  drawText(ctx, {
     text: label,
     x: px(24),
     y: Math.round(height / 2 + px(9)),
@@ -587,7 +596,7 @@ export function menuPlateTexture(label, state, { width = 256, height = 52 } = {}
   });
 
   if (state === 'disabled') {
-    crispText(ctx, scratch, {
+    drawText(ctx, {
       text: '준비 중',
       x: width - px(14),
       y: Math.round(height / 2 + px(8)),
@@ -621,7 +630,7 @@ export function titleTexture(text, sub, { width = 256, height = 80 } = {}) {
     size -= 1;
   }
 
-  crispText(ctx, scratch, {
+  drawText(ctx, {
     text,
     x: px(4),
     y: px(32),
@@ -631,7 +640,7 @@ export function titleTexture(text, sub, { width = 256, height = 80 } = {}) {
   ctx.fillStyle = PALETTE.menu.labelRed;
   ctx.fillRect(px(4), px(42), width - px(24), px(4));
   if (sub) {
-    crispText(ctx, scratch, {
+    drawText(ctx, {
       text: sub,
       x: px(4),
       y: px(68),

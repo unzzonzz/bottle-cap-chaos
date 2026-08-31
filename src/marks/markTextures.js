@@ -1,4 +1,4 @@
-import { CanvasTexture, ClampToEdgeWrapping, NearestFilter, SRGBColorSpace } from 'three';
+import { CanvasTexture, ClampToEdgeWrapping, LinearFilter, SRGBColorSpace } from 'three';
 import { CAP_PANEL_RATIO } from '../cap/capGeometry.js';
 import { DEFAULT_MARK, isSlotRef } from './MarkStorage.js';
 import { PALETTE } from '../core/palette.js';
@@ -79,7 +79,7 @@ function makeCanvas(size) {
   const ctx = c.getContext('2d', { willReadFrequently: true });
   // Governs SCALING, not glyph rasterisation — there is no text here, so this is
   // the whole of what it takes to keep the bake hard-edged.
-  ctx.imageSmoothingEnabled = false;
+  ctx.imageSmoothingEnabled = true;
   return { canvas: c, ctx };
 }
 
@@ -143,8 +143,8 @@ export function bakeCapPanel(
 export function toMarkTexture(canvas) {
   const tex = new CanvasTexture(canvas);
   tex.colorSpace = SRGBColorSpace;
-  tex.magFilter = NearestFilter;
-  tex.minFilter = NearestFilter;
+  tex.magFilter = LinearFilter;
+  tex.minFilter = LinearFilter;
   tex.generateMipmaps = false;
   tex.anisotropy = 1;
   tex.wrapS = ClampToEdgeWrapping;

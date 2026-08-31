@@ -1,4 +1,4 @@
-import { CanvasTexture, ClampToEdgeWrapping, NearestFilter, SRGBColorSpace } from 'three';
+import { CanvasTexture, ClampToEdgeWrapping, LinearFilter, SRGBColorSpace } from 'three';
 import { PALETTE, withAlpha } from '../core/palette.js';
 
 /**
@@ -23,7 +23,6 @@ import { PALETTE, withAlpha } from '../core/palette.js';
  * the thresholding.
  */
 
-const ALPHA_CUT = 110;
 const HEIGHT = 16;
 
 /**
@@ -56,7 +55,7 @@ export function scoreTagTexture(score, intent, rank) {
   canvas.width = width;
   canvas.height = HEIGHT;
   const ctx = canvas.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
+  ctx.imageSmoothingEnabled = true;
 
   const color = RANK_TEXT[Math.min(rank, RANK_TEXT.length - 1)];
   ctx.fillStyle = withAlpha(PALETTE.ui.surface, 0.85);
@@ -64,26 +63,17 @@ export function scoreTagTexture(score, intent, rank) {
   ctx.fillStyle = color;
   ctx.fillRect(0, 0, 2, HEIGHT);
 
-  // Thresholded on a scratch pass, because the font rasteriser antialiases glyph
-  // edges whatever `imageSmoothingEnabled` says — see the note in `hudTextures`.
-  const scratch = document.createElement('canvas');
-  scratch.width = width;
-  scratch.height = HEIGHT;
-  const sctx = scratch.getContext('2d');
-  sctx.font = font;
-  sctx.textBaseline = 'alphabetic';
-  sctx.fillStyle = color;
-  sctx.fillText(text, 6, HEIGHT - 4);
-  const img = sctx.getImageData(0, 0, width, HEIGHT);
-  const d = img.data;
-  for (let i = 3; i < d.length; i += 4) d[i] = d[i] >= ALPHA_CUT ? 255 : 0;
-  sctx.putImageData(img, 0, 0);
-  ctx.drawImage(scratch, 0, 0);
+  // 바로 그린다. 스크래치 캔버스에 그려 알파를 잘라 blit 하던 것을 없앴다 —
+  // 그 임계 처리가 막으려던 디더와 양자화가 파이프라인에 없다.
+  ctx.font = font;
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = color;
+  ctx.fillText(text, 6, HEIGHT - 4);
 
   const tex = new CanvasTexture(canvas);
   tex.colorSpace = SRGBColorSpace;
-  tex.magFilter = NearestFilter;
-  tex.minFilter = NearestFilter;
+  tex.magFilter = LinearFilter;
+  tex.minFilter = LinearFilter;
   tex.generateMipmaps = false;
   tex.wrapS = ClampToEdgeWrapping;
   tex.wrapT = ClampToEdgeWrapping;

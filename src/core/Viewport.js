@@ -2,7 +2,7 @@ import {
   Color,
   ColorManagement,
   NoToneMapping,
-  PCFSoftShadowMap,
+  PCFShadowMap,
   SRGBColorSpace,
   Vector2,
   WebGLRenderer,
@@ -85,7 +85,17 @@ export class Viewport {
      */
     this.renderer.toneMapping = NoToneMapping;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = PCFSoftShadowMap;
+    /**
+     * `PCFShadowMap`. `PCFSoftShadowMap` 이 아니다.
+     *
+     * 브리프는 `PCFSoftShadowMap` 을 지정하지만 three 0.185 에서 그건 폐기됐고,
+     * 지정해도 조용히 `PCFShadowMap` 으로 대체되면서 콘솔에 경고를 남긴다.
+     * 실제로 그리는 것과 코드가 말하는 것이 다르면 안 되므로 실제 쪽에 맞췄다.
+     *
+     * 부드러움은 `lighting.js` 의 `sun.shadow.radius` 가 담당한다 — 브리프의
+     * "하드 엣지 금지"는 그쪽에서 지켜진다.
+     */
+    this.renderer.shadowMap.type = PCFShadowMap;
     this.renderer.autoClear = true;
     /**
      * 지워지는 색이 검정이 아니다.

@@ -109,6 +109,26 @@ function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
+/**
+ * 카드 텍스처를 실제로 몇 텍셀로 구울 것인가.
+ *
+ * ── `config.cards` 는 수정 금지 구역이다 ────────────────────────────────────
+ * `cards.textureWidth` 는 128 이고, 그 값이 정해진 근거는 "NearestFilter, 밉맵
+ * 없음, 128 텍셀 카드를 96 프레임 픽셀에 그린다" 였다. 셋 다 사실이 아니게 됐고
+ * 카드는 이제 150 프레임 픽셀 폭이라 128 텍셀로는 흐리다.
+ *
+ * 그런데 `cards` 는 시뮬레이션 최상위 키라 아트 작업이 건드릴 수 없다. 그래서
+ * 값을 고치는 대신 렌더 쪽에서 배수를 곱한다 — `cardCatalog` 의 accent 를
+ * 팔레트가 덮어쓰는 것과 같은 방식이고, 같은 이유다.
+ *
+ * 배수는 UI 텍스처와 같은 것을 쓴다. 카드와 HUD 판이 나란히 놓이는데 둘의
+ * 선명도가 다르면 그게 제일 먼저 보인다.
+ */
+function texelsFor(config, base) {
+  const scale = Math.max(1, Math.min(3, config.ui?.textureScale ?? 1));
+  return Math.round(base * scale);
+}
+
 /** One spring channel. Semi-implicit Euler, sub-stepped so it cannot blow up. */
 function advance(ch, target, k, c, dt) {
   const steps = Math.max(1, Math.ceil(dt / SUB_STEP));
@@ -302,7 +322,9 @@ export class CardHand {
   }
 
   _makeCard(data, key) {
-    const mat = this.materials.create(cardFaceTexture(data, this.config.cards.textureWidth));
+    const mat = this.materials.create(
+      cardFaceTexture(data, texelsFor(this.config, this.config.cards.textureWidth)),
+    );
     const shadowMat = this.materials.createShadow();
 
     const mesh = new Mesh(QUAD, mat);
@@ -333,7 +355,7 @@ export class CardHand {
       mat,
       shadowMat,
       /** Which texture width is currently uploaded, so it is only swapped once. */
-      texWidth: this.config.cards.textureWidth,
+      texWidth: texelsFor(this.config, this.config.cards.textureWidth),
       texFace: true,
       x: channel(0),
       y: channel(0),
@@ -798,7 +820,7 @@ export class CardHand {
   /** Swap the LOD, and the face, only when what is wanted actually changes. */
   _applyTexture(c, wantFace, big) {
     const cfg = this.config.cards;
-    const want = big && wantFace ? cfg.hoverTextureWidth : cfg.textureWidth;
+    const want = texelsFor(this.config, big && wantFace ? cfg.hoverTextureWidth : cfg.textureWidth);
     if (c.texWidth === want && c.texFace === wantFace) return;
     c.texWidth = want;
     c.texFace = wantFace;

@@ -1,4 +1,4 @@
-import { CanvasTexture, ClampToEdgeWrapping, NearestFilter, SRGBColorSpace } from 'three';
+import { CanvasTexture, ClampToEdgeWrapping, LinearFilter, SRGBColorSpace } from 'three';
 import { darken, PALETTE } from '../core/palette.js';
 import { registerTextureCache } from './fonts.js';
 
@@ -28,8 +28,6 @@ import { registerTextureCache } from './fonts.js';
  * defaults to 1 and is exposed as a knob rather than a setting.
  */
 
-/** Alpha at or above this survives; everything else is dropped. */
-const ALPHA_CUT = 110;
 
 const cache = new Map();
 
@@ -38,15 +36,22 @@ function makeCanvas(w, h) {
   c.width = Math.max(1, Math.round(w));
   c.height = Math.max(1, Math.round(h));
   const ctx = c.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
+  ctx.imageSmoothingEnabled = true;
   return { canvas: c, ctx };
 }
 
+/**
+ * UI 텍스처의 필터 정책.
+ *
+ * `LinearFilter` 이고 밉맵은 없다. UI 판은 화면과 거의 1:1 로 대응하는
+ * 쿼드에 붙으므로 축소되는 일이 없고, 밉맵은 만들 이유가 없는 메모리다.
+ * 확대는 일어난다 — 그래서 mag 가 nearest 면 안 된다.
+ */
 function toTexture(canvas) {
   const tex = new CanvasTexture(canvas);
   tex.colorSpace = SRGBColorSpace;
-  tex.magFilter = NearestFilter;
-  tex.minFilter = NearestFilter;
+  tex.magFilter = LinearFilter;
+  tex.minFilter = LinearFilter;
   tex.generateMipmaps = false;
   tex.wrapS = ClampToEdgeWrapping;
   tex.wrapT = ClampToEdgeWrapping;
@@ -56,29 +61,29 @@ function toTexture(canvas) {
 }
 
 /**
- * Draw text with hard edges.
+ * 텍스트를 그린다. 임계 처리 없이, 대상 컨텍스트에 바로.
  *
- * Rasterised on a scratch canvas, thresholded, then blitted. Doing it in place
- * would threshold whatever art is already underneath it as well. Lifted from
- * `render/cardTexture.js`, which explains at length why
- * `imageSmoothingEnabled = false` is not enough on its own — that flag governs
- * image SCALING, and the font rasteriser antialiases glyph edges regardless.
+ * ── 스크래치 캔버스와 알파 이진화가 사라졌다 ────────────────────────────────
+ * 예전 이름은 `crispText` 였고, 스크래치 캔버스에 글자를 그린 뒤 알파를 110 에서
+ * 0 아니면 255 로 자르고 그것을 blit 했다. 제자리에서 자르면 밑에 이미 그려진
+ * 그림까지 같이 잘리기 때문에 캔버스가 하나 더 필요했다.
+ *
+ * 그 임계 처리는 저해상도 타겟에 nearest 로 확대되는 파이프라인에서 글자 가장자리의
+ * 중간 알파가 디더와 5비트 양자화를 거치며 지저분해지는 것을 막으려던 것이다. 셋 다
+ * 없다. 지금은 그냥 안티에일리어싱된 글자가 그대로 화면에 간다.
+ *
+ * 없애서 얻은 것이 셋이다: 글자가 부드럽고, 고DPI 에서 선명하고, 텍스처 하나마다
+ * 있던 `getImageData` / `putImageData` 왕복이 사라졌다 — 그건 GPU 파이프라인을
+ * 세우는 동기 호출이라 공짜가 아니었다.
  */
-function crispText(target, scratch, { text, x, y, font, color, align = 'left' }) {
-  const { canvas, ctx } = scratch;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.font = font;
-  ctx.textAlign = align;
-  ctx.textBaseline = 'alphabetic';
-  ctx.fillStyle = color;
-  ctx.fillText(text, x, y);
-
-  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const d = img.data;
-  for (let i = 3; i < d.length; i += 4) d[i] = d[i] >= ALPHA_CUT ? 255 : 0;
-  ctx.putImageData(img, 0, 0);
-
-  target.drawImage(canvas, 0, 0);
+function drawText(target, { text, x, y, font, color, align = 'left' }) {
+  target.save();
+  target.font = font;
+  target.textAlign = align;
+  target.textBaseline = 'alphabetic';
+  target.fillStyle = color;
+  target.fillText(text, x, y);
+  target.restore();
 }
 
 /**
@@ -149,7 +154,7 @@ export function scorePlateTexture(board, { width, height, scale = 1 }) {
   const numberY = u(29);
   const numberFont = `bold ${u(26)}px ui-monospace, Menlo, monospace`;
 
-  crispText(ctx, scratch, {
+  drawText(ctx, {
     text: board.left.value,
     x: mid - u(22),
     y: numberY,
@@ -157,7 +162,7 @@ export function scorePlateTexture(board, { width, height, scale = 1 }) {
     color: board.left.color,
     align: 'right',
   });
-  crispText(ctx, scratch, {
+  drawText(ctx, {
     text: ':',
     x: mid,
     y: numberY - u(2),
@@ -165,7 +170,7 @@ export function scorePlateTexture(board, { width, height, scale = 1 }) {
     color: PALETTE.ui.textFaint,
     align: 'center',
   });
-  crispText(ctx, scratch, {
+  drawText(ctx, {
     text: board.right.value,
     x: mid + u(22),
     y: numberY,
@@ -175,7 +180,7 @@ export function scorePlateTexture(board, { width, height, scale = 1 }) {
   });
 
   if (board.caption) {
-    crispText(ctx, scratch, {
+    drawText(ctx, {
       text: board.caption,
       x: mid,
       y: h - u(4),
@@ -233,7 +238,7 @@ export function buttonTexture(label, state, { width, height, scale = 1 }) {
   ctx.fillStyle = skin.bar;
   ctx.fillRect(u(3), u(3), u(4), h - u(6));
 
-  crispText(ctx, scratch, {
+  drawText(ctx, {
     text: label,
     x: u(13),
     y: Math.round(h / 2 + u(6)),
@@ -361,7 +366,7 @@ export function turnPlateTexture(text, color, { width, height, scale = 1, maxWid
   ctx.fillStyle = color;
   ctx.fillRect(0, 0, u(4), h);
 
-  crispText(ctx, scratch, {
+  drawText(ctx, {
     text,
     x: u(11),
     y: Math.round(h / 2 + u(6)),
@@ -406,7 +411,7 @@ export function notePlateTexture(text, tone, { height, scale = 1, maxWidth = 360
   ctx.fillStyle = tone === 'timeout' ? PALETTE.ui.danger : PALETTE.accent.yellow;
   ctx.fillRect(0, 0, u(3), h);
 
-  crispText(ctx, scratch, {
+  drawText(ctx, {
     text,
     x: u(9),
     y: Math.round(h / 2 + u(5)),
@@ -491,7 +496,7 @@ export function victoryPlateTexture(text, color, { width, height, scale = 1 }) {
   ctx.fillRect(u(3), u(3), u(9), h - u(6));
   ctx.fillRect(w - u(12), u(3), u(9), h - u(6));
 
-  crispText(ctx, scratch, {
+  drawText(ctx, {
     text,
     x: w / 2,
     // Baseline rather than a centred box: `textBaseline` is alphabetic in
@@ -616,7 +621,7 @@ export function modalTexture(
 
   let y = u(pad) + u(14);
   if (title) {
-    crispText(ctx, scratch, {
+    drawText(ctx, {
       text: title,
       x: u(pad),
       y,
@@ -626,7 +631,7 @@ export function modalTexture(
     y += titleH;
   }
   for (const line of lines) {
-    crispText(ctx, scratch, {
+    drawText(ctx, {
       text: line,
       x: u(pad),
       y,

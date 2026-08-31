@@ -1,6 +1,7 @@
 import { Color, PerspectiveCamera, Scene } from 'three';
 import { GlossMaterials } from '../core/GlossMaterial.js';
 import { buildEnvironment } from '../core/environment.js';
+import { setTextureRenderer } from '../core/textures.js';
 import { PALETTE } from '../core/palette.js';
 import { DISPLAY_ASPECT, Viewport } from '../core/Viewport.js';
 import { SceneComposer } from '../core/Composer.js';
@@ -19,6 +20,7 @@ import { bootDebug } from './Debug.js';
 
 export function bootViewer(canvas) {
   const viewport = new Viewport({ canvas });
+  setTextureRenderer(viewport.renderer);
   const retro = new GlossMaterials({ resolution: viewport.resolution });
 
   const scene = new Scene();

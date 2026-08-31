@@ -16,7 +16,12 @@ import { PALETTE } from '../core/palette.js';
  * the mesh — and it is what the affine warp visibly bends as the cap tips away.
  */
 export function makeCapTopTexture() {
-  return makeCanvasTexture(128, drawCapTop, {
+  /**
+   * 512. 드로잉 코드는 이미 전부 `size` 비율이라 숫자만 올리면 된다 — 이 파일이
+   * 처음부터 정규화되어 있었기 때문이고, 나머지 텍스처들이 PHASE 4 에서 하게 된
+   * 작업을 이미 해 둔 셈이다.
+   */
+  return makeCanvasTexture(512, drawCapTop, {
     // The panel's UVs cover exactly [0, 1] and nothing samples outside it, but
     // clamping means a rounding error at the rim cannot wrap round to the far
     // edge of the image.

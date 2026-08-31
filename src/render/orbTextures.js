@@ -1,4 +1,4 @@
-import { CanvasTexture, ClampToEdgeWrapping, NearestFilter, RepeatWrapping, SRGBColorSpace } from 'three';
+import { CanvasTexture, ClampToEdgeWrapping, LinearFilter, RepeatWrapping, SRGBColorSpace } from 'three';
 import { PALETTE } from '../core/palette.js';
 
 /**
@@ -14,15 +14,15 @@ function makeCanvas(w, h) {
   c.width = w;
   c.height = h;
   const ctx = c.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
+  ctx.imageSmoothingEnabled = true;
   return { canvas: c, ctx };
 }
 
 function toTexture(canvas, wrapS = ClampToEdgeWrapping) {
   const t = new CanvasTexture(canvas);
   t.colorSpace = SRGBColorSpace;
-  t.magFilter = NearestFilter;
-  t.minFilter = NearestFilter;
+  t.magFilter = LinearFilter;
+  t.minFilter = LinearFilter;
   t.generateMipmaps = false;
   t.wrapS = wrapS;
   t.wrapT = ClampToEdgeWrapping;

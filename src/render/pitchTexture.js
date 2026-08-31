@@ -52,8 +52,18 @@ const BLADE_A = PALETTE.pitch.grassB;
 const BLADE_B = PALETTE.pitch.grassC;
 const DRY = PALETTE.pitch.grassDry;
 
+/**
+ * 텍셀 한 변.
+ *
+ * 128 이었다. 그때는 파이프라인에 밉맵이 없어서 1텍셀:1픽셀 근처를 맞추는 게
+ * 전부였고, `TURF_TILE` 이 그 계산의 결과다. 이제 밉맵과 이방성이 있으므로
+ * 축소는 필터가 처리하고, 해상도는 "가까이서 볼 때 잔디가 잔디로 보이는가"만
+ * 결정한다.
+ */
+const SIZE = 512;
+
 export function makeTurfTexture() {
-  return makeCanvasTexture(128, drawTurf);
+  return makeCanvasTexture(SIZE, drawTurf);
 }
 
 function drawTurf(ctx, size) {
@@ -69,22 +79,57 @@ function drawTurf(ctx, size) {
   // texture being minified, and this stops what is left of it from twinkling in
   // place. Fewer of them too: at two texels each, 900 covered most of the tile
   // and the tones averaged out into a flat wash.
-  for (let i = 0; i < 320; i++) {
+  /**
+   * 잎의 크기와 개수는 해상도에 비례한다.
+   *
+   * 예전엔 "폭 2텍셀, 320개"였다. 128 에서 2텍셀은 36cm 타일에서 5.6mm — 잔디
+   * 잎의 두께로 맞는 값이다. 상한만 1024 로 올리고 2텍셀을 그대로 두면 0.7mm
+   * 짜리 실오라기가 되어 잔디가 아니라 카펫 보풀이 된다. 그래서 폭도 개수도
+   * `k` 로 비례시킨다 — 같은 물리 크기의 잎이 면적에 비례해 더 많이 깔린다.
+   */
+  const k = size / 128;
+
+  /**
+   * 잎은 더 가늘고 더 많고 더 흐리다.
+   *
+   * 예전 값을 그대로 비례시켰더니 화면에서 4픽셀짜리 블록이 됐다. 물리 크기는
+   * 이전과 같았지만 — nearest 로 축소되며 모아레에 묻혀 있던 것이 필터링이
+   * 제대로 되면서 또렷해졌을 뿐이다 — 또렷해지고 나니 잔디가 아니라 모자이크로
+   * 보였다. 필터가 좋아지면 없던 문제가 보이는 게 아니라, 있던 문제가 드러난다.
+   *
+   * 폭을 절반으로 줄이고 개수를 네 배로 늘렸다. 알파를 넣은 건 텍스처가 무늬가
+   * 아니라 질감이어야 하기 때문이다 — 잔디의 색 단계는 `BAND_TINT` 의 깎은
+   * 줄무늬가 맡고, 이 파일은 그 위의 미세한 결만 담당한다.
+   */
+  const blades = Math.round(1280 * k * k);
+  const w = Math.max(1, Math.round(k));
+  ctx.globalAlpha = 0.5;
+  for (let i = 0; i < blades; i++) {
     const h = hash2(i, 11);
     const x = h % size;
     const y = Math.floor(h / size) % size;
-    const len = 3 + ((h >>> 9) % 3);
+    const len = Math.max(1, Math.round((2 + ((h >>> 9) % 3)) * k * 0.7));
     ctx.fillStyle = (h >>> 3) & 1 ? BLADE_A : BLADE_B;
-    ctx.fillRect(x, y, 2, len);
+    ctx.fillRect(x, y, w, len);
   }
+  ctx.globalAlpha = 1;
 
   // A handful of drier patches, to break up the regularity at a scale the eye
   // picks up before it picks up individual tufts.
-  for (let i = 0; i < 40; i++) {
+  // 마른 자국. 잎보다 더 흐리다 — 이건 눈에 띄면 얼룩이지 잔디가 아니다.
+  const patches = Math.round(60 * k * k);
+  ctx.globalAlpha = 0.25;
+  for (let i = 0; i < patches; i++) {
     const h = hash2(i, 29);
     ctx.fillStyle = DRY;
-    ctx.fillRect(h % size, Math.floor(h / size) % size, 4 + ((h >>> 7) % 4), 3);
+    ctx.fillRect(
+      h % size,
+      Math.floor(h / size) % size,
+      Math.round((4 + ((h >>> 7) % 4)) * k),
+      Math.round(2 * k),
+    );
   }
+  ctx.globalAlpha = 1;
 }
 
 /** Deterministic 32-bit integer hash. Same pitch every run — see boardTexture. */

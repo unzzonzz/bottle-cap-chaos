@@ -1,4 +1,4 @@
-import { CanvasTexture, ClampToEdgeWrapping, NearestFilter, SRGBColorSpace } from 'three';
+import { CanvasTexture, ClampToEdgeWrapping, LinearFilter, SRGBColorSpace } from 'three';
 import { PALETTE } from '../core/palette.js';
 import { registerTextureCache } from '../ui/fonts.js';
 
@@ -54,8 +54,6 @@ function accentOf(card) {
   return PALETTE.card[card.id] ?? card.accent;
 }
 
-/** Alpha at or above this survives; everything else is dropped. */
-const ALPHA_CUT = 110;
 
 const cache = new Map();
 
@@ -64,31 +62,34 @@ function makeCanvas(w, h) {
   c.width = w;
   c.height = h;
   const ctx = c.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
+  ctx.imageSmoothingEnabled = true;
   return { canvas: c, ctx };
 }
 
 /**
- * Draw text with hard edges.
+ * 텍스트를 그린다. 임계 처리 없이, 대상 컨텍스트에 바로.
  *
- * Rasterised on a scratch canvas, thresholded, then blitted. Doing it in place
- * would mean thresholding the card art underneath it as well.
+ * ── 스크래치 캔버스와 알파 이진화가 사라졌다 ────────────────────────────────
+ * 예전 이름은 `crispText` 였고, 스크래치 캔버스에 글자를 그린 뒤 알파를 110 에서
+ * 0 아니면 255 로 자르고 그것을 blit 했다. 제자리에서 자르면 밑에 이미 그려진
+ * 그림까지 같이 잘리기 때문에 캔버스가 하나 더 필요했다.
+ *
+ * 그 임계 처리는 저해상도 타겟에 nearest 로 확대되는 파이프라인에서 글자 가장자리의
+ * 중간 알파가 디더와 5비트 양자화를 거치며 지저분해지는 것을 막으려던 것이다. 셋 다
+ * 없다.
+ *
+ * 없애서 얻은 것이 셋이다: 글자가 부드럽고, 고DPI 에서 선명하고, 텍스처 하나마다
+ * 있던 `getImageData` / `putImageData` 왕복이 사라졌다 — 그건 GPU 파이프라인을
+ * 세우는 동기 호출이라 공짜가 아니었다.
  */
-function crispText(target, scratch, { text, x, y, font, color, align = 'left' }) {
-  const { canvas, ctx } = scratch;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.font = font;
-  ctx.textAlign = align;
-  ctx.textBaseline = 'alphabetic';
-  ctx.fillStyle = color;
-  ctx.fillText(text, x, y);
-
-  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const d = img.data;
-  for (let i = 3; i < d.length; i += 4) d[i] = d[i] >= ALPHA_CUT ? 255 : 0;
-  ctx.putImageData(img, 0, 0);
-
-  target.drawImage(canvas, 0, 0);
+function drawText(target, { text, x, y, font, color, align = 'left' }) {
+  target.save();
+  target.font = font;
+  target.textAlign = align;
+  target.textBaseline = 'alphabetic';
+  target.fillStyle = color;
+  target.fillText(text, x, y);
+  target.restore();
 }
 
 /** Wrap `text` to `width` px in the current font, by measuring. */
@@ -150,7 +151,7 @@ export function cardFaceTexture(card, width) {
   ctx.fill();
 
   // Name, then a rule under it.
-  crispText(ctx, scratch, {
+  drawText(ctx, {
     text: card.name,
     x: Math.round(7 * u),
     y: Math.round(19 * u),
@@ -166,7 +167,7 @@ export function cardFaceTexture(card, width) {
   const artH = Math.round(78 * u);
   ctx.fillStyle = PANEL;
   ctx.fillRect(Math.round(6 * u), artY, w - Math.round(12 * u), artH);
-  crispText(ctx, scratch, {
+  drawText(ctx, {
     text: card.glyph,
     x: Math.round(w / 2),
     y: artY + Math.round(artH * 0.68),
@@ -180,7 +181,7 @@ export function cardFaceTexture(card, width) {
   const lines = wrap(ctx, card.text, w - Math.round(14 * u), bodyFont);
   let ty = artY + artH + Math.round(14 * u);
   for (const line of lines.slice(0, 3)) {
-    crispText(ctx, scratch, {
+    drawText(ctx, {
       text: line,
       x: Math.round(7 * u),
       y: ty,
@@ -192,8 +193,8 @@ export function cardFaceTexture(card, width) {
 
   const tex = new CanvasTexture(canvas);
   tex.colorSpace = SRGBColorSpace;
-  tex.magFilter = NearestFilter;
-  tex.minFilter = NearestFilter;
+  tex.magFilter = LinearFilter;
+  tex.minFilter = LinearFilter;
   tex.generateMipmaps = false;
   tex.wrapS = ClampToEdgeWrapping;
   tex.wrapT = ClampToEdgeWrapping;
@@ -232,7 +233,7 @@ export function cardBackTexture(width) {
   ctx.strokeStyle = BACK_MARK;
   ctx.lineWidth = Math.max(1, Math.round(u));
   ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
-  crispText(ctx, scratch, {
+  drawText(ctx, {
     text: '✶',
     x: Math.round(w / 2),
     y: Math.round(h / 2 + 12 * u),
@@ -243,8 +244,8 @@ export function cardBackTexture(width) {
 
   const tex = new CanvasTexture(canvas);
   tex.colorSpace = SRGBColorSpace;
-  tex.magFilter = NearestFilter;
-  tex.minFilter = NearestFilter;
+  tex.magFilter = LinearFilter;
+  tex.minFilter = LinearFilter;
   tex.generateMipmaps = false;
   tex.wrapS = ClampToEdgeWrapping;
   tex.wrapT = ClampToEdgeWrapping;
@@ -328,8 +329,8 @@ export function useGuideTexture(width, height) {
 
   const tex = new CanvasTexture(canvas);
   tex.colorSpace = SRGBColorSpace;
-  tex.magFilter = NearestFilter;
-  tex.minFilter = NearestFilter;
+  tex.magFilter = LinearFilter;
+  tex.minFilter = LinearFilter;
   tex.generateMipmaps = false;
   tex.wrapS = ClampToEdgeWrapping;
   tex.wrapT = ClampToEdgeWrapping;
@@ -370,7 +371,7 @@ export function noticeTexture(text) {
   ctx.strokeStyle = PALETTE.ui.danger;
   ctx.lineWidth = 1;
   ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
-  crispText(ctx, scratch, {
+  drawText(ctx, {
     text,
     x: 8,
     y: 14,
@@ -380,8 +381,8 @@ export function noticeTexture(text) {
 
   const tex = new CanvasTexture(canvas);
   tex.colorSpace = SRGBColorSpace;
-  tex.magFilter = NearestFilter;
-  tex.minFilter = NearestFilter;
+  tex.magFilter = LinearFilter;
+  tex.minFilter = LinearFilter;
   tex.generateMipmaps = false;
   tex.wrapS = ClampToEdgeWrapping;
   tex.wrapT = ClampToEdgeWrapping;

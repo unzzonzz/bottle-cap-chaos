@@ -3,6 +3,7 @@ import { GlossMaterials } from '../core/GlossMaterial.js';
 import { buildEnvironment } from '../core/environment.js';
 import { createLightRig } from '../core/lighting.js';
 import { createSky } from '../core/sky.js';
+import { setTextureRenderer } from '../core/textures.js';
 import { DISPLAY_ASPECT, Viewport } from '../core/Viewport.js';
 import { SceneComposer } from '../core/Composer.js';
 import { BOARD_ASPECT, FRAME } from '../core/frame.js';
@@ -122,6 +123,7 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
   // simply takes the window's shape and the arrangement below stacks instead of
   // sitting side by side. See src/core/frame.js.
   const viewport = new Viewport({ canvas, portrait: true });
+  setTextureRenderer(viewport.renderer);
   const retro = new GlossMaterials({ resolution: viewport.resolution });
 
   viewport.onResize(({ resolution }) => retro.setResolution(resolution));

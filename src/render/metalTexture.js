@@ -90,8 +90,10 @@ const BAND_LO = PALETTE.metal.bandLo;
 const GRAIN_HI = PALETTE.metal.grainHi;
 const GRAIN_LO = PALETTE.metal.grainLo;
 
+const SIZE = 512;
+
 export function makeMetalTexture() {
-  return makeCanvasTexture(128, drawMetal);
+  return makeCanvasTexture(SIZE, drawMetal);
 }
 
 function drawMetal(ctx, size) {
