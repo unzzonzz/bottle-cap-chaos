@@ -113,15 +113,33 @@ export const PALETTE = {
   /**
    * The world backdrop: an abstract aero gradient, not an outdoor scene.
    *
-   * Deep sky overhead falling to almost-white at the bottom, with a few very
-   * slow bokeh points over it. There is deliberately nothing else out there —
-   * the brief is explicit that objects around the board compete with the board,
-   * and both football and curling have framing requirements that scenery breaks.
+   * Deep sky overhead falling to a lit horizon, with a few very slow bokeh
+   * points over it. There is deliberately nothing else out there — the brief is
+   * explicit that objects around the board compete with the board, and both
+   * football and curling have framing requirements that scenery breaks.
+   *
+   * ── "almost-white at the bottom" 이었고, 그게 너무 밝았다 ──────────────────
+   * `skyLow` 가 `#dff4fc`, 상대 휘도 0.874 였다. 메뉴 아래쪽을 90x90 픽셀 재면
+   * 평균 0.981 — 사실상 흰 종이다. 거기에 바닥 광원의 흰 글로우가 겹치니 화면
+   * 아래 3분의 1이 하나의 흰 덩어리가 됐고, 병이 그 위에 떠 있는 것이 아니라
+   * 잘려 있는 것으로 보였다.
+   *
+   * 실측으로 내렸다:
+   *
+   *     #dff4fc (L 0.874)   아래쪽 평균 0.981   ← 흰 종이
+   *     #bfe6f7 (L 0.769)   아래쪽 평균 0.980   ← 바닥 글로우가 여전히 지배
+   *     #a8dcf2 (L 0.681)   아래쪽 평균 0.875   ← 지금
+   *
+   * `below` 도 함께 내렸다. 둘은 지평선의 위아래이고, 하나만 내리면 그 경계가
+   * 띠로 보인다.
+   *
+   * 아직 밝다(0.875). 그건 바닥 광원이 만드는 것이고 그쪽은 **광원이므로** 밝은
+   * 것이 맞다 — 지금은 흰 벌판이 아니라 빛나는 웅덩이로 읽힌다.
    */
   bg: {
     skyTop: '#1a76c4',
     skyMid: '#4fb3e8',
-    skyLow: '#dff4fc',
+    skyLow: '#a8dcf2',
     /**
      * 수평선 아래, 즉 필드 바깥의 원경.
      *
@@ -136,7 +154,7 @@ export const PALETTE = {
      * 수평선 부근에 쓰이므로, 옆에서 보는 메뉴에서는 브리프가 요구한 그라디언트
      * 그대로다.
      */
-    below: '#7fbde0',
+    below: '#63a2cc',
     bokeh: PAPER,
   },
 

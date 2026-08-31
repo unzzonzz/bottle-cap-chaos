@@ -26,6 +26,19 @@ import { BUDGET } from './budget.js';
 /** 태양의 방향. `environment.js` 의 `uSunDir` 과 같은 값이어야 한다. */
 const SUN_DIR = { x: -0.55, y: 0.72, z: 0.42 };
 
+/**
+ * ── 문서별 노출 배율을 넣었다가 뺐다 ────────────────────────────────────────
+ * "경기 화면은 어둡고 메뉴는 밝다" 는 보고를 받고 `scale` 인자를 넣었는데, 재보니
+ * 메뉴에서 이 리그는 거의 아무 일도 하지 않는다: 강도를 2배로 바꿔도 병 몸통의
+ * 평균 휘도가 0.78 에서 0.761 로 2% 움직인다.
+ *
+ * 메뉴가 밝았던 것은 조명이 아니라 **하늘**이었다 — `PALETTE.bg.skyLow` 가 휘도
+ * 0.874 라 화면 아래쪽이 평균 0.981, 사실상 흰 종이였다. 거기를 고쳤다.
+ * 병의 하이라이트는 환경맵의 태양이 유리에 비친 것이라 어느 쪽과도 무관하고,
+ * 그래서 요구대로 그대로 남았다.
+ *
+ * 쓰지 않는 인자를 남기지 않는다. 필요해지면 여기 세 줄에 `* k` 를 붙이면 된다.
+ */
 export function createLightRig(scene, { shadows = true, shadowMapSize = BUDGET.shadowMapSize } = {}) {
   /**
    * 키 라이트. 그림자를 던지는 유일한 광원이다.
@@ -41,10 +54,20 @@ export function createLightRig(scene, { shadows = true, shadowMapSize = BUDGET.s
  * 그것도 확산광에 기여하므로, 2.4 를 그대로 쓰면 보드의 조도가 albedo 를 넘어
  * 화면 전체가 하얗게 날아간다. 실제로 그렇게 됐다.
  *
- * 셋의 합이 대략 1 근처가 되도록 잡았다 — 그래야 팔레트에서 고른 색이 화면에서
- * 그 색으로 나온다. 팔레트 감사가 재는 대비값도 그 전제 위에 있다.
+ * ── 0.95 / 0.42 / 0.35 였고, 실측으로 올렸다 ───────────────────────────────
+ * 판 한가운데를 120x120 픽셀 읽어 상대 휘도를 재면:
+ *
+ *     0.95 / 0.42 / 0.35   평균 0.578  최대 0.607   ← 어두웠다
+ *     1.15 / 0.50 / 0.40   평균 0.604  최대 0.632
+ *     1.30 / 0.56 / 0.44   평균 0.623  최대 0.652   ← 지금
+ *     1.45 / 0.62 / 0.48   평균 0.641  최대 0.672
+ *
+ * 상한을 정하는 것은 블룸 임계값 0.72 다. 판이 그것을 넘으면 나무가 빛나기
+ * 시작하는데, 빛나야 하는 것은 젖은 금속이지 나무가 아니다. 1.45 조는 최대
+ * 0.672 로 여유가 5% 밖에 없어서, 밝은 뚜껑이 겹치는 순간 넘는다. 1.30 조는
+ * 10% 를 남긴다.
  */
-const sun = new DirectionalLight(PALETTE.light.sun, 0.95);
+const sun = new DirectionalLight(PALETTE.light.sun, 1.3);
   sun.position.set(SUN_DIR.x, SUN_DIR.y, SUN_DIR.z).multiplyScalar(120);
   sun.castShadow = shadows;
   sun.shadow.mapSize.set(shadowMapSize, shadowMapSize);
@@ -73,7 +96,7 @@ const sun = new DirectionalLight(PALETTE.light.sun, 0.95);
    * 위는 하늘색, 아래는 지면색. 키가 닿지 않는 면이 검게 죽지 않고 하늘색을
    * 띠게 만드는 게 전부이고, 그게 "그림자 안에서도 색이 보인다"의 구현이다.
    */
-  const hemi = new HemisphereLight(PALETTE.light.ambientSky, PALETTE.light.ambientGround, 0.42);
+  const hemi = new HemisphereLight(PALETTE.light.ambientSky, PALETTE.light.ambientGround, 0.56);
   scene.add(hemi);
 
   /**
@@ -84,7 +107,7 @@ const sun = new DirectionalLight(PALETTE.light.sun, 0.95);
    * 문제다 — 역광이 그림자를 던지면 카메라 쪽으로 그림자가 나와서 접지 그림자와
    * 싸운다.
    */
-  const rim = new DirectionalLight(PALETTE.light.rim, 0.35);
+  const rim = new DirectionalLight(PALETTE.light.rim, 0.44);
   rim.position.set(0.62, 0.28, -0.74).multiplyScalar(120);
   rim.castShadow = false;
   scene.add(rim);

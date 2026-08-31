@@ -1375,6 +1375,9 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
     // a cap wipe and a fade, and neither is something you can step through by
     // hand from the outside.
     swapTo, markBook, openEditor, audio, menuAudio, launch,
+    // 조명 리그. 노출을 손으로 재려면 있어야 한다 — `createLightRig` 의 `scale`
+    // 주석에 왜 이 문서가 경기 화면과 다른 배율을 쓰는지 적혀 있다.
+    lights,
     get marks() { return marks; }, get settings() { return settings; },
     get editor() { return editor; },
     get opponent() { return opponent; },
