@@ -1,6 +1,9 @@
 import { CanvasTexture, ClampToEdgeWrapping, LinearFilter, SRGBColorSpace } from 'three';
 import { darken, PALETTE } from '../core/palette.js';
 import { registerTextureCache } from './fonts.js';
+import { ELEVATION, RADIUS, SIZE, SPACE, TYPE } from '../core/tokens.js';
+import { applyTracking, focusRing, fontSpec, gelButton, glassPanel, roundRectPath, skinFor } from './glass.js';
+import { drawIcon } from './icons.js';
 
 /**
  * Every plate the HUD draws, as a canvas texture.
@@ -134,65 +137,84 @@ export function scorePlateTexture(board, { width, height, scale = 1 }) {
   const w = Math.round(width * scale);
   const h = Math.round(height * scale);
   const { canvas, ctx } = makeCanvas(w, h);
-  const scratch = makeCanvas(w, h);
-  /** Authored against the plate's frame size, then scaled. */
-  const u = (n) => Math.max(1, Math.round(n * scale));
+  /**
+   * 프레임 좌표로 그린다.
+   *
+   * 캔버스를 `scale` 배로 만들고 컨텍스트에 같은 배수를 걸어 두면, 아래 모든
+   * 숫자가 `tokens.js` 의 프레임 픽셀 그대로가 된다. 예전에는 `u(n)` 로 하나씩
+   * 곱했는데, 그러면 토큰 값과 코드의 숫자가 달라 보여서 대조가 안 된다.
+   */
+  ctx.scale(scale, scale);
+  const fw = width;
+  const fh = height;
 
-  ctx.fillStyle = PLATE;
-  ctx.fillRect(0, 0, w, h);
-  ctx.strokeStyle = EDGE;
-  ctx.lineWidth = u(1);
-  ctx.strokeRect(u(0.5), u(0.5), w - u(1), h - u(1));
+  glassPanel(ctx, { x: 0, y: 0, w: fw, h: fh, radius: RADIUS.panel });
 
-  // The team bars. Wide enough to read as a colour rather than a line.
-  ctx.fillStyle = board.left.color;
-  ctx.fillRect(u(3), u(3), u(7), h - u(6));
-  ctx.fillStyle = board.right.color;
-  ctx.fillRect(w - u(10), u(3), u(7), h - u(6));
+  // 팀 색 바. 색으로 읽히려면 선이 아니라 면이어야 한다.
+  const bar = 10;
+  for (const [color, x] of [[board.left.color, SPACE.sm], [board.right.color, fw - SPACE.sm - bar]]) {
+    ctx.fillStyle = color;
+    roundRectPath(ctx, x, SPACE.sm, bar, fh - SPACE.sm * 2, bar / 2);
+    ctx.fill();
+  }
 
-  const mid = w / 2;
-  const numberY = u(29);
-  const numberFont = `bold ${u(26)}px ui-monospace, Menlo, monospace`;
-
+  const mid = fw / 2;
+  const numberY = fh * 0.56;
+  applyTracking(ctx, TYPE.display.tracking);
   drawText(ctx, {
     text: board.left.value,
-    x: mid - u(22),
+    x: mid - SPACE.md,
     y: numberY,
-    font: numberFont,
-    color: board.left.color,
+    font: fontSpec(TYPE.display),
+    color: inkFor(board.left.color),
     align: 'right',
   });
   drawText(ctx, {
+    text: board.right.value,
+    x: mid + SPACE.md,
+    y: numberY,
+    font: fontSpec(TYPE.display),
+    color: inkFor(board.right.color),
+    align: 'left',
+  });
+  applyTracking(ctx, 0);
+  drawText(ctx, {
     text: ':',
     x: mid,
-    y: numberY - u(2),
-    font: `bold ${u(19)}px ui-monospace, Menlo, monospace`,
+    y: numberY - 4,
+    font: fontSpec(TYPE.title),
     color: PALETTE.ui.textFaint,
     align: 'center',
   });
-  drawText(ctx, {
-    text: board.right.value,
-    x: mid + u(22),
-    y: numberY,
-    font: numberFont,
-    color: board.right.color,
-    align: 'left',
-  });
 
   if (board.caption) {
+    applyTracking(ctx, TYPE.caption.tracking);
     drawText(ctx, {
       text: board.caption,
       x: mid,
-      y: h - u(4),
-      font: `${u(10)}px ui-monospace, Menlo, monospace`,
+      y: fh - SPACE.sm,
+      font: fontSpec(TYPE.caption),
       color: PALETTE.ui.textMuted,
       align: 'center',
     });
+    applyTracking(ctx, 0);
   }
 
   const tex = toTexture(canvas);
   cache.set(key, tex);
   return tex;
+}
+
+/**
+ * 팀 색을 흰 판 위의 글자로 읽히는 값으로.
+ *
+ * 점수 숫자는 44px 이고 흰 유리 위에 앉는다. 팀 색 자체는 그 위에서 대비가
+ * 모자라므로 어두운 쪽 짝을 쓴다 — `victoryPlateTexture` 가 같은 이유로 같은
+ * 것을 한다. 팔레트에 없는 색(무승부의 중립색 등)은 `darken` 으로 떨어뜨린다.
+ */
+function inkFor(color) {
+  const i = PALETTE.player.indexOf(color);
+  return i >= 0 ? PALETTE.playerInk[i] : darken(color, 0.45);
 }
 
 /**
@@ -214,36 +236,28 @@ export function buttonTexture(label, state, { width, height, scale = 1 }) {
   const w = Math.round(width * scale);
   const h = Math.round(height * scale);
   const { canvas, ctx } = makeCanvas(w, h);
-  const scratch = makeCanvas(w, h);
-  const u = (n) => Math.max(1, Math.round(n * scale));
+  ctx.scale(scale, scale);
 
-  const hover = state === 'hover';
   /**
-   * A third state, for a button that is there but cannot be pressed yet.
+   * 세 상태를 세 장의 텍스처로 굽는다. 런타임 틴트가 아니다.
    *
-   * `menuPlateTexture`'s disabled skin stamps "준비 중" onto the plate, which is
-   * the menu's way of saying a FEATURE is unfinished. That is the wrong sentence
-   * here: 확인 on a half-typed nickname is not unbuilt, it is waiting. So this
-   * one only dims — everything recedes toward the plate colour, including the
-   * accent bar, so the button reads as present and inert rather than as missing.
+   * 호버는 테두리와 바닥 반사광을 바꾸되 글자 뒤 바탕은 거의 건드리지 않는데,
+   * 균일한 틴트로는 그렇게 할 수 없다 — 바탕을 글자 쪽으로 끌어올려서 하필
+   * 사람이 보고 있는 순간에 대비를 깎는다.
+   *
+   * 그림자가 판 밖으로 번지므로 캔버스 안쪽에 여백을 두고 그린다. 없으면
+   * `ELEVATION.raised` 의 blur 10 이 텍스처 가장자리에서 잘려 한쪽만 그림자가
+   * 있는 것처럼 보인다.
    */
-  const dead = state === 'disabled';
-  const skin = hover ? BTN.hover : dead ? BTN.disabled : BTN.idle;
-  ctx.fillStyle = skin.bg;
-  ctx.fillRect(0, 0, w, h);
-  ctx.strokeStyle = skin.edge;
-  ctx.lineWidth = u(1);
-  ctx.strokeRect(u(0.5), u(0.5), w - u(1), h - u(1));
-
-  ctx.fillStyle = skin.bar;
-  ctx.fillRect(u(3), u(3), u(4), h - u(6));
-
-  drawText(ctx, {
-    text: label,
-    x: u(13),
-    y: Math.round(h / 2 + u(6)),
-    font: `bold ${u(16)}px ui-monospace, Menlo, monospace`,
-    color: skin.text,
+  const pad = 6;
+  gelButton(ctx, {
+    x: pad,
+    y: pad,
+    w: width - pad * 2,
+    h: height - pad * 2,
+    label,
+    state,
+    align: 'center',
   });
 
   const tex = toTexture(canvas);
@@ -278,41 +292,28 @@ export function iconButtonTexture(icon, state, { size, scale = 1 }) {
   const hit = cache.get(key);
   if (hit) return hit;
 
-  const s = Math.round(size * scale);
-  const { canvas, ctx } = makeCanvas(s, s);
-  const u = (n) => Math.max(1, Math.round(n * scale));
+  const s2 = Math.round(size * scale);
+  const { canvas, ctx } = makeCanvas(s2, s2);
+  ctx.scale(scale, scale);
 
-  const hover = state === 'hover';
-  const skin = hover ? BTN.hover : BTN.idle;
-  ctx.fillStyle = skin.bg;
-  ctx.fillRect(0, 0, s, s);
-  ctx.strokeStyle = skin.edge;
-  ctx.lineWidth = u(1);
-  ctx.strokeRect(u(0.5), u(0.5), s - u(1), s - u(1));
+  const pad = 6;
+  const box = size - pad * 2;
+  gelButton(ctx, { x: pad, y: pad, w: box, h: box, state, radius: RADIUS.panel });
 
-  ctx.fillStyle = skin.text;
-
-  // Four corner brackets, inset from the plate's own border so the two do not
-  // read as one thick frame.
-  const pad = u(9);
-  const arm = u(6);
-  const thick = u(2);
-  const far = s - pad - thick;
-  for (const [x, y, sx, sy] of [
-    [pad, pad, 1, 1],
-    [far, pad, -1, 1],
-    [pad, far, 1, -1],
-    [far, far, -1, -1],
-  ]) {
-    // Horizontal and vertical arm of each bracket, drawn from the corner inward.
-    ctx.fillRect(sx > 0 ? x : x + thick - arm, y, arm, thick);
-    ctx.fillRect(x, sy > 0 ? y : y + thick - arm, thick, arm);
-  }
-
-  // The subject, back in the middle of them.
-  const dot = u(4);
-  ctx.fillStyle = skin.bar;
-  ctx.fillRect(Math.round((s - dot) / 2), Math.round((s - dot) / 2), dot, dot);
+  /**
+   * 아이콘은 `icons.js` 의 벡터다. 사각형으로 손으로 찍던 것을 대체했다.
+   *
+   * 예전에는 네 모서리 브래킷과 가운데 점을 `fillRect` 로 직접 놓았고, 그 이유는
+   * 이 파이프라인에서 글리프가 알파 이진화를 거치면 덩어리가 되기 때문이었다.
+   * 이진화가 없으므로 그 제약도 없고, 벡터는 어느 해상도에서든 같은 모양이다.
+   */
+  const inner = box * 0.5;
+  drawIcon(ctx, icon, {
+    x: pad + (box - inner) / 2,
+    y: pad + (box - inner) / 2,
+    size: inner,
+    color: skinFor(state).text,
+  });
 
   const tex = toTexture(canvas);
   cache.set(key, tex);
@@ -343,36 +344,49 @@ export function iconButtonTexture(icon, state, { size, scale = 1 }) {
  * `width` is now a MINIMUM rather than the size, so a short label is the plate
  * it always was and only a long one moves.
  */
-export function turnPlateTexture(text, color, { width, height, scale = 1, maxWidth = 260 }) {
+export function turnPlateTexture(text, color, { width, height, scale = 1, maxWidth = 300 }) {
   const key = `turn:${text}:${color}:${width}x${height}@${scale}`;
   const hit = cache.get(key);
   if (hit) return hit;
 
-  const u = (n) => Math.max(1, Math.round(n * scale));
-  const font = `bold ${u(15)}px ui-monospace, Menlo, monospace`;
-
+  const font = fontSpec(TYPE.label);
   const probe = makeCanvas(8, 8);
   probe.ctx.font = font;
   const textW = Math.ceil(probe.ctx.measureText(text).width);
-  const frameW = Math.min(maxWidth, Math.max(width, Math.round(textW / scale) + 22));
+  // 판은 자기가 말하는 것만큼 넓다. 라벨을 고정 폭 안에 넣으면 짧은 이름이
+  // 상자 안에서 떠다니고, 긴 닉네임은 잘린다.
+  const frameW = Math.min(maxWidth, Math.max(width, textW + SPACE.lg + SPACE.md));
 
   const w = Math.round(frameW * scale);
   const h = Math.round(height * scale);
   const { canvas, ctx } = makeCanvas(w, h);
-  const scratch = makeCanvas(w, h);
+  ctx.scale(scale, scale);
 
-  ctx.fillStyle = PLATE;
-  ctx.fillRect(0, 0, w, h);
+  const pad = 5;
+  glassPanel(ctx, {
+    x: pad,
+    y: pad,
+    w: frameW - pad * 2,
+    h: height - pad * 2,
+    radius: RADIUS.pill,
+    elevation: ELEVATION.raised,
+  });
+
+  // 팀 색 알약. 판이 pill 이므로 안쪽 표시도 pill 이어야 같은 언어가 된다.
+  const bar = 8;
   ctx.fillStyle = color;
-  ctx.fillRect(0, 0, u(4), h);
+  roundRectPath(ctx, pad + SPACE.xs, pad + SPACE.xs, bar, height - (pad + SPACE.xs) * 2, bar / 2);
+  ctx.fill();
 
+  applyTracking(ctx, TYPE.label.tracking);
   drawText(ctx, {
     text,
-    x: u(11),
-    y: Math.round(h / 2 + u(6)),
+    x: pad + SPACE.xs * 2 + bar + SPACE.xs,
+    y: height / 2 + TYPE.label.size * 0.36,
     font,
-    color: TEXT,
+    color: PALETTE.ui.text,
   });
+  applyTracking(ctx, 0);
 
   const tex = toTexture(canvas);
   tex.userData = { width: frameW, height };

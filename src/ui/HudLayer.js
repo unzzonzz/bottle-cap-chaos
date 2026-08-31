@@ -6,7 +6,6 @@ import { scoreboardFor } from '../game/modes.js';
 import { PLAYER_COLORS } from '../render/playerColors.js';
 import { HudMaterials } from './HudMaterial.js';
 import {
-  buttonTexture,
   clearHudTextureCache,
   iconButtonTexture,
   notePlateTexture,
@@ -14,6 +13,7 @@ import {
   turnPlateTexture,
 } from './hudTextures.js';
 import { PALETTE } from '../core/palette.js';
+import { SIZE, SPACE } from '../core/tokens.js';
 
 /**
  * The readouts, as meshes.
@@ -112,22 +112,30 @@ function parkedHandReach(config) {
  */
 const BACK_ROW_REACH = 143;
 /** Breathing room between the plate and the hand above it. */
-const SCORE_GAP = 3;
-
-const SCORE = { width: 208, height: 42 };
-const BUTTON = { width: 104, height: 34 };
-/** The camera-reset button. Square, because it is an icon and not a word. */
-const ICON = 34;
-/** Between the icon and the labelled button beside it. */
-const ICON_GAP = 6;
-const TURN = { width: 152, height: 26 };
-/** The online turn clock, under the turn plate. */
-const TIMER_HEIGHT = 5;
-const TIMER_GAP = 3;
-/** Below this many seconds the bar starts flashing. The brief's five. */
+/**
+ * 배치 수치. 전부 `tokens.js` 에서 온다.
+ *
+ * ── 예전 상수는 하나도 남지 않았다 ─────────────────────────────────────────
+ * 208x42 스코어, 104x34 버튼, 34 아이콘, 152x26 턴 플레이트, 12 여백. 촘촘한
+ * 작은 요소들의 배치였고, 새 방향은 그 반대다 — 요소를 크게 하고 개수를 줄인다.
+ * 좌표계(가상 640 폭)만 재사용하고 숫자는 전부 다시 골랐다.
+ *
+ * 여기서 직접 정하는 것은 두 개뿐이다: 클럭 바의 두께와 긴급 임계 초. 나머지는
+ * `SIZE`/`SPACE` 를 그대로 읽는다 — UI 를 키울 때 고칠 곳이 한 군데여야 한다.
+ */
+const SCORE = { width: SIZE.scorePlate.w, height: SIZE.scorePlate.h };
+/** 카메라 리셋 버튼. 단어가 아니라 아이콘이므로 정사각. */
+const ICON = SIZE.buttonIcon.w;
+const ICON_GAP = SPACE.sm;
+const TURN = { width: SIZE.turnPlate.w, height: SIZE.turnPlate.h };
+const SCORE_GAP = SPACE.xs;
+/** 턴 플레이트 아래의 온라인 턴 클럭. */
+const TIMER_HEIGHT = SIZE.clockBar.h;
+const TIMER_GAP = SPACE.xs;
+/** 이 초 아래로 내려가면 바가 깜박인다. 브리프의 5초. */
 const TIMER_URGENT_SEC = 5;
-const NOTE_HEIGHT = 22;
-const MARGIN = 12;
+const NOTE_HEIGHT = 30;
+const MARGIN = SPACE.screenMargin;
 
 function smoothstep(x) {
   const t = Math.min(1, Math.max(0, x));
@@ -429,41 +437,66 @@ export class HudLayer {
       halfH -
       this._safe.top -
       (this._handParked ? parkedHandReach(this.config) + SCORE_GAP : MARGIN);
-    this.score.scale.set(SCORE.width, SCORE.height, 1);
+    this.score.scale.set(this._scoreWidth ?? SCORE.width, SCORE.height, 1);
     this._scoreHome = {
       x: ui.scoreOffsetX,
       y: scoreTop - SCORE.height / 2 + ui.scoreOffsetY,
     };
     this.score.position.set(this._scoreHome.x, this._scoreHome.y, 0);
 
-    // Top right, clear of the hand's fan — which is centred on x = 0 and never
-    // reaches this far out. One button now: 재시작 was removed, so the column it
-    // used to head is a single plate and nothing below it moved up into a gap.
-    const right = halfW - edgeRight - BUTTON.width / 2 + ui.exitOffsetX;
-    const top = halfH - edgeTop - BUTTON.height / 2 + ui.exitOffsetY;
-    this.exit.scale.set(BUTTON.width, BUTTON.height, 1);
-    this.exit.position.set(right, top, 0);
+    /**
+     * ── 상단은 이제 한 줄이 아니라 두 줄이다 ────────────────────────────────
+     * 예전에는 턴 플레이트(152), 스코어(208), 나가기(104), 리센터(34)가 모두
+     * 프레임 최상단 같은 줄에 있었고 640 폭 안에 넉넉히 들어갔다. 새 크기로는
+     * 240 + 300 + 64 + 64 에 여백까지 더해 640 을 넘는다 — 실제로 넷이 서로
+     * 겹쳐서 읽을 수 없었다. 요소를 크게 하면 배치가 따라와야 한다는 것이
+     * PHASE 6 의 내용이다.
+     *
+     * 그래서 스코어가 최상단 중앙을 혼자 쓰고, 턴 플레이트와 두 컨트롤이 그 아래
+     * 줄을 나눠 쓴다. 순서가 중요도이기도 하다: 점수는 화면 밖에서도 읽혀야 하고,
+     * 누구 차례인지는 그 다음이고, 버튼은 찾을 때만 필요하다.
+     */
+    const rowTwoY =
+      this._scoreHome.y - SCORE.height / 2 - SPACE.sm - Math.max(TURN.height, ICON) / 2;
 
     /**
-     * The camera reset, immediately left of 나가기 on the same row.
+     * ── 프레임 폭은 640 이 아니다. 창에 따라 변한다 ─────────────────────────
+     * `tokens.js` 의 SIZE 는 가상 640 폭 기준으로 골랐는데, `resolveFrame` 은
+     * 창이 가로로 길면 프레임을 더 낮고 좁게 잡는다 — 800x459 창에서 실측 422 였다.
+     * 그 폭에서 300 짜리 스코어는 71% 를 먹고, 240 짜리 턴 플레이트는 오른쪽
+     * 아이콘과 33 픽셀 겹쳤다.
      *
-     * "나가기 버튼 근처. 겹치지 않게." Beside rather than below, because below
-     * would put a square icon at the foot of a column of two wide plates and
-     * read as a third, broken button — and because the column is already as deep
-     * as the score's band allows. Left of the row keeps it in the corner cluster
-     * where the player is already looking for controls, and the fan of cards is
-     * centred and never reaches this far out.
+     * 그래서 두 판은 프레임에 반응한다. 토큰 값은 상한이고, 좁은 프레임에서는
+     * 비율이 이긴다. 텍스처는 이 폭으로 구워지므로 글자가 리샘플되지 않는다.
+     */
+    const frameW = halfW * 2;
+    this._scoreWidth = Math.min(SCORE.width, frameW * 0.55);
+    // 턴 플레이트는 오른쪽 컨트롤 무리에 닿기 전에서 멈춘다.
+    const controlsLeft = halfW - edgeRight - ICON * 2 - ICON_GAP;
+    this._turnMax = Math.max(
+      TURN.height * 2,
+      Math.min(TURN.width, controlsLeft - (-halfW + edgeLeft) - SPACE.md),
+    );
+
+    // 아래 줄 오른쪽 끝: 나가기, 그 왼쪽에 리센터.
+    const right = halfW - edgeRight - ICON / 2 + ui.exitOffsetX;
+    this.exit.scale.set(ICON, ICON, 1);
+    this.exit.position.set(right, rowTwoY + ui.exitOffsetY, 0);
+
+    /**
+     * 카메라 리셋. 나가기 바로 왼쪽, 같은 줄.
+     *
+     * "나가기 버튼 근처. 겹치지 않게." 아래가 아니라 옆인 이유는, 아래에 두면
+     * 정사각 아이콘이 판 두 개 아래 매달려 세 번째 고장난 버튼처럼 읽히기
+     * 때문이다. 옆에 두면 사람이 이미 컨트롤을 찾는 모서리 무리에 함께 있게 되고,
+     * 카드 팬은 중앙에 모여 있어 여기까지 오지 않는다.
      */
     this.recenter.scale.set(ICON, ICON, 1);
-    this.recenter.position.set(right - BUTTON.width / 2 - ICON_GAP - ICON / 2, top, 0);
+    this.recenter.position.set(right - ICON - ICON_GAP, rowTwoY + ui.exitOffsetY, 0);
 
-    // Top left.
-    this.turn.scale.set(TURN.width, TURN.height, 1);
-    this.turn.position.set(
-      -halfW + edgeLeft + TURN.width / 2,
-      halfH - edgeTop - TURN.height / 2,
-      0,
-    );
+    // 아래 줄 왼쪽.
+    this.turn.scale.set(Math.min(TURN.width, this._turnMax ?? TURN.width), TURN.height, 1);
+    this.turn.position.set(-halfW + edgeLeft + TURN.width / 2, rowTwoY, 0);
     /**
      * The plate's LEFT edge, kept because the plate is no longer a fixed width.
      *
@@ -611,8 +644,9 @@ export class HudLayer {
       this._pulseKey = pulseKey;
     }
 
-    if (board.key !== this._scoreKey) {
-      this._scoreKey = board.key;
+    const scoreKey = `${board.key}|${Math.round(this._scoreWidth ?? SCORE.width)}`;
+    if (scoreKey !== this._scoreKey) {
+      this._scoreKey = scoreKey;
       this.score.material.uniforms.uMap.value = scorePlateTexture(
         {
           key: board.key,
@@ -620,7 +654,9 @@ export class HudLayer {
           right: { value: board.right, color: PLAYER_COLORS[1] },
           caption: board.caption,
         },
-        { ...SCORE, scale: ui.textureScale },
+        // 실제로 그려지는 폭으로 굽는다. 토큰 값으로 구운 뒤 메시만 줄이면
+        // 글자가 리샘플되어 흐려진다. 캐시 키에 폭이 들어 있으므로 안전하다.
+        { ...SCORE, width: this._scoreWidth ?? SCORE.width, scale: ui.textureScale },
       );
     }
 
@@ -680,6 +716,8 @@ export class HudLayer {
     this._turnKey = key;
     const tex = turnPlateTexture(text, color, {
       ...TURN,
+      // 오른쪽 컨트롤에 닿기 전까지가 이 판이 쓸 수 있는 전부다. `_layout` 참조.
+      maxWidth: this._turnMax ?? TURN.width,
       scale: this.config.ui.textureScale,
     });
     this.turn.material.uniforms.uMap.value = tex;
@@ -806,11 +844,10 @@ export class HudLayer {
     const key = `${this.hovered ?? '-'}|${ui.textureScale}`;
     if (key === this._buttonKey) return;
     this._buttonKey = key;
-    const size = { ...BUTTON, scale: ui.textureScale };
-    this.exit.material.uniforms.uMap.value = buttonTexture(
-      '나가기',
+    this.exit.material.uniforms.uMap.value = iconButtonTexture(
+      'exit',
       this.hovered === 'exit' ? 'hover' : 'idle',
-      size,
+      { size: ICON, scale: ui.textureScale },
     );
     this.recenter.material.uniforms.uMap.value = iconButtonTexture(
       'recenter',

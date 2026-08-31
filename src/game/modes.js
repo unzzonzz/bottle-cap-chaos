@@ -145,7 +145,9 @@ export const MODES = {
         key: `knockout:${a}:${b}:${rules.turn}`,
         left: String(a),
         right: String(b),
-        caption: `남은 뚜껑  ·  턴 ${rules.turn}`,
+        // 턴 번호를 뺐다. 매 프레임 읽을 정보가 아니라는 PHASE 5 감사 결과다 —
+        // 몇 번째 턴인지는 가끔 궁금한 것이고, 남은 뚜껑 수는 늘 봐야 하는 것이다.
+        caption: '남은 뚜껑',
       };
     },
   },
