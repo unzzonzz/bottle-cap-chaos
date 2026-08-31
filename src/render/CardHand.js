@@ -851,12 +851,24 @@ export class CardHand {
       ? Math.max(drain, cfg.blockedGrey)
       : Math.max(drain, cfg.blockedGrey * seal);
 
-    // Armed goes warm rather than swapping to a second texture: the state has to
-    // read at a glance while the card is moving, and a tint costs no memory and
-    // no cache entry.
+    /**
+     * 무장하면 색조가 바뀐다. 두 번째 텍스처로 바꾸지 않는 이유는 그대로다 —
+     * 카드가 움직이는 중에 한눈에 읽혀야 하고, 색조는 메모리도 캐시 항목도 쓰지
+     * 않는다.
+     *
+     * ── 따뜻한 금색이었다. 이제 차갑다 ──────────────────────────────────────
+     * `(1.3, 1.16, 0.72)` 는 파란 채널을 깎아 카드를 금빛으로 물들였다. 그 색이
+     * 나오는 순간은 슬롯 안에 카드가 들어간 순간인데, 그 슬롯이 이제 CYAN 이라
+     * 확인해 주는 두 물건이 서로 다른 색으로 말하게 된다. 금색은 이 화면의
+     * 언어가 아니다 — `cardTexture.useGuideTexture` 의 주석에 그 사정이 있다.
+     *
+     * 파란 채널을 가장 많이 올려 유리가 빛을 받는 쪽으로 민다. 밝기 자체가
+     * 오르므로("무언가 일어났다") 색맹인 사람에게도 신호가 남고, 그건 금색이
+     * 하던 일과 같다.
+     */
     const tint = u.uTint.value;
     if (c.blocked) tint.setScalar(cfg.blockedBrightness);
-    else if (c.armed) tint.set(1.3, 1.16, 0.72);
+    else if (c.armed) tint.set(1.12, 1.26, 1.34);
     else tint.setScalar(lerp(1, cfg.blockedBrightness, seal));
   }
 

@@ -461,12 +461,34 @@ export class CardLayer {
    * A blocked card never gets one. It cannot be played however far it travels,
    * and drawing it somewhere to aim for would be an invitation to a refusal.
    */
+  /**
+   * ── 이제 드래그 전에도 나온다 ───────────────────────────────────────────────
+   * 슬롯은 드래그가 시작된 뒤에만 그려졌다. 그건 "얼마나 올려야 하는가" 를 이미
+   * 올리기 시작한 사람에게만 알려 준다는 뜻이고, 처음 보는 사람은 한 번 실패한
+   * 뒤에야 그 문턱을 알게 된다 — 이 가이드가 없애려던 바로 그 문제가 시작 지점에
+   * 그대로 남아 있었다.
+   *
+   * 그래서 카드에 손이 얹히는 순간(호버) 같은 슬롯을 **옅게** 미리 보여 준다.
+   * 위치를 정하는 식은 아래와 한 글자도 다르지 않다 — 같은 `_checkArmed` 항이다 —
+   * 그러니 미리보기와 실제가 어긋날 방법이 없다.
+   *
+   * 손이 다 올라오기 전에는 그리지 않는다(`RAISED_ENOUGH`). 부채꼴이 아직 움직이는
+   * 동안 슬롯이 떠 있으면 두 개가 서로 다른 속도로 움직이는 것으로 보인다.
+   */
   _updateGuide() {
     const cfg = this.config.cards;
-    const hand = this._dragHand;
-    const card = hand?.dragging;
+    const dragHand = this._dragHand;
+    /** 드래그가 없을 때만 호버가 슬롯을 부른다. 둘이 겹칠 일은 없다. */
+    const hoverHand = dragHand ? null : this.hands.find((h) => h.hovered && h.raise > RAISED_ENOUGH);
+    const hand = dragHand ?? hoverHand;
+    const card = dragHand ? dragHand.dragging : hoverHand?.hovered;
+    const preview = !dragHand;
 
-    if (!cfg.showUseGuide || !hand || !card || hand.dragMode === 'sort' || card.blocked || card.flying > 0) {
+    if (
+      !cfg.showUseGuide || !hand || !card
+      || (!preview && hand.dragMode === 'sort')
+      || card.blocked || card.flying > 0
+    ) {
       this.guide.visible = false;
       return;
     }
@@ -515,10 +537,30 @@ export class CardLayer {
      * That is the right trade: a corner behind a card reads as depth, a line
      * across a card's name reads as a bug.
      */
-    this.guide.renderOrder = Math.min(hand.cards.length, card.mesh.renderOrder - 0.5);
+    /**
+     * 미리보기는 부채꼴 **위**다. 드래그 중일 때만 카드 밑으로 들어간다.
+     *
+     * `min` 이 필요했던 것은 드래그가 막 시작된 순간, 카드는 아직 낮은 level 에
+     * 있는데 그 위쪽 끝이 이미 슬롯 아래 테두리에 걸치는 경우 때문이었다. 호버
+     * 미리보기에는 그 순간이 없다 — 슬롯은 손패에서 한참 위에 떠 있고 카드는
+     * 아직 부채꼴 안에 있으므로, 쉬고 있는 카드 전부보다 위에 그리면 된다.
+     */
+    this.guide.renderOrder = preview
+      ? hand.cards.length
+      : Math.min(hand.cards.length, card.mesh.renderOrder - 0.5);
 
     const u = this.guide.material.uniforms;
-    u.uOpacity.value = card.armed ? cfg.guideArmedOpacity : cfg.guideOpacity;
+    /**
+     * 미리보기는 **표적이 아니라 예고**라서 옅다.
+     *
+     * `cards` 는 시뮬레이션 쪽 설정이라 새 키를 넣지 않는다 — `config.cards` 의
+     * 주석에 그 경계가 적혀 있다. 그래서 이미 있는 `guideOpacity` 에서 유도한다:
+     * 드래그를 시작하면 같은 슬롯이 그 자리에서 진해지므로, 두 상태가 서로 다른
+     * 물건이 아니라 같은 것의 두 단계로 읽힌다.
+     */
+    u.uOpacity.value = preview
+      ? cfg.guideOpacity * 0.55
+      : (card.armed ? cfg.guideArmedOpacity : cfg.guideOpacity);
     u.uDrain.value = 0;
     u.uTint.value.setScalar(1);
     this.guide.visible = true;

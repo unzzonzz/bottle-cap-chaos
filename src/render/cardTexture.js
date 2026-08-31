@@ -170,17 +170,24 @@ export function cardFaceTexture(card, width) {
    */
   glassPanel(ctx, { x: 0, y: 0, w: fw, h: fh, radius: RADIUS.card, accent, alpha: 1 });
 
-  // 카드 색 띠. 위쪽 가장자리를 따라, 손에 쥐었을 때 부채꼴로 겹쳐도 보이는 자리.
-  ctx.fillStyle = accent;
-  roundRectPath(ctx, SPACE.sm, SPACE.sm, fw - SPACE.sm * 2, 5, 2.5);
-  ctx.fill();
-
-  // 이름.
+  /**
+   * ── 이름 위의 색 띠는 없앴다 ────────────────────────────────────────────────
+   * 위쪽 가장자리를 따라 5픽셀짜리 accent 막대가 있었다. 근거는 "손에 쥐었을 때
+   * 부채꼴로 겹쳐도 보이는 자리" 였고, 그건 사실이었다 — 부채꼴에서는 카드마다
+   * 왼쪽 띠 한 줄만 나오니까. 그런데 그 값을 치르고 얻는 것이 겹쳤을 때의 색
+   * 하나뿐이고, 카드가 펼쳐진 순간에는 유리판·아트 패널·아이콘이 이미 전부 같은
+   * accent 로 물들어 있어서 막대는 같은 말을 네 번째로 하는 선 하나였다.
+   *
+   * 남은 여백 5픽셀은 돌려받는다. 이름의 baseline 이 `SPACE.sm + SPACE.md` 로
+   * 올라가고 아래가 전부 5 씩 따라 올라오므로, 위 여백이 좌우와 같은 `SPACE.sm`
+   * 이 된다.
+   */
+  const nameY = SPACE.sm + SPACE.md;
   applyTracking(ctx, TYPE.label.tracking);
   drawText(ctx, {
     text: card.name,
     x: fw / 2,
-    y: SPACE.sm + 5 + SPACE.md,
+    y: nameY,
     font: fontSpec(TYPE.label),
     color: PALETTE.ui.text,
     align: 'center',
@@ -195,7 +202,7 @@ export function cardFaceTexture(card, width) {
    * 이진화가 없으므로 제약도 없다 — `iconForCard` 가 카탈로그의 `glyph` 를
    * 아이콘 이름으로 옮긴다.
    */
-  const artY = SPACE.sm + 5 + SPACE.md + SPACE.sm;
+  const artY = nameY + SPACE.sm;
   const artH = fh * 0.42;
   ctx.save();
   roundRectPath(ctx, SPACE.sm, artY, fw - SPACE.sm * 2, artH, RADIUS.chip);
@@ -339,9 +346,24 @@ export function useGuideTexture(width, height) {
   const line = Math.max(1.5, 2 * u);
   const pad = line;
 
+  /**
+   * ── 금색을 버리고 화면이 이미 쓰는 **포커스 색**으로 ────────────────────────
+   * 노란 물에 노란 점선, 연노랑 꺾쇠였다. 금색은 이 화면 어디에도 없는 언어다 —
+   * `PALETTE.button.hover` 의 테두리도, `slotTexture` 의 강조도, `focusRing` 도
+   * 전부 CYAN 이고, 유리는 흰색이다. 카드를 내려놓을 자리만 금테를 두르면 그것만
+   * 다른 게임에서 온 것으로 보이고, 실제로 그렇게 보였다.
+   *
+   * 그래서 모양은 그대로 두고 — 안쪽 물, 점선, 모서리 꺾쇠 — 색만 시스템 것으로
+   * 바꾼다. 물은 유리와 같은 흰색이고, 점선은 CYAN, 꺾쇠는 CYAN_DEEP 이다.
+   *
+   * 꺾쇠가 점선보다 **진해진** 것은 예전과 반대다. 예전에는 연노랑이 노랑보다
+   * 옅었는데, 꺾쇠야말로 "여기가 슬롯이다"를 말하는 부분이라 가장 단단해야 한다.
+   * 깊은 청록은 나무판(황갈), 잔디(초록), 하늘(파랑) 어디에서도 읽힌다 — 흰
+   * 꺾쇠를 먼저 시도했다가 나무판 위에서 흐려져 물렀다.
+   */
   // 옅은 물. 슬롯 안쪽이 주변보다 아주 조금 밝아야 "빈 자리"로 읽힌다.
   roundRectPath(ctx, pad, pad, w - pad * 2, h - pad * 2, radius);
-  ctx.fillStyle = withAlpha(PALETTE.accent.yellowPale, 0.1);
+  ctx.fillStyle = withAlpha(PALETTE.ui.glossHi, 0.16);
   ctx.fill();
 
   // 점선 테두리.
@@ -349,7 +371,7 @@ export function useGuideTexture(width, height) {
   ctx.setLineDash([10 * u, 7 * u]);
   ctx.lineCap = 'round';
   ctx.lineWidth = line;
-  ctx.strokeStyle = withAlpha(PALETTE.accent.yellow, 0.85);
+  ctx.strokeStyle = withAlpha(PALETTE.accent.cyan, 0.9);
   roundRectPath(ctx, pad, pad, w - pad * 2, h - pad * 2, radius);
   ctx.stroke();
   ctx.restore();
@@ -363,7 +385,7 @@ export function useGuideTexture(width, height) {
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineWidth = line * 1.6;
-  ctx.strokeStyle = PALETTE.accent.yellowPale;
+  ctx.strokeStyle = PALETTE.accent.cyanDeep;
   const arm = Math.max(6, 20 * u);
   const l = pad;
   const r = w - pad;
