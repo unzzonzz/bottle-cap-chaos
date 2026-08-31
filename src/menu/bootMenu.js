@@ -33,7 +33,6 @@ import { MODES } from '../game/modes.js';
 // The audio mix lives with every other tunable, in the one CONFIG the panel
 // edits. `MENU_CONFIG` is this page's own layout numbers and nothing else.
 import { CONFIG } from '../game/config.js';
-import { fadeThrough } from '../ui/pageFade.js';
 import { bootMenuDebug } from './MenuDebug.js';
 import { MenuAudio } from '../audio/MenuAudio.js';
 
@@ -353,8 +352,6 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
   let online = null;
   /** Which scene root is live. Swapped under the cap at the covered frame. */
   let current = 'menu';
-  /** True while the black fade back from settings is running. Blocks input. */
-  let fading = false;
 
   // Its own overlay scene and camera; see the note in `CapWipe`.
   const wipe = new CapWipe({
@@ -540,7 +537,7 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
   }
 
   function refreshHover() {
-    if (transition.running || fading || !pointer.inside) {
+    if (transition.running || !pointer.inside) {
       items.setHover(null);
       settings?.setHover(false);
       setCursor(null);
@@ -611,7 +608,7 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
     pointer.y = e.clientY;
     pointer.inside = true;
 
-    if (transition.running || fading) return;
+    if (transition.running) return;
 
     if (current === 'settings') {
       const hit = settings?.pick(canvas, camera, e.clientX, e.clientY);
@@ -914,41 +911,32 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
    * ceremonious as arriving, which is exactly backwards.
    */
   /**
-   * Swap to any screen behind the short black fade.
+   * 다른 화면으로 바꾼다. **덮개 없이, 그 자리에서.**
    *
-   * `returnToMenu` was this with the destination hard-coded, and a second
-   * sub-screen made that a copy waiting to happen. The fade is the right
-   * transition for every move that is not entering the menu's own items — see
-   * the note on the settings press.
+   * ── 흰 페이드를 걷어낸 이유 ─────────────────────────────────────────────
+   * `fadeThrough` 로 감쌌었다. 화면이 `PALETTE.ui.surface` — 거의 흰색 — 로
+   * 덮였다가 다시 걷혔고, 한 번에 400 밀리초쯤 걸렸다. 이 문서 안에서 화면을
+   * 옮기는 길이 다섯이라(설정↔마크, 마크↔편집기, 상대↔온라인, 그리고 되돌아
+   * 가기 둘) 메뉴를 조금만 돌아다녀도 흰 화면이 계속 지나갔다. 사용자가
+   * "하얀색 페이드 남발" 이라고 한 것이 그것이다.
+   *
+   * 덮개는 **가릴 것이 있을 때** 쓰는 것이다. 문서를 바꾸는 이동은 새 문서가
+   * 뜨는 동안 빈 화면이 보이므로 가릴 것이 있고, 그래서 `fadeOut` 은 남는다.
+   * 이 이동에는 없다 — 씬 그래프에서 루트 하나를 빼고 다른 하나를 넣는 일이고,
+   * 다음 프레임에 이미 끝나 있다. 가릴 것이 없는데 덮으면 그건 지연일 뿐이다.
+   *
+   * 화면이 통째로 바뀌는 것이 급작스럽지 않은 것은, 각 화면이 자기 패널을 들고
+   * 있어서 바뀌는 것이 배경이 아니라 패널이기 때문이다.
    */
   function fadeTo(target) {
-    if (fading) return;
-    fading = true;
     menuAudio?.screenChange();
-    items.enabled = false;
-    fadeThrough(
-      () => swapTo(target),
-      () => {
-        fading = false;
-        items.enabled = true;
-        refreshHover();
-      },
-    );
+    swapTo(target);
+    items.enabled = true;
+    refreshHover();
   }
 
   function returnToMenu() {
-    if (fading) return;
-    fading = true;
-    menuAudio?.screenChange();
-    items.enabled = false;
-    fadeThrough(
-      () => swapTo('menu'),
-      () => {
-        fading = false;
-        items.enabled = true;
-        refreshHover();
-      },
-    );
+    fadeTo('menu');
   }
 
   /**

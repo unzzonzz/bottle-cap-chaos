@@ -151,6 +151,7 @@ export class OpponentScene {
 
     this._geometry = buildCapGeometry({ ...CAP_DEFAULTS, shell: true });
     this._capRadius = this._geometry.userData.radius ?? 1.6;
+    this._capHeight = this._geometry.userData.height ?? 0;
 
     /** @type {Mesh[]} index is the player. */
     this.caps = [0, 1].map((player) => {
@@ -248,8 +249,22 @@ export class OpponentScene {
     const capWidth = Math.min(L.capWidth, box.plate.width * 0.28, caps.h * 0.8);
     const capX = capWidth * L.capXShare;
     const perCapUnit = (capWidth / (this._capRadius * 2)) * u;
+    /**
+     * 뚜껑을 패널 **앞으로** 밀어낸다.
+     *
+     * ── 잘려 보이던 이유 ────────────────────────────────────────────────────
+     * 뚜껑은 불투명 메시라 투명한 패널보다 먼저 그려지고 깊이를 찍는다. 그런데
+     * 피벗이 ±0.42 rad 돌아가 있으므로 뚜껑의 몸통 절반이 z = 0 **뒤로** 넘어가고,
+     * 패널 쿼드는 정확히 z = 0 에 있다. 그 뒤쪽 절반에서는 깊이 검사를 패널이
+     * 통과하므로, 패널이 뚜껑 위에 덮인다 — 화면에서는 뚜껑이 수직으로 싹둑
+     * 잘린 것으로 보인다. 두 개가 각각 바깥쪽으로 잘린 것도 그래서다.
+     *
+     * 뚜껑 높이만큼 앞으로 밀면 어느 각도에서도 전부 패널 앞이다. 원근 확대는
+     * 무시할 만하다 — 카메라가 896 픽셀 뒤에 있고 이 값은 20 픽셀 남짓이다.
+     */
+    const forward = this._capHeight * perCapUnit;
     this.caps.forEach((pivot, player) => {
-      pivot.position.set((player === 0 ? -capX : capX) * u, caps.y * u, 0);
+      pivot.position.set((player === 0 ? -capX : capX) * u, caps.y * u, forward);
       pivot.scale.setScalar(perCapUnit);
     });
 

@@ -23,15 +23,11 @@ import { MOTION } from '../core/tokens.js';
  * ── three shapes, one implementation ────────────────────────────────────────
  * `fadeOut` is for leaving: fade to black and stay there, because a navigation
  * is about to replace the document. `fadeIn` is the other half of that trip, run
- * by the document that ARRIVES. `fadeThrough` is for swapping something
- * underneath in one document: fade to black, do the thing, fade back. The brief
- * asks for "복귀 시에는 전환 연출 없이 짧은 페이드", and both ways back — out of a
- * match and out of the settings screen — now use exactly these, so they look the
- * same because they ARE the same.
+ * by the document that ARRIVES. 둘이 이 파일의 전부다 — 한 문서 안에서 화면을
+ * 바꾸는 `fadeThrough` 가 있었고, 없앤 이유는 파일 끝에 적혀 있다.
  *
  * ── a navigation needs BOTH halves, and that is why `fadeIn` exists ──────────
- * `fadeThrough` fades out and back in, so swapping the settings scene is
- * symmetric and reads as one movement. A document swap could not be: `fadeOut`
+ * A document swap cannot be symmetric on its own: `fadeOut`
  * ends with the screen black and the page about to be replaced, and the
  * replacement then painted itself at full brightness the instant it was ready.
  * Black, then a fully lit menu, with nothing in between — which is exactly the
@@ -199,19 +195,13 @@ export function fadeOut(atBlack) {
  * arrangement the cap wipe uses for its own scene change and for the same
  * reason: whatever it costs, nobody sees it.
  *
- * The swap is synchronous and takes almost no time, so this route used to lift
- * the veil about two frames later and was over in roughly 409 ms. It now holds
- * for `HOLD_MS` like the navigating route does — deliberately slower than it
- * needs to be, because the two being the same length is worth more than this one
- * being as short as it can get. See the header.
+ * ── `fadeThrough` 가 여기 있었다 ───────────────────────────────────────────
+ * 한 문서 안에서 화면을 바꾸는 동안 덮개를 씌우고 다시 걷는 함수였다. 메뉴의
+ * 다섯 갈래 이동이 전부 그것을 썼고, 그래서 메뉴를 조금만 돌아다녀도 거의 흰
+ * 화면이 계속 지나갔다 — 사용자가 "하얀색 페이드 남발" 이라고 지적했다.
+ *
+ * 덮개는 가릴 것이 있을 때 쓴다. 문서를 바꾸는 이동에는 있고(새 문서가 뜨는
+ * 동안의 빈 화면), 씬 그래프에서 루트 하나를 바꾸는 일에는 없다. 없는 것을
+ * 가리면 그건 연출이 아니라 지연이다. 그래서 그 이동은 이제 그 자리에서 즉시
+ * 일어나고(`bootMenu.fadeTo`), 이 파일에는 문서 사이를 오가는 반쪽 둘만 남았다.
  */
-export function fadeThrough(atBlack, onDone) {
-  const veil = makeVeil();
-  requestAnimationFrame(() => veil.classList.add('is-on'));
-  once(veil, () => {
-    atBlack?.();
-    // From HERE: the fade-out has just finished, so this is the instant the
-    // screen became fully black.
-    holdThenLift(veil, performance.now(), onDone);
-  });
-}

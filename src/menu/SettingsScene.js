@@ -1,6 +1,6 @@
 import { Group, Mesh, PlaneGeometry, Raycaster, Vector2 } from 'three';
 import { createSpriteMaterial } from './menuMaterials.js';
-import { menuPlateTexture, panelTexture } from './menuTextures.js';
+import { menuPlateTexture, panelTexture, titleTexture } from './menuTextures.js';
 import { toMarkTexture } from '../marks/markTextures.js';
 import { PALETTE } from '../core/palette.js';
 import { ROLE } from '../core/tokens.js';
@@ -358,6 +358,24 @@ export class SettingsScene {
   refresh() {
     for (const item of [...this.items, ...this.footer]) {
       const label = this._labelFor(item.id);
+      /**
+       * 읽는 줄은 판을 두르지 않는다.
+       *
+       * 볼륨 줄은 `kind: 'readout'` 이고 `pick` 이 건너뛰므로 눌리지 않는데,
+       * 위아래 줄과 똑같은 알약을 입고 있었다. 눌리지 않는 것에 눌리는 것의
+       * 모양을 주면 그건 헷갈리라고 만든 것이다 — 사용자가 그대로 지적했다.
+       *
+       * `OnlineScene` 의 상태 줄이 같은 이유로 같은 것을 한다.
+       */
+      if (item.kind === 'readout') {
+        if (label !== item.label) {
+          item.maps.idle?.dispose();
+          item.maps.idle = titleTexture(label, '', { ...item.size, plate: false });
+          item.label = label;
+        }
+        item.mesh.material.uniforms.uMap.value = item.maps.idle;
+        continue;
+      }
       if (label !== item.label) {
         item.maps.idle?.dispose();
         item.maps.hover?.dispose();

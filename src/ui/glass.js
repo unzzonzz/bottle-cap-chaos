@@ -258,7 +258,7 @@ export function roleSkin(role, state = 'idle') {
 export function roleButton(ctx, o) {
   const {
     x, y, w, h, label, role, state = 'idle', selected = false,
-    align = 'center', radius = RADIUS.pill,
+    align = 'center', radius = RADIUS.pill, elevation = null,
     /**
      * 라벨이 쓸 수 있는 폭과 그 중심. 기본은 버튼 전체.
      *
@@ -278,10 +278,29 @@ export function roleButton(ctx, o) {
     glossFraction: 0.46,
     glossInset: 0.1,
     border,
+    elevation,
   });
 
+  /**
+   * 선택 표시는 판 **안쪽**에 그린다.
+   *
+   * `focusRing` 은 판 바깥으로 2px 나가고 12px 번진다. 판 텍스처의 캔버스는 판과
+   * 정확히 같은 크기라, 그 링은 네 변에서 직선으로 잘렸다 — 둥근 끝 좌우에 청록색
+   * 조각이 사각형으로 남았고, 사용자가 "선택 표시가 이상하게 잘려 보인다" 고 한
+   * 것이 그것이다.
+   *
+   * 캔버스를 키우는 것이 다른 답이지만 그러면 판 쿼드가 슬롯보다 커져 이웃과
+   * 겹치고, 그 겹침은 레이캐스트 순서로 임의로 갈린다. 링을 안으로 들이는 쪽이
+   * 잃는 것이 없다 — 선택은 판의 상태이지 판 주변의 사건이 아니다.
+   */
   if (selected) {
-    focusRing(ctx, { x, y, w, h, radius, accent: PALETTE.accent.cyan });
+    ctx.save();
+    ctx.strokeStyle = PALETTE.accent.cyan;
+    ctx.lineWidth = 2.5;
+    const p = border + 2;
+    roundRectPath(ctx, x + p, y + p, w - p * 2, h - p * 2, radius);
+    ctx.stroke();
+    ctx.restore();
   }
 
   if (!label) return;
@@ -317,13 +336,16 @@ export function roleButton(ctx, o) {
  * Split out because the panel wants the same stack with two steps changed, and
  * because the card face wants the body without a label on it.
  */
-function drawGelBody(ctx, { x, y, w, h, radius, skin, waist, glossFraction, glossInset, border = 1.5 }) {
+function drawGelBody(
+  ctx,
+  { x, y, w, h, radius, skin, waist, glossFraction, glossInset, border = 1.5, elevation = null },
+) {
   ctx.save();
   ctx.globalAlpha = skin.alpha;
 
   // 1. Drop shadow, applied to the base fill only — every later step draws
   //    inside this shape and would otherwise stamp its own shadow on top.
-  applyElevation(ctx, skin.elevation);
+  applyElevation(ctx, elevation ?? skin.elevation);
 
   // 2. Base fill. The break at `waist` is the whole trick: a smooth gradient
   //    reads as plastic, and one hard step of value across the middle reads as
@@ -362,14 +384,34 @@ function drawGelBody(ctx, { x, y, w, h, radius, skin, waist, glossFraction, glos
     ctx.fillRect(x, y + h - bh, w, bh);
   }
 
-  // 3. Top gloss, inset from the body so a sliver of the base shows around it.
+  /**
+   * 3. 윗면 광택. 몸통 안쪽으로 들어가 있어서 둘레로 바탕이 한 줄 보인다.
+   *
+   * ── 가로 안쪽 여백이 세로와 같으면 안 된다 ──────────────────────────────
+   * `x + inset` 이었다. 알약에서 그건 틀리다: 알약의 왼쪽 벽은 수직이 아니라
+   * 반지름 `r` 의 원이므로, 광택의 **윗변**이 있는 높이에서 벽은 아직 한참
+   * 안쪽에 있다. 그래서 광택이 벽을 뚫고 나갔고, 클립에 걸려 둥근 끝 위에
+   * 수직으로 잘린 자국이 남았다 — 화면에서 그대로 보였다.
+   *
+   * 벽이 어디 있는지는 계산할 수 있다. 광택 윗변의 깊이 `d = inset` 에서
+   * 모서리 원의 중심으로부터의 세로 거리는 `r - d` 이고, 그 높이에서 원이
+   * 안쪽으로 들어온 양은 `r - sqrt(r² - (r-d)²)` 다. 그만큼 더 들여 놓으면
+   * 광택은 어느 높이에서도 몸통 안이다.
+   *
+   * 윗변에서 재는 것은 그곳이 가장 좁기 때문이다. 아래로 갈수록 벽은 벌어진다.
+   */
   if (skin.glossAlpha > 0) {
     const inset = h * glossInset;
     const glossH = h * glossFraction;
+    const r = Math.min(radius, w / 2, h / 2);
+    const dy = Math.max(0, r - inset);
+    const dx = r - Math.sqrt(Math.max(0, r * r - dy * dy));
+    const gx = inset + dx;
+    const gw = Math.max(1, w - gx * 2);
     const gloss = ctx.createLinearGradient(0, y + inset, 0, y + inset + glossH);
     gloss.addColorStop(0, withAlpha(PALETTE.ui.glossHi, skin.glossAlpha));
     gloss.addColorStop(1, withAlpha(PALETTE.ui.glossLo, 0));
-    roundRectPath(ctx, x + inset, y + inset, w - inset * 2, glossH, radius);
+    roundRectPath(ctx, x + gx, y + inset, gw, glossH, r);
     ctx.fillStyle = gloss;
     ctx.fill();
   }
@@ -637,6 +679,7 @@ export function dialogPanel(ctx, o) {
   const {
     w, h, title = '', caption = '', footerHeight = PANEL.footerHeight,
     tabHeight = PANEL.titleTabHeight, padTop = PANEL.padTop, padX = PANEL.padX,
+    divider = true,
     accent = PALETTE.accent.cyan,
   } = o;
   const tabH = title ? tabHeight : 0;
@@ -750,9 +793,15 @@ export function dialogPanel(ctx, o) {
     applyTracking(ctx, 0);
   }
 
-  // ── 푸터 구분선.
+  /**
+   * ── 푸터 구분선. 있을 수도 없을 수도 있다 ────────────────────────────────
+   * 메뉴 화면은 그리지 않는다. 거기서는 푸터에 버튼이 한둘뿐이고, 그 버튼들이
+   * 이미 열의 판과 크기도 모양도 색도 다르다 — 선까지 있으면 말이 두 번이다.
+   * 모달은 계속 그린다: 거기서는 푸터 위가 흐르는 문장이라 어디까지가 읽는
+   * 것이고 어디부터가 누르는 것인지 선이 아니면 알 수 없다.
+   */
   const footerTop = bodyY + h - footerHeight;
-  if (footerHeight > 0) {
+  if (footerHeight > 0 && divider) {
     ctx.save();
     ctx.strokeStyle = withAlpha(PALETTE.ui.edge, 0.9);
     ctx.lineWidth = PANEL.dividerWeight;

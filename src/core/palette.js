@@ -547,9 +547,19 @@ export const PALETTE = {
     labelCream: '#f7efe0',
     labelCreamAlt: '#f2e6cf',
     labelGold: '#f2d7a8',
-    /** Cola foam: a dirty cream going tan where it is thick, never white. */
-    foam: '#d9b988',
-    foamTones: ['#f0dcb6', '#e2c79c', '#bd9a64', '#fbf1d8'],
+    /**
+     * 거품 머리.
+     *
+     * 콜라 거품이었다 — `#d9b988`, 두꺼운 곳에서 황갈색으로 가는 더러운 크림색.
+     * 병이 사이다가 된 뒤에도 그대로 남아 있었고, 흔들면 어깨와 목이 통째로
+     * 카키색이 됐다. 사용자가 "탄산 색이 아직 콜라다" 라고 한 것이 이것이다.
+     *
+     * 맑은 탄산의 거품은 희다. 완전한 백색이 아닌 것은 유리와 음료를 지나
+     * 보이기 때문이고, 그래서 아주 옅은 청록이 깔린다. 색상은 `liquid.core` 쪽,
+     * 채도는 그 근처에도 못 가는 값.
+     */
+    foam: '#e8f5f9',
+    foamTones: ['#ffffff', '#dcf0f7', '#c2e4ef', '#f7fdff'],
     /**
      * The shadow under the bottle and the pool of light around it.
      *
@@ -668,11 +678,13 @@ export const PALETTE = {
     bubble: { rim: '#e8f4f8', mid: '#3a4a50', core: '#121a1c', glint: PAPER },
     /** The burst at the bottle's mouth, two frames. */
     burst: {
-      popWide: '#fff4d8',
+      // 같은 음료에서 나온 것이므로 같은 계열이다. 크림색이었고, 그건 콜라 거품의
+      // 잔재였다 — `PALETTE.menu.foam` 의 주석 참조.
+      popWide: '#e6f7ff',
       popTight: PAPER,
       popCore: PAPER,
-      sprayWide: '#efe0bb',
-      sprayTight: '#fffaf0',
+      sprayWide: '#cfeaf5',
+      sprayTight: '#f4fdff',
       sprayCore: '#d8cbaa',
     },
   },

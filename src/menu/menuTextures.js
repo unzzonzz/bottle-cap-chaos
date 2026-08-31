@@ -721,6 +721,20 @@ export function menuPlateTexture(label, state, { width = 256, height = 52, scale
     label,
     // 도장이 오른쪽을 먹으므로 라벨은 남은 왼쪽에서 가운데를 잡는다.
     labelWidth: width - stampW,
+    /**
+     * 그림자 없음. 캔버스가 판과 같은 크기라 그릴 자리가 없다.
+     *
+     * `ELEVATION.raised` 는 10 픽셀 번지고 3 픽셀 내려가는데, 캔버스는 판에 딱
+     * 맞으므로 그 번짐이 네 변에서 직선으로 잘린다 — 둥근 판 주위에 사각형
+     * 자국이 남았고, 그게 화면에서 제일 눈에 띄는 결함이었다.
+     *
+     * 캔버스를 키우는 것이 다른 답이고, 그러려면 판 쿼드도 같이 커져 슬롯 밖으로
+     * 나간다 — 이웃과 겹치고 그 겹침은 레이캐스트 순서로 임의로 갈린다.
+     *
+     * 없애도 잃는 것이 없다. 이 판들은 이제 **패널 위에** 있고 패널이 그림자를
+     * 지고 있다. 판을 바탕에서 떼어 놓는 일은 테두리(`edgeOuter`)가 한다.
+     */
+    elevation: ELEVATION.flat,
   });
 
   if (stamp) {
@@ -756,12 +770,12 @@ export function menuPlateTexture(label, state, { width = 256, height = 52, scale
 export function panelTexture(o) {
   const {
     w, h, tabHeight = 0, title = '', caption = '',
-    footerHeight = 0, padTop = 0, padX = 0, scale = 1,
+    footerHeight = 0, padTop = 0, padX = 0, scale = 1, divider = false,
   } = o;
   const texH = tabHeight + h;
   const { canvas, ctx } = makeCanvas(Math.round(w * scale), Math.round(texH * scale));
   ctx.scale(scale, scale);
-  dialogPanel(ctx, { w, h, title, caption, tabHeight, footerHeight, padTop, padX });
+  dialogPanel(ctx, { w, h, title, caption, tabHeight, footerHeight, padTop, padX, divider });
   const tex = toTexture(canvas);
   tex.userData = { width: w, height: texH };
   return tex;

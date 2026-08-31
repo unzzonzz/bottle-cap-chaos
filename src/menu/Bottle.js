@@ -725,14 +725,32 @@ export class Bottle {
      */
     const inset = p.liquidInset;
     const y0 = base.surfaceY;
+    const clampY = (v) => Math.max(floorY, Math.min(ceil, v));
+    /**
+     * ── 반복은 수렴하지 않을 수 있다. 그래서 마지막에 **자른다** ─────────────
+     * 0.6 완화로 6번 돌렸다. 원통이면 넉넉하고 어깨에서는 아니다: 낮은 쪽
+     * (`dir < 0`)에서 r 이 커지면 y 가 내려가고, 내려가면 포락선이 **커진다**.
+     * 그 되먹임의 이득은 |envelope'| · inset 이고 어깨에서는 그것이 1 을 넘는다 —
+     * 반복이 발산한다.
+     *
+     * 실측: fill 150 · 기울기 22도에서 액면 테가 어깨 왼쪽에서 유리를 뚫고
+     * 나왔다. 사용자가 "액체가 살짝 삐져나온다" 고 한 것이 그것이다.
+     *
+     * 완화를 낮추고(0.35) 횟수를 늘려(12) 발산을 늦추지만, 그것만으로는 보장이
+     * 아니다. 보장은 마지막 줄이다: **자기 높이에서의 벽보다 넓을 수 없다.**
+     * 수렴하지 못하면 모자란 쪽으로 남고, 벽과 액체 사이의 가는 틈은 벽을 뚫고
+     * 나온 테보다 언제나 덜 보인다.
+     */
     const solve = (dir) => {
       let r = base.surfaceRadius ?? 0;
-      for (let n = 0; n < 6; n++) {
-        const yy = Math.max(floorY, Math.min(ceil, y0 + dir * r));
+      for (let n = 0; n < 12; n++) {
+        const yy = clampY(y0 + dir * r);
         const want = this.profile.envelopeAt(yy / MM) * inset * MM;
-        r += (want - r) * 0.6;
+        r += (want - r) * 0.35;
       }
-      return { r, y: Math.max(floorY, Math.min(ceil, y0 + dir * r)) };
+      const y = clampY(y0 + dir * r);
+      const wall = this.profile.envelopeAt(y / MM) * inset * MM;
+      return { r: Math.max(0, Math.min(r, wall)), y };
     };
 
     /**

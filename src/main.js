@@ -207,10 +207,13 @@ if (new URLSearchParams(location.search).get('view') === 'cap') {
    *
    * The game fades to black and then navigates, so this document opens on a
    * black screen — and used to paint itself at full brightness the instant it
-   * was ready, which is the one hard cut in the whole app: swapping to 설정 goes
-   * out and back through `fadeThrough` and reads as one movement, while leaving a
-   * match went out through `fadeOut` and simply arrived. Same veil, same colour,
-   * same 180 ms, now on both sides of the navigation.
+   * was ready, which was the one hard cut in the whole app: the game faded out
+   * through `fadeOut` and the menu simply arrived. Same veil, same colour, same
+   * 180 ms, now on both sides of the navigation.
+   *
+   * 문서 **안에서** 화면을 바꾸는 이동에는 덮개가 없다. 가릴 것이 없기 때문이고,
+   * 왜 없앴는지는 `ui/pageFade.js` 끝에 적혀 있다. 덮개는 문서가 바뀌는 이 한
+   * 자리에만 남았다.
    *
    * AFTER `bootMenu`, and that ordering is the whole reason this is two lines
    * rather than a callback: `bootMenu` schedules its first frame before it
