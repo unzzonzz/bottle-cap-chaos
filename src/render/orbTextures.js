@@ -1,4 +1,5 @@
 import { CanvasTexture, ClampToEdgeWrapping, NearestFilter, RepeatWrapping } from 'three';
+import { PALETTE } from '../core/palette.js';
 
 /**
  * The two pages an orb is made of. Drawn at runtime, like everything else.
@@ -40,9 +41,12 @@ function toTexture(canvas, wrapS = ClampToEdgeWrapping) {
  * correct and it does not need to be — it needs to move with the surface, which
  * a texture does for free.
  *
- * Dark in between rather than black: the shader adds a per-vertex rim on top,
- * and a black ground would make the rim the only thing visible and the sphere
- * would read as a ring.
+ * The ground between the bands is a mid tone of the shell's own hue rather than
+ * a dark one. It used to be a near-black navy, on the argument that the shader
+ * adds a per-vertex rim on top and a dark ground was what let the rim read. On a
+ * bright board that inverts: a dark sphere sitting on honey wood reads as a hole
+ * in the board rather than as a floating piece of glass, which is the one thing
+ * a pickup must not look like.
  *
  * Wraps in u, because u goes round.
  */
@@ -51,7 +55,7 @@ export function orbShellTexture() {
   const h = 32;
   const { canvas, ctx } = makeCanvas(w, h);
 
-  ctx.fillStyle = '#12203a';
+  ctx.fillStyle = PALETTE.orb.shell;
   ctx.fillRect(0, 0, w, h);
 
   /** A band of light down the shell, in hard vertical steps. */
@@ -64,12 +68,12 @@ export function orbShellTexture() {
   };
 
   // The key: narrow and bright, a window reflected in the glass.
-  band(9, 4, ['#3a5478', '#6f92c0', '#cfe4ff', '#e8f4ff', '#a8c6ea', '#4a6c96', '#22304c', '#16223a']);
+  band(9, 4, PALETTE.orb.keyBand);
   // Its companion, wider and dimmer, most of the way round.
-  band(37, 6, ['#1a2a44', '#2c4468', '#476a96', '#5c80ac', '#3d5c82', '#243a58', '#18263e', '#131f34']);
+  band(37, 6, PALETTE.orb.fillBand);
 
   // A faint equator so the spin is legible even where neither band is showing.
-  ctx.fillStyle = '#20345a';
+  ctx.fillStyle = PALETTE.orb.equator;
   ctx.fillRect(0, Math.round(h / 2) - 1, w, 2);
 
   return toTexture(canvas, RepeatWrapping);
@@ -96,8 +100,8 @@ export function orbMarkTexture() {
     ctx.fillRect(x, y, w, h);
   };
 
-  const core = '#ffffff';
-  const glow = '#9fd0ff';
+  const core = PALETTE.orb.markCore;
+  const glow = PALETTE.orb.markGlow;
 
   // A soft halo first, so the mark reads against a bright shell too.
   px(9, 4, 14, 3, glow);

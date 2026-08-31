@@ -2,3 +2,29 @@ node_modules
 dist
 .DS_Store
 *.local
+
+# Capacitor.
+#
+# The native projects THEMSELVES are committed — ios/App holds hand-written
+# Swift (GameViewController, the audio session in AppDelegate) and an Info.plist
+# with the ATS and local-network keys, none of which `cap add` regenerates. What
+# is ignored is everything `cap sync` copies or Xcode derives.
+ios/App/App/public
+ios/App/App/capacitor.config.json
+ios/App/build
+ios/App/App.xcodeproj/project.xcworkspace/xcuserdata
+ios/App/App.xcodeproj/xcuserdata
+ios/DerivedData
+ios/App/CapApp-SPM/.build
+android/app/src/main/assets/public
+android/app/src/main/assets/capacitor.config.json
+android/app/build
+android/build
+android/.gradle
+android/local.properties
+android/capacitor-cordova-android-plugins
+
+# determinism harness: build output and reports posted by other devices.
+# The LOGS are committed — they are the fixture both machines must share.
+tools/determinism/build
+tools/determinism/received

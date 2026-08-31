@@ -4,6 +4,8 @@ import { PS1_COLOR_LEVELS } from '../core/RetroPass.js';
 import { RENDER_MODES } from '../core/Viewport.js';
 import { WIPE_FRAME } from './CapWipe.js';
 import { STAGE } from './Transition.js';
+import { CONFIG } from '../game/config.js';
+import { addAudioFolder } from '../audio/audioDebug.js';
 
 /**
  * The panel, behind `?debug=1`.
@@ -50,6 +52,8 @@ export function bootMenuDebug(ctx) {
   }
 
   const { config, bottle, wipe, transition, retro, retroPass, viewport, overlay } = ctx;
+  /** Frame counter for the audio readouts' slow poll. See the return below. */
+  let audioTick = 0;
   const gui = new GUI({ title: 'MENU / 병 + 전환' });
 
   // ── readouts ─────────────────────────────────────────────────────────────
@@ -373,5 +377,33 @@ export function bootMenuDebug(ctx) {
     }, 'go')
     .name('\u21ba localStorage 강제 초기화');
 
-  return { gui, frame };
+  /**
+   * ── 사운드 ────────────────────────────────────────────────────────────────
+   * The same folder the game page's panel builds, from the same file. The menu
+   * owns four sound-producing things the match page has never heard of — the
+   * bottle being worked up, the cap wipe, the mark editor's brush and every one
+   * of the confirm dialogs — and they are tuned by these very sliders, so the
+   * folder belongs on both panels or on neither.
+   */
+  const audioPanel = ctx.audio
+    ? addAudioFolder(gui, {
+        audio: ctx.audio,
+        config: CONFIG.audio,
+        settings: ctx.audioSettings,
+      })
+    : null;
+
+  return {
+    gui,
+    frame: (state) => {
+      frame(state);
+      // MenuDebug has no slow poll of its own, so the audio readouts are ticked
+      // from the per-frame hook at a fraction of its rate. Voice counts move on
+      // a turn boundary, not on a frame, and rebuilding three strings sixty
+      // times a second to show a number that changed twice would be the panel
+      // costing more than the thing it is measuring.
+      audioTick = (audioTick + 1) % 24;
+      if (audioTick === 0) audioPanel?.refresh();
+    },
+  };
 }

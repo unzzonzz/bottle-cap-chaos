@@ -45,6 +45,44 @@
 /** How far a spawn search will go before giving the turn up. */
 const DEFAULT_RETRIES = 24;
 
+/**
+ * The nearest cap within reach of an orb, or -1. Pure; takes a position lookup.
+ *
+ * ── a free function so the AI's look-ahead asks the SAME question ───────────
+ * A pickup is worth a card, and the brief has the AI both chasing orbs and
+ * avoiding shoving an opponent onto one — so the search has to predict pickups,
+ * and it runs against a restored copy of the world where `Arena.capCom` cannot
+ * reach. Handing in `comOf` is the whole of the difference between the two
+ * callers; every rule below — the reach, the 3D test, nearest-not-first, ties to
+ * the lower index — is shared, which is the point.
+ *
+ * The alternative was a second distance test in the AI, and the two would drift
+ * on precisely the cases that decide whether a card changes hands.
+ *
+ * @param {(i: number) => {x: number, y: number, z: number}} comOf
+ * @param {number} capCount
+ * @param {{x: number, z: number}} orb
+ * @param {number} r2  squared reach
+ */
+export function nearestCapWithin(comOf, capCount, orb, r2) {
+  let best = -1;
+  let bestD2 = Infinity;
+  for (let c = 0; c < capCount; c++) {
+    const p = comOf(c);
+    const dx = p.x - orb.x;
+    // The orb is a BOARD position, so height counts against it: a cap thirty
+    // units down in the pit is not touching anything. See `_nearestCap`'s note.
+    const dy = p.y;
+    const dz = p.z - orb.z;
+    const d2 = dx * dx + dy * dy + dz * dz;
+    if (d2 <= r2 && d2 < bestD2) {
+      bestD2 = d2;
+      best = c;
+    }
+  }
+  return best;
+}
+
 export class Orbs {
   /** @param {typeof import('./config.js').CONFIG} config */
   constructor(config) {
@@ -307,20 +345,11 @@ export class Orbs {
    * lower index, so the result is stable across a replay.
    */
   _nearestCap(arena, orb, r2) {
-    let best = -1;
-    let bestD2 = Infinity;
-    for (let c = 0; c < arena.capBodies.length; c++) {
-      const p = arena.capCom(c);
-      const dx = p.x - orb.x;
-      const dy = p.y;
-      const dz = p.z - orb.z;
-      const d2 = dx * dx + dy * dy + dz * dz;
-      if (d2 <= r2 && d2 < bestD2) {
-        bestD2 = d2;
-        best = c;
-      }
-    }
-    return best;
+    // The body of this moved out to `nearestCapWithin` unchanged, so the AI's
+    // look-ahead can ask it of a restored world. Everything the two long notes
+    // above argue for — the 3D test, nearest rather than first — lives there now
+    // and is therefore shared rather than reproduced.
+    return nearestCapWithin((i) => arena.capCom(i), arena.capBodies.length, orb, r2);
   }
 
   /**

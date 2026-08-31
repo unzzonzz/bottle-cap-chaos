@@ -126,6 +126,15 @@ const MIN_FLING = 0.6;
 const TURNTABLE_DEADZONE = 20;
 /** Backstop on a single event's sweep. A jump this big is a lost pointer. */
 const MAX_TURN_STEP = 0.5;
+/**
+ * How far a press may wander and still count as a tap, in CSS pixels.
+ *
+ * A tap on the board skips the AI's presentation and a drag turns the camera,
+ * and they start identically. Generous enough that a finger on glass — which
+ * never lands perfectly still — is not read as a drag, and far below the
+ * distance any deliberate pan or rotate covers.
+ */
+const TAP_SLOP = 6;
 
 export class PointerRouter {
   /**
@@ -135,8 +144,51 @@ export class PointerRouter {
    * @param {import('./Match.js').Match} match
    * @param {(shot: import('./shot.js').Shot) => void} onFire
    */
-  constructor({ canvas, aim, camera, match, config, cards, hud, victory, blocked, onFire }) {
+  /**
+   * @param {() => boolean} [accepts]
+   *   Whether the seat on turn is a person who may act. False during an AI turn.
+   *
+   *   ── it is narrower than `blocked`, and the difference is the point ────────
+   *   `blocked` means the screen is spoken for and NOTHING answers — it is for
+   *   the cap wipe, where the player cannot see what they would be pressing. An
+   *   AI turn is the opposite: the board is fully visible and the brief is
+   *   explicit that the player should be able to look around it. "발사·카드
+   *   조작: 차단. 카메라 조작(줌·팬·회전): 허용."
+   *
+   *   So this gates exactly two branches of `_down` — the cards and the aim —
+   *   and leaves the HUD and the camera alone. The camera needed no work at all:
+   *   it was already ungated by match state, for the reason the note on
+   *   `MATCH_STATE.GOAL_HOLD` gives.
+   * @param {() => void} [onTap]
+   *   A press that turned out not to be a drag, on the board. The AI's
+   *   presentation skip hangs off this.
+   */
+  constructor({
+    canvas,
+    aim,
+    camera,
+    match,
+    config,
+    cards,
+    hud,
+    victory,
+    blocked,
+    accepts,
+    onTap,
+    onFire,
+    boardRect,
+  }) {
     this.canvas = canvas;
+    /**
+     * Where the 3D board is drawn, in client coordinates.
+     *
+     * The canvas rect until the frame grew taller than the board — see
+     * Viewport.boardClientRect. Only the two mappings that speak to the CAMERA
+     * use it (the pan gain and the turntable bearing); the card, HUD and victory
+     * hit tests keep normalising against the whole canvas, because their ortho
+     * frames cover the whole canvas.
+     */
+    this._boardRect = boardRect ?? (() => canvas.getBoundingClientRect());
     this.aim = aim;
     this.camera = camera;
     this.match = match;
@@ -164,7 +216,13 @@ export class PointerRouter {
      * knowing what a cap wipe is — only that the screen is spoken for.
      */
     this._blocked = blocked ?? (() => false);
+    this._accepts = accepts ?? (() => true);
+    this._onTap = onTap ?? (() => {});
     this.onFire = onFire ?? (() => {});
+
+    /** Where the press landed, and whether it has travelled. See `_up`. */
+    this._pressAt = null;
+    this._travelled = false;
 
     this.mode = DRAG_MODE.NONE;
     /** Which of the player's caps the pointer is over, or -1. Drives the cursor. */
@@ -252,6 +310,7 @@ export class PointerRouter {
   get modeLabel() {
     if (this.mode !== DRAG_MODE.NONE) return this.mode;
     if (this.victory?.active) return `victory (${this.victory.hovered ?? 'idle'})`;
+    if (!this._accepts()) return `ai turn (${this.camera.dragMode} only)`;
     if (this._overCard) return 'card (hover)';
     if (this._overUi) return `ui (${this.hud?.hovered ?? 'hover'})`;
     if (this.match.state !== MATCH_STATE.AIM) return 'locked';
@@ -324,6 +383,8 @@ export class PointerRouter {
     this._primary = e.pointerId;
     this._capture(e.pointerId);
     this._flingSamples.length = 0;
+    this._pressAt = { x: e.clientX, y: e.clientY };
+    this._travelled = false;
 
     // The victory screen first, and it takes everything: see the header. It
     // answers true for the whole time it is up, so nothing below runs.
@@ -335,9 +396,27 @@ export class PointerRouter {
       return;
     }
 
+    /**
+     * The HUD is asked EARLY when the seat is not the player's.
+     *
+     * Normally it sits below the cards — a card fanned over a button is drawn
+     * over it, and a control that is visibly behind something must not answer a
+     * press. During an AI turn neither the cards nor the caps answer anything at
+     * all, so there is nothing left for the buttons to be behind, and asking
+     * first is how 나가기, 재시작 and the camera reset stay usable while the
+     * opponent is taking its go. The player must not be locked out of leaving.
+     */
+    const acting = this._accepts();
+    if (!acting && this.hud?.pointerDown(e.clientX, e.clientY)) {
+      this.mode = DRAG_MODE.UI;
+      this._setHover(-1);
+      this._setOverUi(true);
+      return;
+    }
+
     // Cards first, and they do not fall through: a press that lands on one is
     // that card's, whatever is underneath it.
-    if (this.cards?.pointerDown(e.clientX, e.clientY)) {
+    if (acting && this.cards?.pointerDown(e.clientX, e.clientY)) {
       this.mode = DRAG_MODE.CARD;
       this._setHover(-1);
       this._setOverUi(false);
@@ -354,7 +433,7 @@ export class PointerRouter {
       return;
     }
 
-    const cap = this.aim.hitTest(e.clientX, e.clientY);
+    const cap = acting ? this.aim.hitTest(e.clientX, e.clientY) : -1;
     if (cap >= 0 && this.aim.begin(e.clientX, e.clientY, cap)) {
       this.mode = DRAG_MODE.AIM;
       this._setHover(cap);
@@ -400,7 +479,10 @@ export class PointerRouter {
         this._setOverUi(this.victory.hovering);
         return;
       }
-      if (this.cards?.pointerMove(e.clientX, e.clientY)) {
+      // Same gate as the press, in the same order, so the cursor cannot promise
+      // a card or a cap that a press would refuse. The HUD is still live.
+      const acting = this._accepts();
+      if (acting && this.cards?.pointerMove(e.clientX, e.clientY)) {
         this._setHover(-1);
         this._setOverCard(true);
         this.hud?.clearHover();
@@ -416,13 +498,20 @@ export class PointerRouter {
         return;
       }
       this._setOverUi(false);
-      this._setHover(this.aim.hitTest(e.clientX, e.clientY));
+      this._setHover(acting ? this.aim.hitTest(e.clientX, e.clientY) : -1);
       return;
     }
 
     const dx = e.clientX - prev.x;
     const dy = e.clientY - prev.y;
     this._points.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    // Measured from the PRESS, not accumulated per event: a slow drag back to
+    // where it started is a drag, and summing deltas would call it a tap.
+    if (this._pressAt) {
+      const travel = Math.hypot(e.clientX - this._pressAt.x, e.clientY - this._pressAt.y);
+      if (travel > TAP_SLOP) this._travelled = true;
+    }
 
     if (this.mode === DRAG_MODE.PINCH) {
       const d = this._spread();
@@ -460,7 +549,9 @@ export class PointerRouter {
     }
 
     if (this.mode === DRAG_MODE.PAN) {
-      const r = this.canvas.getBoundingClientRect();
+      // The BOARD's size, not the canvas's: the gain is "one drag across the
+      // view pans one view width", and the view is the board.
+      const r = this._boardRect();
       this.camera.panByPixels(dx, dy, { width: r.width, height: r.height });
       return;
     }
@@ -512,7 +603,8 @@ export class PointerRouter {
       this._setOverUi(this.victory.hovering);
       return;
     }
-    if (this.cards?.hovering) {
+    const acting = this._accepts();
+    if (acting && this.cards?.hovering) {
       this._setHover(-1);
       this._setOverCard(true);
       this._setOverUi(false);
@@ -528,7 +620,10 @@ export class PointerRouter {
       return;
     }
     this._setOverUi(false);
-    this._setHover(this.aim.hitTest(this._hoverPoint.x, this._hoverPoint.y));
+    // And re-asked here in particular because the TURN changes under a still
+    // cursor: the moment the AI's go opens, a ring left over the player's own
+    // cap would be promising a shot that is no longer available.
+    this._setHover(acting ? this.aim.hitTest(this._hoverPoint.x, this._hoverPoint.y) : -1);
   }
 
   /**
@@ -548,7 +643,9 @@ export class PointerRouter {
    * @returns {number|null} radians, or null inside the deadzone
    */
   _bearingAt(clientX, clientY) {
-    const r = this.canvas.getBoundingClientRect();
+    // Centred on the BOARD, so the turntable's pivot is the middle of the play
+    // area rather than the middle of a canvas that may include UI bands.
+    const r = this._boardRect();
     if (r.width < 1 || r.height < 1) return null;
     const dx = clientX - (r.left + r.width / 2);
     const sinPitch = Math.max(0.15, Math.sin((this.camera.pitchDegrees * Math.PI) / 180));
@@ -598,6 +695,28 @@ export class PointerRouter {
       if (v !== 0) this.camera.flingRotate(v);
     }
 
+    /**
+     * A press on the board that never became a drag is a TAP, and a tap skips
+     * whatever the AI is currently showing.
+     *
+     * Decided on release rather than on press, and that is what makes the two
+     * gestures coexist: the camera and the skip both live on the board, so
+     * firing the skip at press time would mean every pan and every rotation also
+     * jumped a stage of the presentation. Waiting to see whether the pointer
+     * travelled costs nothing — the skip is instant either way — and lets a
+     * player look around the board mid-turn without accidentally hurrying it.
+     *
+     * PAN and ROTATE only. A tap that landed on a card, a button or a cap has
+     * already been answered by that thing.
+     */
+    if (
+      !cancelled &&
+      !this._travelled &&
+      (this.mode === DRAG_MODE.PAN || this.mode === DRAG_MODE.ROTATE)
+    ) {
+      this._onTap();
+    }
+
     this._finish();
   }
 
@@ -644,6 +763,8 @@ export class PointerRouter {
     this.mode = DRAG_MODE.NONE;
     this._setOverUi(false);
     this._primary = null;
+    this._pressAt = null;
+    this._travelled = false;
     this._pinchDistance = 0;
     this._turnAngle = null;
     this._flingSamples.length = 0;

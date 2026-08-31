@@ -1,6 +1,6 @@
 import { KnockoutBoard } from './layout/KnockoutBoard.js';
 import { FootballPitch } from './layout/FootballPitch.js';
-import { CurlingLane } from './layout/CurlingLane.js';
+import { CurlingTable } from './layout/CurlingTable.js';
 import { KnockoutRules } from './rules/KnockoutRules.js';
 import { FootballRules } from './rules/FootballRules.js';
 import { CurlingRules } from './rules/CurlingRules.js';
@@ -44,6 +44,23 @@ export const MODES = {
     name: '알까기 (기본)',
     createLayout: (config) => new KnockoutBoard(config),
     createRules: (arena) => new KnockoutRules(arena),
+
+    /**
+     * This mode can be played against the computer.
+     *
+     * ── a flag on the MODE, exactly as `cards` and `track` are ───────────────
+     * "축구·컬링에 AI 적용 — 이번엔 서바이벌만이다." The opponent-select screen is
+     * deliberately mode-agnostic and will be reused, so the scope limit cannot
+     * live there; and an AI that silently fell back to a human on the other two
+     * would be a menu that lies about what it just offered.
+     *
+     * So the mode says whether it has an opponent to offer, the menu greys the
+     * row when it does not, and `main.js` refuses to build a controller for a
+     * mode that never claimed one. Football gets an AI by writing an evaluator
+     * and adding this line — see `ai/candidates.js` and `ai/evaluate.js`, which
+     * are split apart for that purpose.
+     */
+    ai: true,
     /**
      * The same camera block football has, term for term.
      *
@@ -76,6 +93,21 @@ export const MODES = {
       fixedPitch: null,
       rotatable: true,
       minZoom: (config) => config.view.knockoutMinZoom,
+      /**
+       * The camera rides the thrown cap while the turn plays out.
+       *
+       * A flag on the MODE rather than a mode check inside the tracker, for the
+       * reason `rotatable` above is one: which games are watched this way is a
+       * fact about the game, and `CamTracker` has no business containing the
+       * word "football". Football does not name this, so it is undefined there
+       * and the tracker never starts — its ball follow is untouched and is a
+       * different mechanism entirely. See `config.view.track`.
+       *
+       * This mode is the reason the fall snap exists. A cap going over the edge
+       * IS the game here, and it happens off to one side of wherever the shot
+       * was aimed.
+       */
+      track: true,
       /**
        * Identical to football's, and identical for the same reason: a player's
        * half is the end their caps start at, that end never moves, so this is a
@@ -137,6 +169,19 @@ export const MODES = {
       fixedPitch: (config) => config.view.footballPitchAngle,
       rotatable: true,
       minZoom: null,
+      /**
+       * How far a small screen may step the DEFAULT framing in. See
+       * `GameCamera.screenZoom`.
+       *
+       * Lower than the 2.1 the other modes take, and measured rather than
+       * chosen: the eight caps and the ball span 56 world units of pitch, and
+       * anything past about 1.22 puts the far half — including the goal you are
+       * aiming at — off the screen. Football is the mode where "see the whole
+       * pitch" is a stated requirement, and while that requirement is about
+       * `minZoom` rather than the default, a kickoff you cannot read is still a
+       * kickoff you cannot read.
+       */
+      screenZoomMax: () => 1.22,
       /**
        * The bearing that puts THIS player's caps at the bottom of the screen.
        *
@@ -221,7 +266,13 @@ export const MODES = {
     /** See the note on knockout's. */
     path: 'curling',
     name: '알까기 컬링',
-    createLayout: (config) => new CurlingLane(config),
+    /**
+     * The only layout that is handed the cap's size, and the only one that
+     * needs it: the table's width is a multiple of the cap's diameter, because
+     * that ratio is the whole of "뚜껑이 너무 작아 보이면 안 된다 / 상대 뚜껑을
+     * 너무 쉽게 치면 안 된다". See `curlingTableMetrics`.
+     */
+    createLayout: (config, capDims) => new CurlingTable(config, (capDims?.radius ?? 1.6) * 2),
     createRules: (arena) => new CurlingRules(arena),
 
     /**
@@ -241,21 +292,30 @@ export const MODES = {
     cards: false,
 
     /**
-     * ── both players look at the lane the same way up ───────────────────────
+     * ── both players look at the table the same way up ──────────────────────
      * `ownHalfBearing` is a constant zero rather than a per-player value, and
      * that is the mode being different rather than the mode not bothering: in
      * curling both players throw from the SAME end. There is no own half. The
-     * throw line is at the bottom of the screen and the house is at the top, for
-     * everybody, every turn — mirroring the lane on the handover would mean each
-     * player spent their turn aiming down a board the other one had just learned.
+     * throw spot is at the bottom of the screen and the target line is at the
+     * top, for everybody, every round — mirroring the table on the handover
+     * would mean each player spent their turn aiming down a board the other one
+     * had just learned.
      *
-     * The invariant machinery above this is unchanged and still runs: it simply
-     * finds the view already correct on almost every frame, and puts it back if
-     * a rotation left it somewhere else.
+     * The invariant machinery in `main.js` is unchanged and still runs: it
+     * simply finds the view already correct on almost every frame, and puts it
+     * back if a rotation left it somewhere else.
      *
-     * `fixedPitch` is null, so the lane uses the panel's top-down toggle exactly
-     * as the knockout board does. There is no curling camera angle to invent —
-     * top-down is what reads on a long lane, and it is already the default.
+     * `fixedPitch` is null, so the table uses the panel's top-down toggle
+     * exactly as the survival board does. There is no curling camera angle to
+     * invent — a distance judged along one axis reads from above, and top-down
+     * is already the default.
+     *
+     * `minZoom` is 1, and 1 is the whole-of-`extents` fit by construction — see
+     * `GameCamera.fitDistance`. So "최소 줌에서 책상 전체가 보인다" is true
+     * because of what the number means rather than because it was measured
+     * against one table size, and it stays true at every width the panel can
+     * produce. There is deliberately no automatic camera move on a shot; the
+     * only thing that repositions the view is the turn handover.
      */
     camera: {
       fixedPitch: null,
@@ -263,7 +323,40 @@ export const MODES = {
       minZoom: (config) => config.view.curlingMinZoom,
       maxZoom: (config) => config.view.curlingMaxZoom,
       turnZoom: (config) => config.view.curlingTurnZoom,
+      /**
+       * Curling declines the small-screen step-in entirely. See
+       * `GameCamera.screenZoom`.
+       *
+       * The other modes take 2.1 because a tighter opening costs them nothing.
+       * It costs curling the mode: you throw from one end AT the other, and
+       * `curlingTurnZoom` is 1 — the whole-table fit — precisely because "a view
+       * that shows only one of them is useless whichever end it picks". At 2.1
+       * the turn opened with both the throw spot and the house off screen, so
+       * you could not even press the cap you were about to throw.
+       */
+      screenZoomMax: () => 1,
       ownHalfBearing: () => 0,
+      /** See the note on knockout's. The throw is followed here too. */
+      track: true,
+      /**
+       * The one thing on this table the view must not lose.
+       *
+       * "라인이 이 모드의 전부다. 라인이 화면 밖으로 나가면 긴장감이 사라진다."
+       * The tracker frames the thrown cap against this line rather than instead
+       * of it — see `CamTracker._frame` — and does so by shifting the view up
+       * the lane, never by zooming, because an automatic zoom is the thing the
+       * whole tracker exists to avoid.
+       *
+       * Read off the built table's own metrics rather than recomputed from the
+       * config, so it is the line the judge measures to and the line
+       * `CurlingTableView` draws. There is exactly one `targetZ` in the project
+       * and this is a third reader of it, not a second copy — see
+       * `curlingTableMetrics`.
+       *
+       * Round-independent and the same for both players: both throw from −Z at
+       * a line that never moves.
+       */
+      keepLineZ: (arena) => arena.layout.metrics?.targetZ ?? null,
     },
 
     // No `orbArea`, and its absence is load-bearing rather than an omission:
@@ -272,30 +365,35 @@ export const MODES = {
     // independent reasons for the same guarantee.
 
     /**
-     * Curling is won by a COUNT, so the headline is how many caps each side has
-     * in the house — live, updated as they arrive and as they are knocked out.
+     * Curling is won by ROUNDS, so the headline is how many each side has taken.
      *
      * ── `pulseKey` is the whole of the "과한 연출은 빼라" ────────────────────
-     * The caption carries the throws left, which changes on every single turn,
-     * and the plate's texture is keyed on everything drawn on it — so a single
-     * key would fire the score's emphasis beat eight times a match at something
-     * nobody did. `pulseKey` names only the two numbers the beat is ABOUT, so
-     * the flourish happens when and only when a cap enters or leaves the house.
-     * See `HudLayer._updateScore`.
+     * The caption carries the round number and who is leading it, both of which
+     * move every round, and the plate's texture is keyed on everything drawn on
+     * it — so a single key would fire the score's emphasis beat at a round
+     * counter ticking over. `pulseKey` names only the two numbers the beat is
+     * ABOUT, so the flourish happens when and only when somebody wins a round.
+     * With four rounds in a match that is at most four beats, which is the
+     * budget "라운드가 4번이므로 매번 길면 늘어진다" allows. See
+     * `HudLayer._updateScore`.
      */
     scoreboard: (rules) => {
-      const a = rules.house[0];
-      const b = rules.house[1];
-      const per = rules.perTeam;
+      const a = rules.wins[0];
+      const b = rules.wins[1];
+      const total = rules.rounds;
+      // Clamped, because `round` reaches `total` when the match ends and the
+      // last thing the plate should say is "라운드 5/4".
+      const now = Math.min(rules.round + 1, total);
+      const lead = rules.leadFor(Math.min(rules.round, total - 1)) + 1;
       return {
-        key: `curling:${a}:${b}:${rules.thrown[0]}:${rules.thrown[1]}:${per}`,
+        key: `curling:${a}:${b}:${now}:${total}:${lead}:${rules.draws}`,
         pulseKey: `curling:${a}:${b}`,
         left: String(a),
         right: String(b),
         // Short on purpose: the plate is 208 frame pixels wide and the caption
-        // gets 10 of its 42, so a longer sentence is a resampled one. The two
-        // numbers above it are already the house count, in the team colours.
-        caption: `남은 투구 ${per - rules.thrown[0]}/${per} · ${per - rules.thrown[1]}/${per}`,
+        // gets 10 of its 42 rows, so a longer sentence is a resampled one. The
+        // two numbers above it are already the round wins, in the team colours.
+        caption: `라운드 ${now}/${total} · 선공 P${lead}`,
       };
     },
   },

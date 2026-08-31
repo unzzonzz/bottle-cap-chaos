@@ -1,4 +1,6 @@
 import { CanvasTexture, ClampToEdgeWrapping, NearestFilter, RepeatWrapping } from 'three';
+import { PALETTE } from '../core/palette.js';
+import { registerTextureCache } from '../ui/fonts.js';
 
 /**
  * The card effects' artwork, drawn as the hardware would have had it.
@@ -71,7 +73,7 @@ function drawStar(ctx, ox, oy, size, angle) {
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
   // Long axis, short axis, and the core. Three tones, hard-stepped.
-  const tones = ['#ffffff', '#d0d0ff', '#7080c0'];
+  const tones = PALETTE.fx.star;
 
   for (let k = 0; k < 4; k++) {
     const a = angle + (k * Math.PI) / 2;
@@ -130,9 +132,9 @@ export function ringTexture(size = 32) {
   // Four bands. Anything more and it stops reading as bands.
   const bands = [
     { r0: 0.72, r1: 1.0, fill: 'rgba(0,0,0,0)' },
-    { r0: 0.56, r1: 0.72, fill: '#4a6fa8' },
-    { r0: 0.40, r1: 0.56, fill: '#9fd0ff' },
-    { r0: 0.26, r1: 0.40, fill: '#ffffff' },
+    { r0: 0.56, r1: 0.72, fill: PALETTE.fx.ring[0] },
+    { r0: 0.40, r1: 0.56, fill: PALETTE.fx.ring[1] },
+    { r0: 0.26, r1: 0.40, fill: PALETTE.fx.ring[2] },
   ];
   for (let y = 0; y < s; y++) {
     for (let x = 0; x < s; x++) {
@@ -169,9 +171,9 @@ export function auraTexture(size = 32) {
   // Outer thin, middle brightest, inner thin. Read from the outside in, which
   // is the direction the card's whole idea runs.
   const bands = [
-    { r0: 0.86, r1: 0.98, fill: '#8c3a16' },
-    { r0: 0.62, r1: 0.74, fill: '#ff8a3c' },
-    { r0: 0.40, r1: 0.48, fill: '#ffd0a0' },
+    { r0: 0.86, r1: 0.98, fill: PALETTE.fx.aura[0] },
+    { r0: 0.62, r1: 0.74, fill: PALETTE.fx.aura[1] },
+    { r0: 0.40, r1: 0.48, fill: PALETTE.fx.aura[2] },
   ];
   for (let y = 0; y < s; y++) {
     for (let x = 0; x < s; x++) {
@@ -213,7 +215,7 @@ export function trailTexture(size = 32) {
   const { canvas: cv, ctx } = canvas(s, s);
   ctx.clearRect(0, 0, s, s);
   const c = s / 2;
-  const tones = ['#ffffff', '#c4c4c4', '#6c6c6c'];
+  const tones = PALETTE.fx.trail;
   for (let y = 0; y < s; y++) {
     for (let x = 0; x < s; x++) {
       const d = Math.hypot(x + 0.5 - c, y + 0.5 - c) / c;
@@ -233,7 +235,7 @@ export function flashTexture(size = 32) {
   const { canvas: cv, ctx } = canvas(s, s);
   ctx.clearRect(0, 0, s, s);
   const c = s / 2;
-  const tones = ['#ffffff', '#ffe9a8', '#c08c34'];
+  const tones = PALETTE.fx.flash;
   for (let y = 0; y < s; y++) {
     for (let x = 0; x < s; x++) {
       const d = Math.hypot(x + 0.5 - c, y + 0.5 - c) / c;
@@ -241,6 +243,86 @@ export function flashTexture(size = 32) {
       px(ctx, x, y, 1, 1, tones[d < 0.34 ? 0 : d < 0.62 ? 1 : 2]);
     }
   }
+  return finish(key, cv);
+}
+
+/**
+ * One opaque white texel.
+ *
+ * For the full-frame darkening flash, which has no shape — the strength is a
+ * uniform and the quad is the whole frame. It exists so the subtractive material
+ * can keep ONE fragment shader for both the bolt and the flash: a second shader
+ * with the texture read taken out would be the same arithmetic written twice,
+ * and the two would eventually disagree about what `uOpacity` means.
+ */
+export function flatTexture() {
+  const key = 'flat';
+  if (cache.has(key)) return cache.get(key);
+  const { canvas: cv, ctx } = canvas(1, 1);
+  px(ctx, 0, 0, 1, 1, PALETTE.fx.white);
+  return finish(key, cv);
+}
+
+/**
+ * The padlock. 침묵's whole vocabulary, in three shapes.
+ *
+ * Alpha-blended rather than additive, and it is the only sprite in this file
+ * that is: everything else here is light being ADDED to the picture, and a seal
+ * is the opposite statement. An additive padlock over a dark pitch would be a
+ * glowing lock, which reads as a power-up.
+ *
+ * So it is drawn as an OBJECT — a dark outline, a mid body, one highlight — and
+ * the outline is what makes it survive being stamped over anything. Without it
+ * a pale lock on the pale end of the pitch simply disappears.
+ *
+ * The shackle is a stepped arc walked in whole pixels rather than an `arc()`
+ * call, for the reason `drawStar` is: a canvas curve antialiases, and an
+ * antialiased edge arrives at the 5-bit quantiser as a fringe of dirt.
+ */
+export function lockTexture(size = 16) {
+  const s = Math.max(8, Math.round(size));
+  const key = `lock:${s}`;
+  if (cache.has(key)) return cache.get(key);
+
+  const { canvas: cv, ctx } = canvas(s, s);
+  ctx.clearRect(0, 0, s, s);
+
+  const { outline: OUTLINE, body: BODY, shade: SHADE, light: LIGHT } = PALETTE.fx.lock;
+
+  // Body: a plain rectangle across the bottom half. A lock is a box.
+  const bx = Math.round(s * 0.18);
+  const bw = s - bx * 2;
+  const by = Math.round(s * 0.46);
+  const bh = Math.round(s * 0.38);
+  px(ctx, bx - 1, by - 1, bw + 2, bh + 2, OUTLINE);
+  px(ctx, bx, by, bw, bh, BODY);
+  // One lit column down the left. Not a gradient — the era lit a face, not a
+  // surface.
+  px(ctx, bx, by, Math.max(1, Math.round(s * 0.08)), bh, LIGHT);
+
+  // Shackle: an upside-down U, walked pixel by pixel.
+  const r = Math.round(s * 0.22);
+  const cx = Math.round(s / 2);
+  const cy = by;
+  const t = Math.max(1, Math.round(s * 0.1));
+  for (let a = 180; a <= 360; a += 6) {
+    const rad = (a * Math.PI) / 180;
+    const x = cx + Math.cos(rad) * r;
+    const y = cy + Math.sin(rad) * r;
+    px(ctx, x - t / 2 - 1, y - t / 2 - 1, t + 2, t + 2, OUTLINE);
+  }
+  for (let a = 180; a <= 360; a += 6) {
+    const rad = (a * Math.PI) / 180;
+    const x = cx + Math.cos(rad) * r;
+    const y = cy + Math.sin(rad) * r;
+    px(ctx, x - t / 2, y - t / 2, t, t, SHADE);
+  }
+
+  // Keyhole. Two pixels of it, and they are what says "lock" rather than "bag".
+  const k = Math.max(1, Math.round(s * 0.1));
+  px(ctx, cx - Math.ceil(k / 2), by + Math.round(bh * 0.28), k, k, OUTLINE);
+  px(ctx, cx - 1, by + Math.round(bh * 0.28) + k, Math.max(1, Math.round(k * 0.7)), k, OUTLINE);
+
   return finish(key, cv);
 }
 
@@ -262,9 +344,9 @@ export function dashTexture(length = 16) {
   // that is flickering.
   for (let i = 0; i < n; i++) {
     const phase = i % 8;
-    if (phase === 0) px(ctx, i, 0, 1, 1, '#ffffff');
-    else if (phase === 1) px(ctx, i, 0, 1, 1, '#9ff0d8');
-    else if (phase === 2) px(ctx, i, 0, 1, 1, '#2f8a70');
+    if (phase === 0) px(ctx, i, 0, 1, 1, PALETTE.fx.dash[0]);
+    else if (phase === 1) px(ctx, i, 0, 1, 1, PALETTE.fx.dash[1]);
+    else if (phase === 2) px(ctx, i, 0, 1, 1, PALETTE.fx.dash[2]);
   }
   return finish(key, cv, { repeat: true });
 }
@@ -286,7 +368,8 @@ export function scanTexture(height = 32) {
   for (let y = 0; y < h; y++) {
     const t = y / (h - 1);
     // A hard leading edge and a stepped tail: the sweep has a direction.
-    const band = t < 0.08 ? '#ffffff' : t < 0.2 ? '#a8ffe4' : t < 0.45 ? '#3f9c86' : t < 0.7 ? '#1d4a42' : null;
+    const S = PALETTE.fx.scan;
+    const band = t < 0.08 ? S[0] : t < 0.2 ? S[1] : t < 0.45 ? S[2] : t < 0.7 ? S[3] : null;
     if (band) px(ctx, 0, y, 1, 1, band);
   }
   return finish(key, cv);
@@ -317,7 +400,7 @@ export function frameTexture(size = 128) {
   const { canvas: cv, ctx } = canvas(s, s);
   ctx.clearRect(0, 0, s, s);
   // Outermost first. Additive, so even the last tone is doing something.
-  const tones = ['#ffe9b0', '#c08c34', '#54380e'];
+  const tones = PALETTE.fx.frame;
   const depth = Math.max(tones.length, Math.round(s * 0.055));
   for (let y = 0; y < s; y++) {
     for (let x = 0; x < s; x++) {
@@ -331,7 +414,6 @@ export function frameTexture(size = 128) {
 }
 
 /** Drop every cached texture. For a resolution or frame-count change. */
-export function clearFxTextureCache() {
+export const clearFxTextureCache = registerTextureCache(() => {
   for (const t of cache.values()) t.dispose();
-  cache.clear();
-}
+  cache.clear();});

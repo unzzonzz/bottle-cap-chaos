@@ -13,7 +13,9 @@ import { makeCapTopTexture } from '../cap/capTexture.js';
 import { BOARD_TILE, makeBoardTexture } from './boardTexture.js';
 import { BALL_GROUP, buildBallGeometry } from './ballGeometry.js';
 import { PitchView } from './PitchView.js';
-import { CurlingView } from './CurlingView.js';
+import { CurlingTableView } from './CurlingTableView.js';
+import { PLAYER_COLORS } from './playerColors.js';
+import { PALETTE } from '../core/palette.js';
 
 /**
  * Layer 3: the physics state, drawn.
@@ -35,7 +37,16 @@ import { CurlingView } from './CurlingView.js';
  */
 
 /** Player colours. Red is the traditional crown cap; blue is the other one. */
-export const PLAYER_COLORS = ['#c8342f', '#3f7ec4'];
+/**
+ * Imported AND re-exported, and it has to be both.
+ *
+ * `export { X } from '...'` alone forwards the name to importers without
+ * creating a local binding, so this file's own uses of it are a
+ * `ReferenceError` — which is exactly what happened. The values moved out to
+ * break a cycle with `PitchView` and to keep the menu off this module; see
+ * `playerColors.js`. The re-export keeps every existing importer unchanged.
+ */
+export { PLAYER_COLORS };
 
 /**
  * Off-white PVC, the usual liner stock. Same value the viewer uses.
@@ -44,7 +55,7 @@ export const PLAYER_COLORS = ['#c8342f', '#3f7ec4'];
  * is not painted with the shell — tinting it is the fastest way to make the
  * inside read as moulded plastic instead of a fitted seal.
  */
-const LINER_COLOR = '#ddd6c2';
+const LINER_COLOR = PALETTE.metal.liner;
 
 /**
  * The cap, INTERIOR AND ALL.
@@ -75,11 +86,19 @@ export function capDimensions(geometry) {
 }
 
 /** The mat's own colour lives in its texture; this is just a tint on top. */
-const BOARD_TINT = '#ffffff';
-/** The out line. The single most important line on screen in the top-down view. */
-const BOARD_EDGE_COLOR = '#f0e8c8';
+const BOARD_TINT = PALETTE.board.tint;
+/**
+ * The out line. The single most important line on screen in the top-down view.
+ *
+ * It was a cream, and it is a dark navy now. The line's job did not change —
+ * what changed is which direction "loud" points: a pale line was the brightest
+ * thing on a near-black mat, and on honey wood it is nearly the mat's own value.
+ * See `PALETTE.aim` for the same inversion happening to the aiming furniture,
+ * and the audit in `PALETTE.board.line` for the measured contrast.
+ */
+const BOARD_EDGE_COLOR = PALETTE.board.line;
 /** Where the surface itself stops. Dim: it is not a rule, only a floor. */
-const APRON_EDGE_COLOR = '#3a4250';
+const APRON_EDGE_COLOR = PALETTE.board.apron;
 /**
  * Distance marks, one every four cap widths.
  *
@@ -87,19 +106,24 @@ const APRON_EDGE_COLOR = '#3a4250';
  * these lines existed to provide, so all they still have to do is mark scale.
  * At the old brightness they sat on top of the mat rather than in it.
  */
-const GRID_COLOR = '#333b47';
+const GRID_COLOR = PALETTE.board.grid;
 
 /**
  * The ball's two panel colours.
  *
- * Not pure black and pure white. The chain quantises to five bits a channel and
- * the pitch behind is dark, so a pure white panel is the brightest thing on
- * screen by a distance and pulls the eye off the caps; a pure black one goes to
- * the same value as the shadow under the goal. These are a step in from each
- * end, which survives the quantiser and still reads as a black-and-white ball.
+ * White and a mid slate — not white and black. The old pair was a step in from
+ * each end because the chain quantised to five bits a channel and the pitch
+ * behind was dark: a pure white panel was then the brightest thing on screen by
+ * a distance and pulled the eye off the caps, and a pure black one went to the
+ * same value as the shadow under the goal.
+ *
+ * The pitch is bright turf now, so white no longer wins the frame and can be the
+ * white a ball actually is. The dark panel came a long way up in exchange, both
+ * because rule 1 of the palette forbids the near-black it was and because a
+ * black-panelled ball on a sunlit pitch reads as a hole rather than as a ball.
  */
-const BALL_LIGHT = '#e8e8e0';
-const BALL_DARK = '#14161a';
+const BALL_LIGHT = PALETTE.ball.light;
+const BALL_DARK = PALETTE.ball.dark;
 
 export class ArenaView {
   /**
@@ -164,7 +188,7 @@ export class ArenaView {
        * contract and `CapWipe` makes the same distinction.
        */
       set[CAP_GROUP.PANEL] = panelTextureFor
-        ? retro.create({ map: panelTextureFor(player), color: '#ffffff' })
+        ? retro.create({ map: panelTextureFor(player), color: PALETTE.untinted })
         : retro.create({ map: this.panelTexture, color });
       set[CAP_GROUP.LINER] = this.linerMaterial;
       return set;
@@ -245,8 +269,8 @@ export class ArenaView {
         layout: arena.layout,
       });
       this.field = this.surface.root;
-    } else if (desc.kind === 'lane') {
-      this.surface = new CurlingView({
+    } else if (desc.kind === 'table') {
+      this.surface = new CurlingTableView({
         retro: this.retro,
         description: desc,
         config: this.config,

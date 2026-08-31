@@ -12,7 +12,8 @@ import {
 import { TURF_TILE, makeTurfTexture } from './pitchTexture.js';
 // The caps' own colours. The goal a player defends is painted in theirs, so the
 // two are the same fact told twice rather than two colour schemes to learn.
-import { PLAYER_COLORS } from './ArenaView.js';
+import { PLAYER_COLORS } from './playerColors.js';
+import { PALETTE } from '../core/palette.js';
 
 /**
  * The football pitch, drawn.
@@ -45,9 +46,9 @@ import { PLAYER_COLORS } from './ArenaView.js';
  */
 
 /** The lines. The brightest thing on the pitch, and the thing being read. */
-const LINE_COLOR = '#e6efe4';
+const LINE_COLOR = PALETTE.pitch.line;
 /** Mown bands: identical map, one tint down. Stripes are luminance, not hue. */
-const BAND_TINT = ['#ffffff', '#c6c6c6'];
+const BAND_TINT = PALETTE.pitch.bandTint;
 /**
  * Mown bands, counted ALONG THE PITCH — so each stripe runs touchline to
  * touchline and the bands step goal-ward.
@@ -63,9 +64,9 @@ const BAND_TINT = ['#ffffff', '#c6c6c6'];
  */
 const BAND_COUNT = 12;
 
-const FENCE_COLOR = '#6b7688';
-const NET_COLOR = '#aeb6c2';
-const FRAME_COLOR = '#e8ecf2';
+const FENCE_COLOR = PALETTE.pitch.fence;
+const NET_COLOR = PALETTE.pitch.net;
+const FRAME_COLOR = PALETTE.pitch.frame;
 
 /**
  * A player's colour, taken most of the way to the net's grey.
@@ -83,7 +84,7 @@ function washed(hex, toward = NET_COLOR, amount = 0.62) {
     .join('')}`;
 }
 /** The goal sensor outline, when the panel asks for it. */
-const SENSOR_COLOR = '#ff7fd0';
+const SENSOR_COLOR = PALETTE.pitch.sensor;
 /**
  * The run-off, one step down from the pitch.
  *
@@ -92,10 +93,10 @@ const SENSOR_COLOR = '#ff7fd0';
  * lines are what the rule reads. Making it loud would put the emphasis on the
  * one part of the ground nothing happens on.
  */
-const RUNOFF_TINT = '#b0b8ab';
+const RUNOFF_TINT = PALETTE.pitch.runoff;
 /** Candidate spots the respawn search walked. Debug only. */
-const SEARCH_OK = '#7ef0c8';
-const SEARCH_BLOCKED = '#e0553f';
+const SEARCH_OK = PALETTE.pitch.searchOk;
+const SEARCH_BLOCKED = PALETTE.pitch.searchBlocked;
 const MAX_SEARCH_MARKS = 256;
 
 /**

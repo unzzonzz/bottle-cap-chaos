@@ -1,7 +1,9 @@
-import { Mesh, OrthographicCamera, PlaneGeometry, Raycaster, Scene, Vector2 } from 'three';
+import { Mesh, PlaneGeometry, Raycaster, Scene, Vector2 } from 'three';
+import { FRAME as SHARED_FRAME, frameCamera, refitFrameCamera } from '../core/frame.js';
 import { CardMaterials } from './CardMaterial.js';
 import { CardHand, CARD_ASPECT } from './CardHand.js';
-import { clearCardTextureCache, noticeTexture } from './cardTexture.js';
+import { clearCardTextureCache, noticeTexture, useGuideTexture } from './cardTexture.js';
+import { lockTexture } from './fxTextures.js';
 
 /**
  * The card scene: its own scene, its own orthographic camera, its own raycaster.
@@ -44,11 +46,50 @@ import { clearCardTextureCache, noticeTexture } from './cardTexture.js';
  * everything else instead of doubling in size.
  */
 
-/** The layout box, in frame pixels. 4:3, matching the display. */
-export const FRAME = { width: 640, height: 480 };
+/**
+ * The layout box, in frame pixels — the shared, live one.
+ *
+ * Re-exported under the name this module has always used, so `CardHand`,
+ * `CardFx` and `CardFlight` (which are all handed this exact object) follow a
+ * change of shape for free. See src/core/frame.js.
+ */
+export const FRAME = SHARED_FRAME;
 
 /** How far up a hand must be before a single card will lift out of it. */
 const RAISED_ENOUGH = 0.8;
+
+/**
+ * Where a sealed hand's padlock sits, in frame coordinates.
+ *
+ * ── only ever the bottom hand, so there is no side to choose ────────────────
+ * The marker is drawn on the sealed player's OWN turn and at no other time —
+ * see `_updateSeals` — and on their own turn their hand is the one at the
+ * bottom of the screen. So this takes no "which edge" argument: there is one
+ * place a seal marker can be, and asking would only create a second answer.
+ *
+ * X is measured out from the middle of the hand and Y up from the bottom edge,
+ * because that is how the hand itself is laid out and the marker has to move
+ * with it when either is dragged in the panel.
+ */
+export function sealAnchor(cfg, frame) {
+  return { x: cfg.sealIconX, y: -frame.height / 2 + cfg.sealIconY };
+}
+
+/**
+ * 침묵's palette. Three entries, and they barely move.
+ *
+ * Against 혼란's five and 강타's four, so no two of the three cycles line up — a
+ * player carrying two of them must not see one beat. But the real difference is
+ * the RANGE: those two walk across hues, and this one walks between three greys
+ * with a trace of cold in them. 침묵 takes colour away from the hand it lands
+ * on, and a marker that pulsed through violet and pink would be advertising the
+ * opposite of what the card does.
+ */
+const SEAL_PALETTE = [
+  [1.0, 1.0, 1.0],
+  [0.78, 0.82, 0.9],
+  [0.62, 0.66, 0.76],
+];
 
 function smoothstep(x) {
   const t = Math.min(1, Math.max(0, x));
@@ -73,23 +114,28 @@ export class CardLayer {
    *   whether this point belongs to the board no matter what is drawn over it.
    *   See `_reserved`.
    */
-  constructor({ canvas, config, resolution, onCardUsed, onReorder, usable, reserved }) {
+  /**
+   * @param {(player: number) => boolean} [silenced]
+   *   whether 침묵 has this player's hand sealed. Handed in from the game for the
+   *   reason `usable` is: the view does not decide what is legal.
+   *
+   *   Separate from `usable` even though the seal is what makes every card
+   *   answer `ok: false`, because the two are asked about different things. That
+   *   one is per CARD and is what greys them; this is about the HAND, and it is
+   *   what puts the padlock next to it and what times the colour coming back.
+   *   Deriving "sealed" from "every card is blocked" would be a guess — a hand
+   *   holding one 강타 that is already armed satisfies it too.
+   */
+  constructor({ canvas, config, resolution, onCardUsed, onReorder, usable, reserved, silenced }) {
     this.canvas = canvas;
     this.config = config;
     this.onCardUsed = onCardUsed ?? (() => {});
     this.usable = usable ?? (() => ({ ok: true }));
     this._isReserved = reserved ?? (() => false);
+    this._isSilenced = silenced ?? (() => false);
 
     this.scene = new Scene();
-    this.camera = new OrthographicCamera(
-      -FRAME.width / 2,
-      FRAME.width / 2,
-      FRAME.height / 2,
-      -FRAME.height / 2,
-      -100,
-      100,
-    );
-    this.camera.position.z = 10;
+    this.camera = frameCamera();
 
     this.materials = new CardMaterials({ resolution });
 
@@ -136,10 +182,102 @@ export class CardLayer {
     this.notice.renderOrder = 900;
     this.scene.add(this.notice);
     this._noticeText = '';
+
+    /**
+     * The drop guide: where a card has to come to be played.
+     *
+     * ── it sits BETWEEN the fan and the card being carried ──────────────────
+     * The card has to pass over it — a slot on a table is under the thing you
+     * are putting in it — but the rest of the hand must not, and that is not a
+     * taste call: the raised fan reaches to about frame y −120 and the slot's
+     * bottom edge is at −151, so a guide under everything has its lower corners
+     * covered by whichever cards happen to be next to the one being dragged.
+     * Measured on a five-card hand; the guide read as an open-bottomed bracket.
+     *
+     * The order is therefore set per frame in `_updateGuide`, against the same
+     * arithmetic `CardHand._place` uses, rather than being a constant here.
+     *
+     * `guideMargin` is the other half of being under the dragged card: a border
+     * exactly the card's size would sit beneath the card's own edge and be
+     * invisible at the one moment it is confirming something.
+     *
+     * One mesh, re-textured when the size changes, because there is only ever one
+     * card being dragged.
+     */
+    this.guide = new Mesh(new PlaneGeometry(1, 1), this.materials.create(useGuideTexture(64, 96)));
+    this.guide.visible = false;
+    this.scene.add(this.guide);
+    this._guideKey = '';
+
+    /**
+     * The padlock that stands on a sealed hand. One per player.
+     *
+     * ── it is NOT parented to the hand, and that is deliberate ────────────────
+     * The parked hand's root is rotated by π so its fan opens the right way off
+     * the top edge — see `CardHand.update` — and a lock inherited into that
+     * would hang upside down, which reads as a bug rather than as a seal. So the
+     * markers live in the scene and are placed from `sealAnchor`, which is also
+     * where the effect's stamp lands.
+     *
+     * ── and it is drawn on the hand, not on the cards ────────────────────────
+     * Which is what makes it work for a FACE-DOWN hand. The AI's cards will show
+     * their backs, the grey-out happens in the card material and is blind to
+     * which texture is bound, and this marker never touched a card in the first
+     * place — so a sealed AI hand is greyed and padlocked by exactly this code,
+     * with nothing added.
+     */
+    this._seals = [0, 1].map(() => {
+      const mesh = new Mesh(new PlaneGeometry(1, 1), this.materials.create(lockTexture(16)));
+      mesh.visible = false;
+      // Above the fan, below the reason plate: the plate is an answer to
+      // something the player is doing right now and the lock is a standing
+      // condition, so the momentary thing wins.
+      mesh.renderOrder = 880;
+      this.scene.add(mesh);
+      return mesh;
+    });
+    /**
+     * Whether each hand's marker was DRAWN last frame.
+     *
+     * Not "was sealed": the marker only exists on that player's own turn, so
+     * this is the edge both the stamp and the release hang off. See the note on
+     * `_updateSeals` for why the release needs the seal's own state as well.
+     */
+    this._wasShown = [false, false];
+    /** 1 the frame a seal lifts, decaying to 0. See `CardHand.update`. */
+    this._sealFade = [0, 0];
+    /** 1 the frame the marker arrives, decaying to 0. Drives the stamp. */
+    this._sealIn = [0, 0];
+    /** Wall-clock seconds, for the marker's palette walk. Render only. */
+    this._now = 0;
+    /** Last frame's AI reveal, so its start and end can be caught as edges. */
+    this._reveal = null;
   }
 
   setResolution(resolution) {
     this.materials.setResolution(resolution);
+    // The frame can change shape now; the ortho box has to follow it.
+    refitFrameCamera(this.camera);
+  }
+
+  /**
+   * Hand the device's unsafe edges down to both fans.
+   *
+   * Straight through: a hand is placed against a frame edge in `CardHand.update`
+   * and that is the only place the number is used. Kept as one call on the layer
+   * so the loop has one thing to notify, matching `setResolution` above.
+   *
+   * @param {{top:number,right:number,bottom:number,left:number}} insets frame px
+   */
+  setSafeInsets(insets) {
+    for (const h of this.hands) {
+      h.safeInsets = {
+        top: Math.max(0, insets?.top ?? 0),
+        right: Math.max(0, insets?.right ?? 0),
+        bottom: Math.max(0, insets?.bottom ?? 0),
+        left: Math.max(0, insets?.left ?? 0),
+      };
+    }
   }
 
   /**
@@ -173,6 +311,13 @@ export class CardLayer {
    */
   refreshTextures() {
     clearCardTextureCache();
+    // The two meshes that are not cards cache by CONTENT rather than by size, so
+    // an unchanged key would leave them pointing at a texture this call has just
+    // disposed — which draws nothing, silently, because a freed texture is not an
+    // error. Forgetting the guide's would have been a border that vanished the
+    // first time anyone touched the resolution slider.
+    this._guideKey = '';
+    this._noticeText = '';
     for (const h of this.hands) {
       for (const c of h.cards) {
         c.texWidth = -1;
@@ -204,14 +349,33 @@ export class CardLayer {
    *   layer is still built, still holds both fans, still answers `hitAt` with
    *   nothing (there are no cards in either hand's quad list once the roots are
    *   off), and comes straight back on a mode switch.
+   * @param {number|null} [pinnedBottom]
+   *   A player index whose hand stays at the bottom whatever the turn says, or
+   *   null for the ordinary swap.
+   *
+   *   ── this is what "핸드 자리 교체 연출도 없다" is ─────────────────────────
+   *   The swap exists because two people share one screen and each needs their
+   *   own hand in front of them. Against an AI there is one person, so there is
+   *   nothing to swap FOR — and swapping anyway spends half a second of every
+   *   turn sliding an opponent's face-down cards into the seat the player is
+   *   sitting in, then sliding them back out. Pinned, the player's hand is
+   *   always the one at the bottom and the AI's is always the strip along the
+   *   top, which is what somebody playing a computer expects to look at.
+   *
+   *   Null in local play, where every line below behaves exactly as it did.
+   * @param {{player: number, cardId: string, phase: string, t: number}|null} [reveal]
+   *   The AI's card being turned over. See `CardHand.beginReveal`.
    */
-  update({ dt, currentPlayer, enabled, visible = true }) {
+  update({ dt, currentPlayer, enabled, visible = true, pinnedBottom = null, reveal = null }) {
     const cfg = this.config.cards;
 
+    this._now += dt;
     this._visible = visible;
     if (!visible) {
       for (const h of this.hands) h.root.visible = false;
+      for (const s of this._seals) s.visible = false;
       this.notice.visible = false;
+      this.guide.visible = false;
       // Hover state goes with it, or a pointer that was over a card when the
       // mode changed would keep reporting one that is no longer drawn — and the
       // router asks the cards before it asks the board, so that press would be
@@ -224,9 +388,15 @@ export class CardLayer {
     this.materials.shared.uSnapAmount.value = cfg.vertexSnap;
     this._enabled = enabled;
 
-    const want = currentPlayer === 0 ? 1 : 0;
+    // Pinned, the seat is a constant and the swap simply never has anywhere to
+    // travel to — so the easing below runs, finds itself already there, and
+    // costs nothing. One expression rather than a branch around the whole block.
+    const seated = pinnedBottom ?? currentPlayer;
+    const want = seated === 0 ? 1 : 0;
     const rate = dt / Math.max(0.05, cfg.turnSwapSeconds);
     this._swap += Math.max(-rate, Math.min(rate, want - this._swap));
+
+    this._updateReveal(reveal);
 
     // Eased at the ends so the hands leave and arrive rather than starting and
     // stopping dead. The raw value stays linear so the two hands cannot
@@ -239,6 +409,13 @@ export class CardLayer {
     // Re-read the pointer BEFORE the hands move, so the raise and the per-card
     // hover are decided against the same frame the player is looking at.
     if (this._pointer && !this.dragging) this._updateHover();
+
+    // And the seals before them, for the same reason: the hands are handed
+    // `_sealFade` below, so advancing it afterwards would give them last frame's
+    // value. Measured — it cost exactly one frame, and that frame is the one the
+    // seal lifts on, so the hand flashed to full colour and then dropped back to
+    // grey to start the transition it had already finished.
+    this._updateSeals(dt, p0);
 
     const raiseRate = dt / Math.max(0.05, cfg.raiseSeconds);
     for (const hand of this.hands) {
@@ -264,10 +441,237 @@ export class CardLayer {
         live,
         lock,
         usable: (cardId) => this.usable(cardId, hand.player),
+        sealFade: this._sealFade[hand.player],
+        reveal: reveal && reveal.player === hand.player ? reveal : null,
       });
     }
 
+    this._updateGuide();
     this._updateNotice();
+  }
+
+  /**
+   * The slot the dragged card has to reach, drawn at the height it arms at.
+   *
+   * ── the position is DERIVED from the rule, never a number of its own ────────
+   * `useLiftFactor` is a live slider and `homeY` moves with the fan's curvature,
+   * so anything written down here would be right at today's settings and quietly
+   * wrong at tomorrow's — a guide pointing somewhere the card does not arm is
+   * worse than no guide, because the player would trust it. So the same three
+   * terms `_checkArmed` tests are the ones that place this: the card's own
+   * resting height, the threshold, and the hand's scale.
+   *
+   * ── shown while the gesture is still undecided ─────────────────────────────
+   * `dragMode` is null until the drag commits to use-or-sort, and that is exactly
+   * the moment guidance is worth anything — a guide that waited for the decision
+   * would arrive after the player had made it. It goes the instant the gesture
+   * turns out to be a sort.
+   *
+   * A blocked card never gets one. It cannot be played however far it travels,
+   * and drawing it somewhere to aim for would be an invitation to a refusal.
+   */
+  _updateGuide() {
+    const cfg = this.config.cards;
+    const hand = this._dragHand;
+    const card = hand?.dragging;
+
+    if (!cfg.showUseGuide || !hand || !card || hand.dragMode === 'sort' || card.blocked || card.flying > 0) {
+      this.guide.visible = false;
+      return;
+    }
+
+    const scale = hand.root.scale.y;
+    const cardH = cfg.width * CARD_ASPECT;
+    // The card is carried at `hoverScale` — see `CardHand.update` — so the slot
+    // is sized to the card as it will actually arrive, not as it sits in the fan.
+    const margin = Math.max(0, cfg.guideMargin);
+    const w = (cfg.width * cfg.hoverScale + margin * 2) * scale;
+    const h = (cardH * cfg.hoverScale + margin * 2) * scale;
+
+    // Re-textured only when the drawn size changes, so the border stays one
+    // texel per pixel instead of being stretched off the grid.
+    const key = `${Math.round(w)}:${Math.round(h)}`;
+    if (key !== this._guideKey) {
+      this._guideKey = key;
+      this.guide.material.uniforms.uMap.value = useGuideTexture(w, h);
+    }
+
+    // Where the card's GRIP sits at the instant it arms — the identical
+    // expression `_checkArmed` compares against — and the body rises from there.
+    const gripY = hand.root.position.y + (card.homeY + cfg.useLiftFactor * cardH) * scale;
+    const grow = card.armed ? 1 + Math.max(0, cfg.guideArmedGrow) : 1;
+
+    this.guide.position.set(0, gripY + (cardH * cfg.hoverScale * scale) / 2, -1);
+    this.guide.scale.set(w * grow, h * grow, 1);
+
+    /**
+     * Above the resting fan, and ALWAYS below the card being carried.
+     *
+     * `CardHand._place` gives a card `level + forward * (n + 2)`, where `level`
+     * is its index and `forward` climbs from 0 to 1 over the same travel this
+     * guide is drawn at the end of. So a resting card is at most `n - 1` and a
+     * card that has arrived is at least `n + 2`; `n` sits in that gap.
+     *
+     * The `min` is what handles the START of the drag, and it is not a
+     * refinement — it is a case a fixed `n` gets visibly wrong. `forward` is
+     * still 0 down there, so the card is drawn at its bare level while its TOP
+     * has already climbed into the slot's lower edge, and a fixed `n` put the
+     * guide's bottom border straight across the card's title. Measured, on the
+     * frame the gesture commits.
+     *
+     * Below the card costs the guide's bottom corners to whichever cards are
+     * beside the dragged one, for the part of the drag where the card is low.
+     * That is the right trade: a corner behind a card reads as depth, a line
+     * across a card's name reads as a bug.
+     */
+    this.guide.renderOrder = Math.min(hand.cards.length, card.mesh.renderOrder - 0.5);
+
+    const u = this.guide.material.uniforms;
+    u.uOpacity.value = card.armed ? cfg.guideArmedOpacity : cfg.guideOpacity;
+    u.uDrain.value = 0;
+    u.uTint.value.setScalar(1);
+    this.guide.visible = true;
+  }
+
+  /**
+   * Start and finish the AI's card reveal on the edges of `reveal`.
+   *
+   * Edge-driven rather than state-driven because both ends are one-shot: the
+   * card has to be PICKED once, out of whichever duplicates are in the fan, and
+   * handed to the ordinary fly-out once. Re-picking every frame would let the
+   * card change identity mid-flip if the hand were reordered underneath it.
+   *
+   * The hand-off at the end is what stops the card vanishing. `Match.playCard`
+   * removes it from the state the instant the effect starts, and the next
+   * `syncTo` destroys anything the state no longer holds — unless it is flying.
+   * `endReveal` sets that flag, so the card dissolves out of the middle of the
+   * screen exactly as a human's played card does.
+   */
+  _updateReveal(reveal) {
+    const was = this._reveal;
+    this._reveal = reveal;
+    if (reveal && !was) {
+      const hand = this.hands[reveal.player];
+      if (hand && !hand.beginReveal(reveal.cardId)) {
+        // The card is not in the fan — it can only be a flight that has not
+        // landed. Not worth failing the turn over; the effect still plays.
+        console.warn(`[cards] nothing to reveal for "${reveal.cardId}"`);
+      }
+      return;
+    }
+    if (!reveal && was) this.hands[was.player]?.endReveal();
+  }
+
+  /**
+   * The padlock, and the colour coming back off the hand when it lifts.
+   *
+   * ── it is drawn on the VICTIM'S OWN TURN and at no other time ───────────────
+   * The seal is armed the moment the card is played, and for a while the marker
+   * was drawn from that moment too — a padlock sitting on the opponent's parked
+   * hand across the top of the screen for the whole of the caster's turn. That is
+   * a badge, not a state: it tells the caster something they already know, at a
+   * moment when nothing about it is actionable, and by the time it MATTERS the
+   * player has been looking at it for a turn and stopped seeing it.
+   *
+   * So it waits for the hand it belongs to to come down to the bottom of the
+   * screen, and it arrives by being STAMPED. That is the moment the sealed
+   * player needs it: their turn has opened, their whole hand is grey, and the
+   * question in their head is why.
+   *
+   * `atBottom` is therefore not asked — the marker only ever exists for the hand
+   * in play, so the anchor is always the bottom one. That also means it cannot
+   * jump across the frame mid-release when the swap crosses its midpoint.
+   *
+   * ── two edges, and they are deliberately not the same edge ──────────────────
+   * `show` falls both when the seal LIFTS and when the turn merely swaps away
+   * from a hand that is still sealed — which is a real case at `silenceTurns`
+   * above 1. Only the first of those is a release, so the transition is armed on
+   * `show` falling AND the seal being gone. Armed on `show` alone, a two-turn
+   * seal would play "you may play again" halfway through itself.
+   */
+  _updateSeals(dt, p0) {
+    const cfg = this.config.cards;
+    const fxCfg = this.config.cardFx;
+
+    // Re-pointed every frame rather than on a change: a cache hit costs a map
+    // lookup, and it is the only thing that survives another panel slider
+    // emptying the texture cache out from under a material still pointing into
+    // it. A freed texture is not an error — it just draws nothing, silently.
+    const tex = lockTexture(fxCfg.sealLockTexels);
+    for (const s of this._seals) s.material.uniforms.uMap.value = tex;
+
+    const rate = dt / Math.max(0.05, cfg.silenceReleaseSeconds);
+    const stampRate = dt / Math.max(0.05, fxCfg.sealStampSeconds);
+    const at = sealAnchor(fxCfg, FRAME);
+    const size = Math.max(1, fxCfg.sealIconSize);
+
+    for (const hand of this.hands) {
+      const p = hand.player;
+      const sealed = !!this._isSilenced(p);
+      // Settled at the bottom — the same test `live` uses for the fans, so the
+      // stamp lands once the hand has arrived rather than while it is still
+      // sliding under it.
+      const show = sealed && (p === 0 ? p0 : 1 - p0) > 0.999;
+
+      if (this._wasShown[p] && !show && !sealed) this._sealFade[p] = 1;
+      // Sealed again mid-fade: drop the transition rather than let the two run
+      // against each other. Coming back to grey while a "you may play again"
+      // animation is still going is the one message that must not be sent.
+      if (show) this._sealFade[p] = 0;
+      // Armed on the rising edge, so the stamp plays once per turn rather than
+      // every frame the hand happens to be down.
+      if (show && !this._wasShown[p]) this._sealIn[p] = 1;
+      this._wasShown[p] = show;
+
+      if (this._sealFade[p] > 0) this._sealFade[p] = Math.max(0, this._sealFade[p] - rate);
+      if (this._sealIn[p] > 0) this._sealIn[p] = Math.max(0, this._sealIn[p] - stampRate);
+
+      const mesh = this._seals[p];
+      const fade = this._sealFade[p];
+      if (!show && fade <= 0) {
+        mesh.visible = false;
+        continue;
+      }
+
+      mesh.position.set(at.x, at.y, 60);
+
+      const u = mesh.material.uniforms;
+      u.uDrain.value = 0;
+      if (show) {
+        /**
+         * The stamp: it arrives oversized and lands, in a handful of jumps.
+         *
+         * A thing coming from in front of the picture and being pressed onto it,
+         * which is the one gesture that says a seal was APPLIED rather than that
+         * an icon faded in. Quantised to `sealStampSteps` because a smooth
+         * contraction is a tween and this is meant to be a blow.
+         */
+        const jumps = Math.max(1, Math.round(fxCfg.sealStampSteps));
+        const drop = Math.ceil(this._sealIn[p] * jumps) / jumps;
+        const s = size * (1 + drop * Math.max(0, fxCfg.sealStampStart - 1));
+        mesh.scale.set(s, s, 1);
+        const c = SEAL_PALETTE[
+          Math.floor(this._now * fxCfg.sealPaletteCyclesPerSecond * SEAL_PALETTE.length) %
+            SEAL_PALETTE.length
+        ];
+        u.uTint.value.set(c[0], c[1], c[2]);
+        u.uOpacity.value = 1;
+      } else {
+        /**
+         * The unlock: two hard beats and gone, over the release clock.
+         *
+         * Stepped rather than faded for the reason every flash in `CardFx` is —
+         * a smooth dissolve is a modern transition and would be the one part of
+         * this card that did not go through the era's vocabulary. Two beats is
+         * the count 원모어's screen edge uses.
+         */
+        mesh.scale.set(size, size, 1);
+        const on = Math.floor((1 - fade) * 4) % 2 === 0;
+        u.uTint.value.setScalar(1);
+        u.uOpacity.value = on ? fade : 0;
+      }
+      mesh.visible = u.uOpacity.value > 0.02;
+    }
   }
 
   /**

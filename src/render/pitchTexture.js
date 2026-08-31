@@ -1,4 +1,5 @@
 import { makeCanvasTexture } from '../core/textures.js';
+import { PALETTE } from '../core/palette.js';
 
 /**
  * Turf, drawn rather than loaded — the same argument the board's weave makes.
@@ -46,10 +47,10 @@ import { makeCanvasTexture } from '../core/textures.js';
  */
 export const TURF_TILE = 36;
 
-const BASE = '#2f4a2c';
-const BLADE_A = '#355330';
-const BLADE_B = '#294223';
-const DRY = '#3b5734';
+const BASE = PALETTE.pitch.grassA;
+const BLADE_A = PALETTE.pitch.grassB;
+const BLADE_B = PALETTE.pitch.grassC;
+const DRY = PALETTE.pitch.grassDry;
 
 export function makeTurfTexture() {
   return makeCanvasTexture(128, drawTurf);

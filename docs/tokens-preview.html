@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>PHASE 0 — 디자인 토큰 스펙 시트</title>
+    <style>
+      html, body { margin: 0; padding: 0; background: #eaf4fb; }
+      body { font: 13px/1.5 Pretendard, -apple-system, system-ui, sans-serif; color: #2f4a6b; }
+      #sheet { display: block; margin: 0 auto; }
+    </style>
+  </head>
+  <body>
+    <canvas id="sheet"></canvas>
+    <script type="module">
+      /**
+       * PHASE 0 승인 게이트용 스펙 시트.
+       *
+       * 실제 UI가 쓸 코드 그대로 그린다 — palette.js / tokens.js / glass.js /
+       * icons.js 를 import 해서 렌더하므로, 여기 보이는 것과 게임에 나올 것이
+       * 다를 수 없다. 별도의 목업이 아니다.
+       */
+      import { PALETTE, withAlpha } from '/src/core/palette.js';
+      import { RADIUS, SIZE, SPACE, TYPE, ELEVATION } from '/src/core/tokens.js';
+      import { gelButton, glassPanel, roundRectPath, fontSpec, applyTracking } from '/src/ui/glass.js';
+      import { ICON, drawIcon } from '/src/ui/icons.js';
+      import { FONT_FAMILY, whenFontsReady } from '/src/ui/fonts.js';
+
+      const W = 980;
+      const H = 1180;
+      const S = Math.min(3, (window.devicePixelRatio || 1) * 1.5);
+
+      const cv = document.getElementById('sheet');
+      cv.width = W * S;
+      cv.height = H * S;
+      cv.style.width = W + 'px';
+      cv.style.height = H + 'px';
+      const ctx = cv.getContext('2d');
+
+      const heading = (text, x, y) => {
+        ctx.font = fontSpec({ ...TYPE.caption, weight: 700 });
+        applyTracking(ctx, 0.6);
+        ctx.fillStyle = withAlpha(PALETTE.ui.textOnAccent, 0.92);
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(text.toUpperCase(), x, y);
+        applyTracking(ctx, 0);
+      };
+      const note = (text, x, y) => {
+        ctx.font = fontSpec(TYPE.caption);
+        ctx.fillStyle = withAlpha(PALETTE.ui.textOnAccent, 0.72);
+        ctx.textAlign = 'left';
+        ctx.fillText(text, x, y);
+      };
+
+      function draw() {
+        ctx.setTransform(S, 0, 0, S, 0, 0);
+        ctx.clearRect(0, 0, W, H);
+
+        // 배경: 실제 월드 백드롭 그라디언트. UI는 이 위에 얹힌다.
+        const bg = ctx.createLinearGradient(0, 0, 0, H);
+        bg.addColorStop(0, PALETTE.bg.skyTop);
+        bg.addColorStop(0.55, PALETTE.bg.skyMid);
+        bg.addColorStop(1, PALETTE.bg.skyLow);
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, W, H);
+
+        const M = SPACE.screenMargin + 12;
+        let y = 54;
+
+        // ── 제목 (백드롭 위 = 흰 글씨) ──────────────────────────────────────
+        ctx.font = fontSpec(TYPE.title);
+        ctx.fillStyle = PALETTE.ui.textOnAccent;
+        ctx.textAlign = 'left';
+        ctx.fillText('PHASE 0 — 디자인 토큰', M, y);
+        ctx.font = fontSpec(TYPE.caption);
+        ctx.fillStyle = withAlpha(PALETTE.ui.textOnAccent, 0.8);
+        ctx.fillText('palette.js · tokens.js · glass.js · icons.js — 실제 렌더', M, y + 22);
+        y += 62;
+
+        // ── 젤 버튼 5상태 ──────────────────────────────────────────────────
+        heading('gel button — SIZE.buttonPrimary 200×64, RADIUS.pill', M, y);
+        y += 16;
+        const states = ['idle', 'hover', 'pressed', 'selected', 'disabled'];
+        let x = M;
+        for (const st of states) {
+          gelButton(ctx, {
+            x, y, w: SIZE.buttonPrimary.w * 0.86, h: SIZE.buttonPrimary.h,
+            label: st === 'idle' ? '서바이벌' : st === 'hover' ? '축구' : st === 'pressed' ? '컬링' : st === 'selected' ? '설정' : '준비 중',
+            state: st,
+          });
+          note(st, x + 2, y + SIZE.buttonPrimary.h + 16);
+          x += SIZE.buttonPrimary.w * 0.86 + SPACE.md;
+        }
+        y += SIZE.buttonPrimary.h + 46;
+
+        // ── 보조 버튼 + 아이콘 버튼 ────────────────────────────────────────
+        heading('buttonSecondary 160×56 · buttonIcon 64×64', M, y);
+        y += 16;
+        x = M;
+        gelButton(ctx, { x, y, w: SIZE.buttonSecondary.w, h: SIZE.buttonSecondary.h, label: '메뉴로', state: 'idle' });
+        x += SIZE.buttonSecondary.w + SPACE.md;
+        gelButton(ctx, { x, y, w: SIZE.buttonSecondary.w, h: SIZE.buttonSecondary.h, label: '다시하기', state: 'hover' });
+        x += SIZE.buttonSecondary.w + SPACE.lg;
+        for (const [name, state] of [['recenter', 'idle'], ['exit', 'hover'], ['sound', 'idle'], ['back', 'pressed']]) {
+          const b = SIZE.buttonIcon;
+          gelButton(ctx, { x, y: y + 4, w: b.w, h: b.h, state, radius: RADIUS.panel });
+          const inner = b.w * 0.5;
+          drawIcon(ctx, name, {
+            x: x + (b.w - inner) / 2, y: y + 4 + (b.h - inner) / 2, size: inner,
+            color: state === 'hover' ? PALETTE.accent.cyanDeep : PALETTE.ui.text,
+          });
+          x += b.w + SPACE.sm;
+        }
+        y += SIZE.buttonSecondary.h + 46;
+
+        // ── 스코어 플레이트 ────────────────────────────────────────────────
+        heading('scorePlate — SIZE.scorePlate 300×84, glassPanel + ELEVATION.floating', M, y);
+        y += 16;
+        const sp = SIZE.scorePlate;
+        glassPanel(ctx, { x: M, y, w: sp.w, h: sp.h, radius: RADIUS.panel });
+        // 플레이어 색 바 — 양 끝
+        for (const [i, side] of [[0, M + 12], [1, M + sp.w - 12 - 10]]) {
+          ctx.fillStyle = PALETTE.player[i];
+          roundRectPath(ctx, side, y + 14, 10, sp.h - 28, 5);
+          ctx.fill();
+        }
+        ctx.font = fontSpec(TYPE.display);
+        applyTracking(ctx, TYPE.display.tracking);
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillStyle = PALETTE.playerInk[0];
+        ctx.fillText('3', M + sp.w / 2 - 18, y + 54);
+        ctx.textAlign = 'left';
+        ctx.fillStyle = PALETTE.playerInk[1];
+        ctx.fillText('1', M + sp.w / 2 + 18, y + 54);
+        ctx.textAlign = 'center';
+        ctx.font = fontSpec(TYPE.title);
+        ctx.fillStyle = PALETTE.ui.textFaint;
+        ctx.fillText(':', M + sp.w / 2, y + 50);
+        ctx.font = fontSpec(TYPE.caption);
+        applyTracking(ctx, TYPE.caption.tracking);
+        ctx.fillStyle = PALETTE.ui.textMuted;
+        ctx.fillText('남은 뚜껑', M + sp.w / 2, y + 72);
+        applyTracking(ctx, 0);
+
+        // 턴 플레이트 + 클럭 바
+        const tp = SIZE.turnPlate;
+        const tx = M + sp.w + SPACE.groupGap;
+        glassPanel(ctx, { x: tx, y, w: tp.w, h: tp.h, radius: RADIUS.pill, elevation: ELEVATION.raised });
+        ctx.fillStyle = PALETTE.player[0];
+        roundRectPath(ctx, tx + 10, y + 10, 8, tp.h - 20, 4);
+        ctx.fill();
+        ctx.font = fontSpec(TYPE.label);
+        ctx.textAlign = 'left';
+        ctx.fillStyle = PALETTE.ui.text;
+        ctx.fillText('PLAYER 1', tx + 28, y + tp.h / 2 + 6);
+        const cb = SIZE.clockBar;
+        ctx.fillStyle = withAlpha(PALETTE.ui.shadow, 0.16);
+        roundRectPath(ctx, tx, y + tp.h + 10, cb.w, cb.h, cb.h / 2);
+        ctx.fill();
+        const grad = ctx.createLinearGradient(tx, 0, tx + cb.w * 0.62, 0);
+        grad.addColorStop(0, PALETTE.accent.cyan);
+        grad.addColorStop(1, PALETTE.accent.sky);
+        ctx.fillStyle = grad;
+        roundRectPath(ctx, tx, y + tp.h + 10, cb.w * 0.62, cb.h, cb.h / 2);
+        ctx.fill();
+        note('turnPlate 240×44 + clockBar 240×10', tx, y + tp.h + 38);
+        y += sp.h + 56;
+
+        // ── 카드 아이콘 ────────────────────────────────────────────────────
+        heading('card icons — 벡터, 유니코드 글리프 대체', M, y);
+        y += 22;
+        const cards = [
+          ['swap', '교체', PALETTE.card.swap],
+          ['trajectory', '궤적', PALETTE.card.trajectory],
+          ['chaos', '혼돈', PALETTE.card.chaos],
+          ['onemore', '한 번 더', PALETTE.card.onemore],
+          ['smash', '강타', PALETTE.card.smash],
+          ['silence', '침묵', PALETTE.card.silence],
+        ];
+        x = M;
+        for (const [name, label, accent] of cards) {
+          const cw = 92;
+          const ch = 116;
+          glassPanel(ctx, { x, y, w: cw, h: ch, radius: RADIUS.card, accent, elevation: ELEVATION.raised });
+          ctx.fillStyle = accent;
+          roundRectPath(ctx, x + 10, y + 10, cw - 20, 4, 2);
+          ctx.fill();
+          drawIcon(ctx, name, { x: x + (cw - 44) / 2, y: y + 26, size: 44, color: accent });
+          ctx.font = fontSpec(TYPE.caption);
+          ctx.textAlign = 'center';
+          ctx.fillStyle = PALETTE.ui.text;
+          ctx.fillText(label, x + cw / 2, y + ch - 16);
+          x += cw + SPACE.sm;
+        }
+        y += 116 + 44;
+
+        // ── 타입 스케일 ────────────────────────────────────────────────────
+        heading('type scale — TYPE', M, y);
+        y += 12;
+        glassPanel(ctx, { x: M, y, w: 430, h: 196, radius: RADIUS.panel });
+        let ty = y + 40;
+        for (const [key, t] of Object.entries(TYPE)) {
+          ctx.font = fontSpec(t);
+          applyTracking(ctx, t.tracking);
+          ctx.textAlign = 'left';
+          ctx.fillStyle = PALETTE.ui.text;
+          ctx.fillText(key === 'display' ? '3 : 1' : '뚜껑을 튕겨라 Aa', M + 18, ty);
+          applyTracking(ctx, 0);
+          ctx.font = fontSpec(TYPE.caption);
+          ctx.fillStyle = PALETTE.ui.textFaint;
+          ctx.textAlign = 'right';
+          ctx.fillText(`${key} ${t.size}/${t.weight}`, M + 412, ty);
+          ty += t.size + 12;
+        }
+
+        // ── 팔레트 ─────────────────────────────────────────────────────────
+        const px0 = M + 430 + SPACE.groupGap;
+        heading('palette', px0, y - 12);
+        glassPanel(ctx, { x: px0, y, w: W - px0 - M, h: 196, radius: RADIUS.panel });
+        const swatches = [
+          ['player 1P', PALETTE.player[0]], ['player 2P', PALETTE.player[1]],
+          ['accent.cyan', PALETTE.accent.cyan], ['accent.sky', PALETTE.accent.sky],
+          ['accent.green', PALETTE.accent.green], ['accent.yellow', PALETTE.accent.yellow],
+          ['accent.orng', PALETTE.accent.orange], ['ui.text', PALETTE.ui.text],
+          ['board.wood', PALETTE.board.wood], ['board.line', PALETTE.board.line],
+          ['pitch.grassA', PALETTE.pitch.grassA], ['curling.table', PALETTE.curling.table],
+          ['liquid.core', PALETTE.liquid.core], ['orb.shell', PALETTE.orb.shell],
+          ['aim.bow', PALETTE.aim.bow], ['ui.shadow', PALETTE.ui.shadow],
+        ];
+        swatches.forEach(([label, hex], i) => {
+          const col = i % 4;
+          const row = Math.floor(i / 4);
+          const sx = px0 + 16 + col * 112;
+          const sy = y + 20 + row * 44;
+          ctx.fillStyle = hex;
+          roundRectPath(ctx, sx, sy, 30, 30, 8);
+          ctx.fill();
+          ctx.strokeStyle = withAlpha(PALETTE.ui.shadow, 0.2);
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.font = fontSpec({ ...TYPE.caption, size: 11 });
+          ctx.fillStyle = PALETTE.ui.textMuted;
+          ctx.textAlign = 'left';
+          ctx.fillText(label, sx + 36, sy + 14);
+          ctx.fillStyle = PALETTE.ui.textFaint;
+          ctx.fillText(hex, sx + 36, sy + 26);
+        });
+        y += 196 + 44;
+
+        // ── 엘리베이션 ─────────────────────────────────────────────────────
+        heading('elevation — 그림자 색은 PALETTE.ui.shadow (남색, 검정 아님)', M, y);
+        y += 16;
+        x = M;
+        for (const [key, step] of Object.entries(ELEVATION)) {
+          glassPanel(ctx, { x, y, w: 150, h: 76, radius: RADIUS.panel, elevation: step });
+          ctx.font = fontSpec(TYPE.caption);
+          ctx.textAlign = 'center';
+          ctx.fillStyle = PALETTE.ui.text;
+          ctx.fillText(key, x + 75, y + 38);
+          ctx.fillStyle = PALETTE.ui.textFaint;
+          ctx.fillText(`blur ${step.blur} · dy ${step.dy}`, x + 75, y + 54);
+          x += 150 + SPACE.md;
+        }
+        y += 76 + 44;
+
+        // ── UI 아이콘 ──────────────────────────────────────────────────────
+        heading('ui icons', M, y);
+        y += 16;
+        glassPanel(ctx, { x: M, y, w: W - M * 2, h: 78, radius: RADIUS.panel });
+        x = M + 22;
+        for (const name of ['recenter', 'exit', 'back', 'check', 'close', 'sound', 'lock']) {
+          drawIcon(ctx, name, { x, y: y + 16, size: 34, color: PALETTE.ui.text });
+          ctx.font = fontSpec({ ...TYPE.caption, size: 11 });
+          ctx.textAlign = 'center';
+          ctx.fillStyle = PALETTE.ui.textFaint;
+          ctx.fillText(name, x + 17, y + 66);
+          x += 74;
+        }
+      }
+
+      draw();
+      // 폰트가 늦게 들어오면 다시 그린다 — 게임의 텍스처 캐시 무효화와 같은 이유.
+      whenFontsReady().then(draw);
+      document.fonts?.ready?.then(draw);
+    </script>
+  </body>
+</html>

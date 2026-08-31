@@ -1,4 +1,6 @@
 import { CanvasTexture, ClampToEdgeWrapping, NearestFilter } from 'three';
+import { PALETTE } from '../core/palette.js';
+import { registerTextureCache } from '../ui/fonts.js';
 
 /**
  * The editor's icons, drawn as bitmaps.
@@ -245,12 +247,36 @@ function brushArt(dot) {
   return rows;
 }
 
+/**
+ * The four button states, built on `PALETTE.button`.
+ *
+ * This table used to be written out in full here, and `menuTextures` had its own
+ * copy with the same four rows and slightly different values — which is how the
+ * mark editor's tool buttons and the menu's plates drifted apart in the first
+ * place. The four shared fields now come straight from the palette; `shade` is
+ * the one this file adds, because an icon drawn as a shape needs a second tone
+ * the plate does not.
+ */
 const SKINS = {
-  idle: { bg: '#141a26', edge: '#3c4759', ink: '#c3ccdb', shade: '#7c879b', accent: '#5c6a82' },
-  hover: { bg: '#26314a', edge: '#8ea4c6', ink: '#ffffff', shade: '#b9c8de', accent: '#d8b45c' },
-  active: { bg: '#3a3320', edge: '#d8b45c', ink: '#ffe6a8', shade: '#c8a94e', accent: '#d8b45c' },
-  disabled: { bg: '#101319', edge: '#242a34', ink: '#454c5a', shade: '#333945', accent: '#2b323e' },
+  idle: skin('idle', PALETTE.ui.textMuted),
+  hover: skin('hover', PALETTE.accent.cyanDeep),
+  active: skin('active', PALETTE.accent.cyanDeep),
+  disabled: skin('disabled', PALETTE.ui.disabledText),
 };
+
+/**
+ * One row, in this file's own vocabulary.
+ *
+ * `ink` and `accent` are what the icon drawing calls its two strong tones, and
+ * the palette calls the same two `text` and `bar` because on a plain button they
+ * are type and a marker stripe. Translated once here rather than renaming either
+ * side: the palette's names are right for a button and these are right for an
+ * icon, and the mapping is the only thing that would otherwise be implicit.
+ */
+function skin(state, shade) {
+  const b = PALETTE.button[state];
+  return { bg: b.bg, edge: b.edge, ink: b.text, accent: b.bar, shade };
+}
 
 const cache = new Map();
 
@@ -515,7 +541,7 @@ export function solidTexture() {
   canvas.width = 1;
   canvas.height = 1;
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = PALETTE.fx.white;
   ctx.fillRect(0, 0, 1, 1);
   return finishIcon(key, canvas, 1, 1);
 }
@@ -538,7 +564,6 @@ function finishIcon(key, canvas, width, height = width) {
 /** Every icon name, for the panel's preview sheet. */
 export const ICON_NAMES = [...Object.keys(ART), 'redo', 'brush1', 'brush2', 'brush3'];
 
-export function clearIconCache() {
+export const clearIconCache = registerTextureCache(() => {
   for (const t of cache.values()) t.dispose();
-  cache.clear();
-}
+  cache.clear();});

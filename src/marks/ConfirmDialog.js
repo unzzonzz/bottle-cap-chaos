@@ -2,6 +2,7 @@ import { Group, Mesh, PlaneGeometry, Raycaster, Vector2 } from 'three';
 import { createSpriteMaterial } from '../menu/menuMaterials.js';
 import { menuPlateTexture } from '../menu/menuTextures.js';
 import { messageTexture, solidTexture } from './markIcons.js';
+import { PALETTE } from '../core/palette.js';
 
 /**
  * "정말?" — asked in the scene, never in a `window.confirm`.
@@ -90,7 +91,7 @@ export class ConfirmDialog {
       new PlaneGeometry(1, 1),
       createSpriteMaterial(retro, {
         map: solidTexture(),
-        tint: '#05070b',
+        tint: PALETTE.ui.veil,
         opacity: 0.74,
         depthTest: false,
       }),

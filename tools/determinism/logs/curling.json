@@ -1,0 +1,113 @@
+{
+  "format": "bcc-inputlog",
+  "version": 1,
+  "mode": "curling",
+  "seed": 2618105391,
+  "label": "synth/curling",
+  "events": [
+    {
+      "seq": 0,
+      "kind": "shot",
+      "player": 0,
+      "rngState": 1438070210,
+      "capIndex": 0,
+      "dirX": -0.8721881620920335,
+      "dirZ": 0.48917053254107673,
+      "power": 0.3202268020249903,
+      "seed": 1438070210,
+      "impulseMul": 1,
+      "spreadMul": 1
+    },
+    {
+      "seq": 1,
+      "kind": "shot",
+      "player": 1,
+      "rngState": 3592026681,
+      "capIndex": 4,
+      "dirX": -0.48367467550967314,
+      "dirZ": 0.875247855336197,
+      "power": 0.28512072869343685,
+      "seed": 3592026681,
+      "impulseMul": 1,
+      "spreadMul": 1
+    },
+    {
+      "seq": 2,
+      "kind": "shot",
+      "player": 1,
+      "rngState": 3842268740,
+      "capIndex": 5,
+      "dirX": 0.4099688951619028,
+      "dirZ": -0.9120995038918335,
+      "power": 0.38504144244361665,
+      "seed": 3842268740,
+      "impulseMul": 1,
+      "spreadMul": 1
+    },
+    {
+      "seq": 3,
+      "kind": "shot",
+      "player": 0,
+      "rngState": 3487225043,
+      "capIndex": 1,
+      "dirX": -0.8388834564552097,
+      "dirZ": -0.5443110751084901,
+      "power": 0.42034675896866247,
+      "seed": 3487225043,
+      "impulseMul": 1,
+      "spreadMul": 1
+    },
+    {
+      "seq": 4,
+      "kind": "shot",
+      "player": 0,
+      "rngState": 3287471126,
+      "capIndex": 2,
+      "dirX": 0.4318500100074103,
+      "dirZ": -0.9019454356315573,
+      "power": 0.3471823149709962,
+      "seed": 3287471126,
+      "impulseMul": 1,
+      "spreadMul": 1
+    },
+    {
+      "seq": 5,
+      "kind": "shot",
+      "player": 1,
+      "rngState": 2791996541,
+      "capIndex": 6,
+      "dirX": 0.7276834470921574,
+      "dirZ": 0.685913114634846,
+      "power": 0.2147177601698786,
+      "seed": 2791996541,
+      "impulseMul": 1,
+      "spreadMul": 1
+    },
+    {
+      "seq": 6,
+      "kind": "shot",
+      "player": 1,
+      "rngState": 1168511928,
+      "capIndex": 7,
+      "dirX": 0.9917065520243049,
+      "dirZ": 0.12852281770979268,
+      "power": 0.3183980173198506,
+      "seed": 1168511928,
+      "impulseMul": 1,
+      "spreadMul": 1
+    },
+    {
+      "seq": 7,
+      "kind": "shot",
+      "player": 0,
+      "rngState": 3736159159,
+      "capIndex": 3,
+      "dirX": 0.39089957325537544,
+      "dirZ": 0.9204333347009795,
+      "power": 0.15508278001798317,
+      "seed": 3736159159,
+      "impulseMul": 1,
+      "spreadMul": 1
+    }
+  ]
+}

@@ -46,6 +46,38 @@ const HEM_Y = 0;
 
 export const BODY_KIND = { CAP: 'cap', BALL: 'ball' };
 
+/**
+ * Which caps have any part inside a sensor volume, on ANY world.
+ *
+ * ── free function so there is ONE definition of "out" ────────────────────────
+ * `Arena.capsInside` is this with the live world; the AI's look-ahead is this
+ * with a restored copy. Knockout's entire win condition is `outOfBounds()`,
+ * which is this against the pit sensor, so a search that judged falling-off for
+ * itself would be a second judge — and when the two disagreed, on exactly the
+ * teetering-cap cases that decide games, there would be no way to tell which was
+ * wrong. `CamTracker` refuses a y-threshold for the same reason and says so at
+ * length in its header.
+ *
+ * Takes a world rather than a `PhysicsWorld` because the copy is a bare
+ * `RAPIER.World`, and the only things needed are `getCollider` and
+ * `intersectionPairsWith`. No cache: a fork lives for one rollout.
+ *
+ * @param {import('@dimforge/rapier3d-compat').World} world
+ * @param {number[][]} capColliders  collider handles per cap
+ * @param {number} sensorHandle
+ * @returns {boolean[]} true = at least one part is in the volume
+ */
+export function capsInSensor(world, capColliders, sensorHandle) {
+  if (sensorHandle < 0) return capColliders.map(() => false);
+  const sensor = world.getCollider(sensorHandle);
+  if (!sensor) return capColliders.map(() => false);
+  const inside = new Set();
+  world.intersectionPairsWith(sensor, (other) => {
+    inside.add(other.handle);
+  });
+  return capColliders.map((handles) => handles.some((h) => inside.has(h)));
+}
+
 export class Arena {
   /**
    * @param {import('../physics/PhysicsWorld.js').PhysicsWorld} physics
@@ -464,8 +496,10 @@ export class Arena {
    * @returns {boolean[]} true = at least one part is in the volume
    */
   capsInside(sensorHandle) {
-    const inside = this.intersecting(sensorHandle);
-    return this.capColliders.map((handles) => handles.some((h) => inside.has(h)));
+    // Delegated to the free function so the AI's look-ahead — which runs the
+    // same query against a restored copy of this world — cannot end up with a
+    // second definition of what "inside the pit" means. See `capsInSensor`.
+    return capsInSensor(this.physics.world, this.capColliders, sensorHandle);
   }
 
   /** Knockout's out judging, by name: a cap that has fallen off the board. */

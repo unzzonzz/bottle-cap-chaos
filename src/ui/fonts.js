@@ -1,0 +1,115 @@
+import { FONT_WEIGHTS } from '../core/tokens.js';
+
+/**
+ * The type family, and the gate that stops textures being baked before it loads.
+ *
+ * ── the bug this exists to prevent ──────────────────────────────────────────
+ * Every piece of type in this game is baked into a canvas texture and cached —
+ * `hudTextures`, `cardTexture`, `fxTextures` and `markIcons` all hold maps keyed
+ * on content. If the first frame draws before the webfont is ready, those
+ * textures are baked with the FALLBACK face and then cached, and the real font
+ * never appears no matter how long you wait. Nothing invalidates them, because
+ * from the cache's point of view nothing changed.
+ *
+ * It was survivable while the alpha threshold was flattening every glyph to hard
+ * 0/255 — the two faces looked more alike after thresholding than before. PHASE 4
+ * removes that, so the difference becomes obvious and this becomes load-bearing.
+ *
+ * ── the registry, rather than importing the four caches ─────────────────────
+ * This module could import `clearHudTextureCache` and its three siblings
+ * directly. It does not, because the menu page does not load `cardTexture` and
+ * importing it here would drag the card face, the card back and the guide frame
+ * onto a page that draws a bottle. Each caching module registers itself instead,
+ * which also means a NEW cache is opted in by one line at its own definition
+ * rather than by remembering to edit this file.
+ */
+
+/**
+ * The stack.
+ *
+ * `Pretendard` is the target: a Korean-first humanist sans with a full weight
+ * range, which is the closest thing to Frutiger's own voice that actually has
+ * Hangul in it. Frutiger, Myriad and Segoe UI — the faces the aero look is
+ * usually described with — have no Hangul at all, and this UI is Korean.
+ *
+ * `BCC Sans` leads it and is the name the BUNDLED file will register under, so
+ * that the packaged app and a dev machine that happens to have Pretendard
+ * installed resolve to the same metrics under the same name. Until that file
+ * exists the stack falls through to a system Pretendard, then to the platform
+ * UI face — which is `-apple-system` on the two platforms this actually ships
+ * to, and is a humanist sans with good Hangul on both.
+ */
+export const FONT_FAMILY =
+  '"BCC Sans", "Pretendard", "SUIT", -apple-system, "Segoe UI", system-ui, sans-serif';
+
+/**
+ * The numerals.
+ *
+ * Kept separate because the score plate is the largest type in the game and aero
+ * numerals are heavier and rounder than its body text. Today it is the same
+ * stack; the seam exists so changing it later is one line rather than a hunt
+ * through every `display`-sized call site.
+ */
+export const NUMERAL_FAMILY = FONT_FAMILY;
+
+const clears = new Set();
+let ready = false;
+
+/**
+ * Register a texture cache to be dropped once the real font is in.
+ *
+ * Safe to call at module scope. Returns the function, so a module can write
+ * `export const clearFooCache = registerTextureCache(() => { … })`.
+ */
+export function registerTextureCache(clear) {
+  clears.add(clear);
+  return clear;
+}
+
+/** Has the font settled? Callers baking type early can check rather than guess. */
+export function fontsAreReady() {
+  return ready;
+}
+
+/**
+ * Wait for the face, then drop every registered cache.
+ *
+ * ── `document.fonts.ready` alone is not enough ──────────────────────────────
+ * It resolves when the document has finished loading the fonts it KNOWS it
+ * needs, and a font used only inside a canvas is not one of those: nothing in
+ * the DOM references it, so the browser has no reason to fetch it. So each
+ * weight is explicitly requested first, with a Hangul sample, because a face can
+ * report loaded for Latin and still be fetching its Korean range.
+ *
+ * Never rejects. A font that fails to arrive leaves the fallback in place, which
+ * is a legible UI in the wrong face — the failure mode the brief asks for. A
+ * throw here would take the boot down over a cosmetic problem.
+ */
+export async function whenFontsReady() {
+  if (ready) return;
+  try {
+    if (typeof document !== 'undefined' && document.fonts) {
+      await Promise.all(
+        FONT_WEIGHTS.map((w) =>
+          // The sample carries Hangul, a Latin pair and a digit, so a face that
+          // splits its coverage across unicode-ranges is forced to fetch all
+          // three of the ranges this UI actually draws from.
+          document.fonts.load(`${w} 20px ${FONT_FAMILY}`, '가힣AZ09').catch(() => {}),
+        ),
+      );
+      await document.fonts.ready;
+    }
+  } catch {
+    // Older WKWebViews expose no `document.fonts` at all. Fall through: the
+    // fallback face is already in use and the caches below are still worth
+    // dropping, since some of them may hold textures baked mid-layout.
+  }
+  ready = true;
+  for (const clear of clears) {
+    try {
+      clear();
+    } catch {
+      // One bad cache must not stop the others being dropped.
+    }
+  }
+}

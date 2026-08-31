@@ -311,146 +311,200 @@ export const CONFIG = {
   },
 
   /**
-   * The curling lane. STRUCTURAL except where noted.
+   * The curling table. STRUCTURAL except where noted.
    *
    * ── it is a THIRD set of surface numbers, not a tweak to the other two ─────
-   * "표면 마찰은 서바이벌·축구와 별도로 관리해라. 모드별 물리 설정으로 분리." —
-   * so `laneFriction` lives here and `arena.boardFriction` and
+   * "표면 마찰은 컬링 전용값으로 별도 관리한다. 다른 모드 값을 건드리지 마라." —
+   * so `tableFriction` lives here and `arena.boardFriction` and
    * `football.pitchFriction` are untouched by anything in this block. The cap's
    * OWN friction is shared by all three modes and must stay shared, which is why
-   * the lane and the walls combine by `Min`/`Max` rather than by Rapier's
-   * default average: see the header in `CurlingLane`. Each number below is the
-   * number the cap actually gets.
+   * the table combines friction by `Min` rather than by Rapier's default
+   * average: see the header in `CurlingTable`. The number below is the number
+   * the cap actually gets.
+   *
+   * ── there is nothing here about walls, and there cannot be ────────────────
+   * The table has none, on any side. What used to be a fence height, a fence
+   * restitution, a run-off and two out lines is gone with the lane it belonged
+   * to: the edge is the hazard, falling off is survival mode's falling off, and
+   * the only line left is the one distances are measured to.
    */
   curling: {
     /**
-     * Distance between the two out lines, in world units. Structural.
+     * The table's width, in CAP DIAMETERS. Structural, and the whole tuning
+     * problem in one number.
      *
-     * With `laneRatio`, the only two size controls there are. A real sheet is
-     * about 1:9 and the brief rules that out for a measured reason — "너무 길면
-     * 뚜껑이 도달하지 못하고 화면에서 하우스가 안 보인다" — so this is a lane you
-     * can actually reach the end of: a full-power throw covers a bit more than
-     * it, which is what makes the overshoot penalty a real cost rather than a
-     * theoretical one.
+     * "시작점: 책상 폭 = 뚜껑 지름의 6~8배." The brief states the two forces
+     * pulling on it and they pull opposite ways: narrow enough that a cap is a
+     * thing you can see, wide enough that hitting the opponent's cap is a shot
+     * rather than a formality. Both are about the RATIO of the cap to the table
+     * and nothing else, because the camera frames the table's own extents — the
+     * table is always the same size on screen whatever its world size is.
+     *
+     * Which is also why there is no cap-size slider beside it. The cap's
+     * diameter is in `CAP_DEFAULTS` and is shared by all three modes, so moving
+     * it would resize the survival board's caps and the football team; and
+     * scaling the cap and the table together is a pure zoom that changes nothing
+     * anybody can see. One control, one degree of freedom. See
+     * `curlingTableMetrics`.
+     *
+     * ── the brief's starting point was 6 to 8; PLAYING it moved it ───────────
+     * "슬라이더로 노출하고 실제로 플레이하며 맞춘다", and this is the number that
+     * came back: at 7 the table read as cramped — the far line was close enough
+     * that a throw arrived before it had visibly travelled, and the opponent's
+     * cap was hard to MISS rather than hard to hit. Half again as big in both
+     * directions is where it settled. The ratio is unchanged, so the length grew
+     * with it: 22.4 x 49.3 became 33.6 x 73.9.
+     *
+     * The slider's range runs well past both ends of that so the two failure
+     * modes stay visible: at 5 the opponent's cap is unmissable, at 18 it is
+     * unhittable and the line is out of reach.
      */
-    laneLength: 100,
+    widthCaps: 10.5,
     /**
-     * Length : width. Structural. The brief's band is 1:4 to 1:5.
+     * Length : width. Structural. The brief's band is 2 to 2.5.
      *
-     * Drag it up and the lane narrows, which tightens the wall-reflection game
-     * and squeezes the house's clearance — `houseMargin` below is what stops the
-     * second of those from silently deleting the first.
+     * Drag it up and the throw gets longer, which makes reaching the line harder
+     * and makes hitting the opponent's cap harder with it — the two difficulties
+     * are the same difficulty here, because there is only one axis in this game.
      */
-    laneRatio: 4.5,
-    /**
-     * Ground past each out line, in world units. Structural.
-     *
-     * Where an overshooting cap ends up. It is drawn differently from the lane
-     * and it is generous on purpose: a cap that crosses the back line at pace
-     * has to have somewhere to stop and be SEEN stopping, because the penalty is
-     * the thing the player has to learn. Past it the ground stops and there is a
-     * catch floor a long way down — a cap that gets that far was out either way.
-     */
-    runoff: 10,
-    groundThickness: 1.0,
-
-    /** Visible side fence. Structural. Low, so it does not hide the lane. */
-    wallHeight: 2.2,
-    wallThickness: 0.7,
-    /**
-     * How high the undrawn shell carries the side walls. Structural.
-     *
-     * The fence has to be low to see past and a low fence is exactly what a
-     * tumbling cap gets over — the same problem `FootballPitch` documents at
-     * length. So the box is closed above it by geometry nobody can see, sitting
-     * directly on the fence so there is no gutter behind it, and a lid across
-     * the top. Nothing in ordinary play reaches any of it.
-     */
-    ceilingHeight: 8,
+    ratio: 2.2,
 
     /**
-     * The house's outer radius, in world units. Structural.
+     * How thick the slab is, and how far its rim runs out. Both structural.
      *
-     * CLAMPED by `houseMargin` — see `curlingMetrics`. At the defaults the clamp
-     * does not bite and the panel says so.
+     * The rim is the fall. Its slope is `thickness / slopeRun` and it has to be
+     * steeper than the friction angle or a cap can come to rest on it — which is
+     * the pathological pose `KnockoutBoard` documents at length, and the reason
+     * survival's board is a truncated pyramid rather than a slab. At 1.2 over 2.0
+     * the slope is 31 degrees against a surface that cannot hold much past 13,
+     * so a cap that gets far enough over tips and goes rather than teetering.
      */
-    houseRadius: 7.5,
+    tableThickness: 1.2,
+    slopeRun: 2.0,
     /**
-     * Least gap between the house's edge and a wall's inner face. Structural.
+     * The fillet where the flat meets the rim. Structural.
      *
-     * The brief makes this a rule rather than a preference: "하우스가 벽에 닿으면
-     * 벽 반사 전략이 무의미해진다". A cap coming off the wall has to have room to
-     * arrive somewhere useful, and if the house reaches the wall then every wall
-     * shot is either in the house or off the lane and there is nothing to aim
-     * for. Three units is nearly a cap diameter of approach on each side.
+     * Not cosmetic. A right-angled edge flips the contact normal sideways and
+     * throws a cap sliding toward it straight back — measured on the survival
+     * board at 136 cm/s in and −8.8 cm/s out one step later. See
+     * `curlingTableMetrics`, which also clamps it against the slab's thickness.
      */
-    houseMargin: 3.0,
-    /** House centre, measured in from the BACK line. Structural. */
-    houseFromBack: 15,
-    /** Throw spot, measured in from the FRONT line. Structural. */
-    throwFromFront: 8,
-    /** Caps per team, and therefore half the turns in a match. Structural. */
-    capsPerTeam: 4,
+    edgeRadius: 0.15,
+
+    /**
+     * Where a cap is dealt, measured in from the NEAR edge. Structural.
+     *
+     * "등장 위치는 책상 시작부 중앙. 매 투구 동일." Far enough in that a cap is
+     * standing on flat table rather than half over the rim, and no further —
+     * every unit of it is a unit taken off the throw.
+     */
+    throwFromEdge: 4.0,
     /**
      * Extra room a cap needs at the throw spot before it is dealt there, on top
      * of two cap radii. LIVE.
      *
-     * Only the fallback in `CurlingLane.throwSpot` reads it: the spot is the
-     * same every turn and this is what decides when a cap knocked back onto it
-     * counts as being in the way. At 0 a new cap is dealt exactly touching the
-     * old one, which the solver resolves as a shove.
+     * Only the fallback in `CurlingTable.throwSpot` reads it: the spot is the
+     * same every throw, and this is what decides when the round's first cap —
+     * which starts there and may not have gone far — counts as being in the way.
+     * At 0 the second cap is dealt exactly touching the first, which the solver
+     * resolves as a shove rather than as a throw.
      */
     throwClearance: 0.8,
 
+    /**
+     * Rounds in a match, and therefore caps per player. Structural.
+     *
+     * "총 4라운드 … 한 라운드에 각 플레이어가 딱 1번씩만 던진다." One cap per
+     * player per round, so this is also half the bodies the table builds and the
+     * whole of `CurlingRules.rounds`.
+     */
+    rounds: 4,
+    /**
+     * Who throws first in round 1: 'p1', 'p2', or 'random'.
+     *
+     * After that it alternates and nothing can change that — throwing second is
+     * the advantage, so a fixed lead would hand it to one player four times out
+     * of four. This decides only where the alternation starts.
+     */
+    firstLead: 'p1',
+    /**
+     * The draw, when `firstLead` is 'random'.
+     *
+     * A SEED, not a call to `Math.random`. "같은 시드·같은 입력이면 결과가 완전히
+     * 동일하다" has to survive the first decision the match makes, and a coin
+     * flipped from the clock would break it before a cap had moved. Change this
+     * to change the draw; leave it and the coin lands the same way every time,
+     * which is what makes the determinism check meaningful at all.
+     */
+    leadSeed: 0x5eed,
+
     // ── materials. All LIVE. ────────────────────────────────────────────────
     /**
-     * The ice. LIVE, and the single most important number in the mode.
+     * The table top. LIVE, and the single most important number in the mode.
      *
-     * A tenth of the knockout board's 0.34, because "컬링이므로 마찰이 낮다.
-     * 뚜껑이 길게 미끄러져야 한다" — and it is the number the cap actually gets
-     * rather than an average with the cap's own, because the lane combines
-     * friction by `Min`. Drag it up and the throw stops arriving; drag it down
-     * and every throw sails past the back line.
+     * "뚜껑이 적당히 미끄러져야 하되, 컨트롤이 가능한 수준으로." Below the
+     * survival board's 0.34 and far above the old lane's 0.15, and the value is
+     * MEASURED against the table's length rather than picked for feel — the two
+     * are one number, because what the player actually experiences is how much
+     * of the pull range lands on the table.
+     *
+     * Travel is very close to quadratic in power here (measured k ≈ 91.4 world
+     * units at full draw, holding to three digits across the range), so the
+     * whole of the tuning is one ratio: full draw against the throw's run. At
+     * 0.26 that comes out at 91.4 against 69.9, which is 1.31 —
+     *
+     *   the far line is reached at 87% of the pull, so the top 13% is the
+     *     overshoot, always present and never the only option;
+     *   a percent of pull near the line is about 1.6 units, half a cap, so the
+     *     last stretch is controllable rather than a coin toss.
+     *
+     * Both ends of that were checked. At 0.30 full draw is only 1.14 of the run:
+     * every throw needs a near-maximum pull and only 6% of the range is over the
+     * edge, so the penalty stops existing. At 0.22 it is 1.86, the line is
+     * reached at 73%, and the last quarter of the pull is undifferentiated
+     * "gone" — which is the version that made the shot a guess.
+     *
+     * It is the number the cap actually gets rather than an average with the
+     * cap's own, because the table combines friction by `Min` — see
+     * `CurlingTable`. That also caps it: above the cap's own 0.34 the `Min`
+     * takes the cap's and this slider stops meaning anything.
      */
-    laneFriction: 0.15,
-    laneRestitution: 0.03,
+    tableFriction: 0.26,
     /**
-     * The side fences. LIVE.
+     * Nearly dead. LIVE.
      *
-     * High restitution and low friction, both on purpose and both for the same
-     * requirement: "반사 각도가 읽히도록 적당히 높게". A lively wall returns the
-     * cap with enough speed left to still reach the house, and a slick one
-     * returns it at the angle it arrived at instead of scrubbing the along-wall
-     * component off and dropping it down the side of the lane.
-     *
-     * Combined by `Max` and `Min` respectively against the cap's, so both
-     * sliders mean what they say. See `CurlingLane`.
+     * There is nothing to bounce off in this mode — no walls, and the only other
+     * cap on the table is the one you are trying to hit — so restitution here
+     * only decides how much a cap chatters on landing after a hard strike. High
+     * enough to read as metal, low enough not to skate.
      */
-    wallRestitution: 0.7,
-    wallFriction: 0.05,
+    tableRestitution: 0.04,
 
     /**
      * Curling's own turn-end clock. LIVE. See `Layout.turnOverrides`.
      *
      * The shared values in `config.turn` describe a cap on a 0.34 mat, which
-     * stops inside a couple of seconds. On ice at 0.10 a full-power throw is
-     * still moving at five seconds, so the shared 5 s damping ramp would be
-     * braking a cap that is still travelling to its target and the 8 s hard
-     * timeout would freeze it mid-slide and report the turn as forced. Both are
-     * moved out past where a real throw finishes.
+     * stops inside a couple of seconds. At 0.22 on a table this size a full
+     * throw is still moving at three, so the shared 5 s damping ramp would be
+     * braking a cap that is still travelling to its target. Both the ramp and
+     * the timeout are moved out past where a real throw finishes — and not
+     * further: the old lane's 14 s timeout was sized for a 77-unit slide on ice,
+     * and on a 45-unit table it is eleven seconds of waiting for a cap that
+     * stopped long ago.
      *
      * The rest thresholds are looser than the caps' shared pair for the matching
-     * reason: a low-friction surface has a long creep tail, and the last
-     * centimetre of it takes longer than the whole of the rest of the throw
-     * while nothing visible happens.
+     * reason: a slippery surface has a long creep tail, and the last centimetre
+     * of it takes longer than the whole of the rest of the throw while nothing
+     * visible happens. This mode has to be watched four rounds in a row, so that
+     * tail is paid eight times a match.
      */
     turn: {
-      rest: { cap: { linear: 1.2, angular: 0.8 } },
+      rest: { cap: { linear: 1.1, angular: 0.8 } },
       quietSteps: 30,
-      rampStartSec: 9.0,
+      rampStartSec: 4.5,
       rampCurve: 2.0,
       rampMaxDamping: 9.0,
-      hardTimeoutSec: 14.0,
+      hardTimeoutSec: 8.0,
     },
   },
 
@@ -658,6 +712,7 @@ export const CONFIG = {
       chaos: 1,
       onemore: 1,
       smash: 1,
+      silence: 1,
     },
     /** Card width in frame pixels. Height follows at 1.5x. */
     width: 128,
@@ -798,6 +853,19 @@ export const CONFIG = {
     activeExposure: 120,
     /** And below the top edge for the other one — a corner, no more. */
     inactiveExposure: 48,
+    /**
+     * How big the AI's card is drawn once it has been turned over.
+     *
+     * A multiple of an ordinary card. Big enough that the name and the one line
+     * of description read at 320x240 — which is the whole reason the reveal
+     * exists — and small enough not to cover the board it is about to act on.
+     *
+     * 1.3 puts the card at 166x250 of the 640x480 frame, a little over half its
+     * height. It started at 1.9 and that was measured as wrong: 243x365 is 76%
+     * of the frame, so the board the card is about to change was completely
+     * hidden behind the announcement that it was going to change.
+     */
+    revealScale: 1.3,
     inactiveScale: 0.82,
     inactiveOpacity: 0.55,
     /** How long the two hands take to trade ends. */
@@ -838,6 +906,41 @@ export const CONFIG = {
     refuseShakeAmount: 9,
     refuseShakeCycles: 3,
     refuseShakeSeconds: 0.28,
+
+    // ── the drop guide ───────────────────────────────────────────────────
+    /**
+     * The card-shaped slot drawn while a card is being dragged to be used.
+     *
+     * ── it draws the threshold, it does not become one ──────────────────────
+     * The play gesture is still vertical travel out of the fan and nothing about
+     * `useLiftFactor` changes — see the note on it above, which explains at
+     * length why a drop TARGET was rejected. What was missing was any way to see
+     * where that travel ends, so the guide is placed at exactly the height the
+     * card arms at: following it always plays the card, and a card that arms
+     * without reaching it horizontally still plays. Strictly forgiving in the
+     * one direction, never the other.
+     */
+    showUseGuide: true,
+    /**
+     * How much bigger than the card the slot is, in frame pixels, per side.
+     *
+     * Not decoration. A border exactly the card's size is one the card covers
+     * completely the instant it lands, so the guide would disappear at the exact
+     * moment it is confirming something. 10 leaves a visible edge all the way
+     * round a card sitting in it.
+     */
+    guideMargin: 10,
+    /** How present the slot is before the card has reached it, and after. */
+    guideOpacity: 0.5,
+    guideArmedOpacity: 1,
+    /**
+     * How much the slot swells the moment the card arms, as a fraction.
+     *
+     * Applied in one step rather than eased. The card crossing the line is an
+     * EVENT — `snapKick` already pops the card itself for it — and a slot that
+     * grew smoothly into its confirmed size would be reporting a process.
+     */
+    guideArmedGrow: 0.06,
 
     // ── what the cards DO ────────────────────────────────────────────────
     /**
@@ -884,6 +987,32 @@ export const CONFIG = {
      * source and is untouched — see `AimInput._mul`.
      */
     smashSpreadMul: 1.5,
+    /**
+     * 침묵: how many of the victim's own turns the seal lasts.
+     *
+     * One, as the card's face says. It is a dial rather than a constant because
+     * the whole question the card asks is how much a turn of somebody else's
+     * hand is worth, and that is not answerable without moving it — but the
+     * value is read ONCE, at the cast, so dragging this never changes a lockout
+     * somebody is already inside. See `CardEffects.play`.
+     *
+     * Whole turns only, and at least one: a seal of zero would be a card that
+     * is spent and does nothing, which reads as the game having eaten it.
+     */
+    silenceTurns: 1,
+    /**
+     * How long the hand takes to come back from grey when the seal lifts.
+     *
+     * Presentation only — the seal is already gone by the time this runs; this
+     * is the hand catching up. It exists because the release is otherwise
+     * invisible: a hand that snaps from grey to colour between two frames tells
+     * the player nothing, and "다시 쓸 수 있게 됐다" is the one thing they need
+     * out of the moment.
+     *
+     * Short. The seal lifts as the turn ends, so this plays over the start of
+     * the hand swap and anything longer finishes after the hand has left.
+     */
+    silenceReleaseSeconds: 0.4,
     /** How long the caps take to trade places, in seconds of simulated time. */
     swapSeconds: 0.45,
     /** How high the exchange arcs, in world units. Visual only — see `CapSwap`. */
@@ -902,6 +1031,16 @@ export const CONFIG = {
       chaos: 0.6,
       onemore: 0.5,
       smash: 0.55,
+      /**
+       * Shortest of the six, and it earns it by having almost nothing to show.
+       *
+       * 침묵's cast is a two-frame darkening — the padlock happens on the
+       * VICTIM'S turn, not this one — so the rest of this window is only there
+       * to cover the card's own flight to the middle of the screen, which is
+       * `useFlySeconds` at 0.32. It was 0.6 while a bolt was crawling across the
+       * pitch, and 0.6 of a frozen board for two frames of flash is a stall.
+       */
+      silence: 0.35,
     },
   },
 
@@ -1010,6 +1149,78 @@ export const CONFIG = {
     dashLength: 16,
     /** How fast the dashes march, in samples per second. Stepped. */
     dashSamplesPerSecond: 14,
+
+    // ── 침묵 ─────────────────────────────────────────────────────────────
+    // Every length here is in FRAME PIXELS: the seal is drawn in the CARD
+    // scene, whose camera covers a fixed 640x480 box whatever the render
+    // target is. Nothing about this card touches the world — it is an effect
+    // on a HAND, so nothing of it is billboarded over a cap.
+    /**
+     * Texels of the padlock sprite.
+     *
+     * 16, which is small even by this file's standards. The lock is drawn at 26
+     * frame pixels on the hand and the whole of it is a shackle, a body and a
+     * keyhole — three shapes. At 32 the keyhole becomes two pixels of detail
+     * nobody at 640x480 will ever resolve, and the sprite starts to look
+     * photographed rather than drawn.
+     */
+    sealLockTexels: 16,
+    /**
+     * How the padlock ARRIVES on the sealed player's hand.
+     *
+     * It comes in oversized and lands at 1, quantised to `sealStampSteps`: a
+     * thing pressed onto the picture from in front of it, which is the one
+     * gesture that reads as a seal being APPLIED rather than as an icon fading
+     * in. A smooth contraction is a tween; three jumps is a blow.
+     *
+     * This runs when the victim's turn OPENS, not when the card is cast — see
+     * `CardLayer._updateSeals`. It is the moment the marker is worth anything.
+     */
+    sealStampStart: 3.2,
+    sealStampSteps: 3,
+    /** How long that stamp takes. Short — it is a strike, not an entrance. */
+    sealStampSeconds: 0.22,
+    /**
+     * Frames of full-frame DARKENING when the card is cast. One or two.
+     *
+     * The whole of 침묵's cast effect, now that the reaching bolt is gone — it
+     * read as smoke drifting across a board where nothing drifts, and it spent
+     * half a second saying what the padlock says better on the turn it matters.
+     *
+     * The mirror of 강타's inversion, and drawn with the same kind of
+     * arithmetic: `dst - src`, which is one of the four semi-transparency modes
+     * the hardware actually had. Counted in FRAMES rather than seconds for the
+     * reason given on `smashInvertFrames` — at this length the frame rate would
+     * otherwise decide whether it happens at all.
+     */
+    sealDarkenFrames: 2,
+    /** How far that flash pulls the picture down, 0..1 of full black. */
+    sealDarkenStrength: 0.55,
+
+    // ── and the padlock on the sealed player's own turn ──────────────────
+    /** Size of the seal marker, in frame pixels. */
+    sealIconSize: 26,
+    /**
+     * Where it sits relative to the hand, in frame pixels.
+     *
+     * X out from the middle of the hand, Y up from the bottom edge — and there
+     * is only one edge to measure from, because the marker is drawn on the
+     * sealed player's OWN turn and their hand is at the bottom then.
+     *
+     * Off to the side rather than over the middle of the fan: the marker says
+     * the hand is sealed, and a marker that covers the cards it is talking
+     * about is in the way of the very thing the player is trying to read.
+     *
+     * Measured against the fan rather than guessed. The hand spans about ±182
+     * frame pixels at five cards and reaches 120 up when it is raised, so 236
+     * clears the widest card and 96 sits beside the fan instead of across the
+     * card NAMES — which is where the first pair of numbers put it, over the top
+     * third of the two rightmost cards.
+     */
+    sealIconX: 236,
+    sealIconY: 96,
+    /** How fast the marker's palette walks while the seal holds. */
+    sealPaletteCyclesPerSecond: 0.7,
   },
 
   physics: {
@@ -1197,6 +1408,536 @@ export const CONFIG = {
 
     /** Draw the pickup radius. */
     showSensors: false,
+  },
+
+  /**
+   * The AI opponent. Search budget, what a position is worth, and how long the
+   * turn takes to WATCH.
+   *
+   * ── every number here was chosen against a measurement ────────────────────
+   * One exact rollout — restore the turn snapshot into a throwaway world, apply
+   * the impulse through the real `resolveImpulse`, and step until `TurnSettle`
+   * says the turn is over — costs 14.5 ms and takes 95 steps on average, at
+   * about 153 us a step. The rollout agrees with the live turn exactly: same
+   * step count, same end position to the last digit. So the search is not
+   * approximating anything, and the only question is how many of these fit in
+   * the time available.
+   *
+   * That single number decides the shape of everything below. A blind grid of
+   * 3 caps x 24 angles x 4 powers is 288 rollouts and four seconds; the budget
+   * here buys about 45. Hence targeted candidates rather than an even sweep —
+   * see `ai/candidates.js`.
+   *
+   * ── the AI is not made weak by aiming badly ───────────────────────────────
+   * `executionErrorDeg` is 0 and is meant to stay there until the thing has been
+   * played against. Measured from a position with an opponent near the rim, 12
+   * of 160 candidate shots drop that cap and 78 lose one of the AI's own — so
+   * the difficulty of this mode is entirely in knowing which shot is which, and
+   * an AI detuned by adding aim error would not play worse, it would play
+   * randomly. `pickRandomness` is the honest dial for that: it degrades the
+   * CHOICE among good moves rather than the execution of one.
+   */
+  ai: {
+    /**
+     * How many candidate shots to build, per axis.
+     *
+     * `anglesPerTarget` is the fan around each target bearing and `powerSteps`
+     * the draw strengths tried on each. Total is roughly
+     * `maxShooters x (opponents + orbs + 1) x anglesPerTarget x powerSteps`,
+     * of which the deadline may only reach the first few dozen.
+     */
+    sampling: {
+      maxShooters: 3,
+      anglesPerTarget: 3,
+      angleSpreadDeg: 9,
+      powerSteps: 5,
+      /**
+       * Aim to send the target OFF the board rather than merely away from the
+       * shooter — the pool player's ghost ball. See `candidates.js`.
+       *
+       * Measured over five matches against a fixed opponent, caps taken per AI
+       * turn: 0.017 without it, 0.25 with. It is the difference between an
+       * opponent that shoves caps around and one that finishes.
+       */
+      ghostBall: true,
+      /**
+       * How many candidates actually get simulated. THE budget.
+       *
+       * A count rather than a time limit, and that is a determinism fix rather
+       * than a preference — a wall-clock deadline made the AI pick a different
+       * move on two identical runs, because a busy machine fit three fewer
+       * rollouts into the same 700 ms. See the header in `ai/AiPlanner.js`.
+       *
+       * 48 x the measured 14.5 ms is about 0.7 s, which fits inside the card
+       * animation and the pause that follow it. The generator is breadth-first,
+       * so the first fifteen or so already cover every cap, every target and the
+       * retreat; the rest is refinement.
+       */
+      maxCandidates: 64,
+    },
+
+    /**
+     * ── random cone sampling was tried, measured, and is gone ────────────────
+     * `robustnessSamples` / `robustnessPool` lived here. The idea was to rank on
+     * the intended shot and then re-roll the best few through real draws. It was
+     * measured over 16 long shots (30-46 units, 강타 armed), each chosen shot
+     * then fired under 10 draws the AI never saw:
+     *
+     *     samples  0 (off)   88% of those draws landed
+     *     samples  3         33%
+     *     samples  5         75%
+     *     samples  8         85%
+     *     samples 12         91%   (and over the time budget)
+     *
+     * Three samples is not a weak estimate, it is an actively misleading one: a
+     * robust line that loses two draws by chance ranks below a poor line that
+     * won two. It takes eight to claw back to where the blind ranking already
+     * was, and twelve to beat it, at four times the rollouts.
+     *
+     * The knobs then sat at 0 with no code path reading them at all — the array
+     * they gated was never filled — so they were dials that moved a number
+     * nobody read, which is worse than no dial. `spreadProbes` does the job
+     * properly: the two cone EDGES instead of random draws from inside it,
+     * deterministic, and a better discriminator for the same two rollouts.
+     */
+
+    /**
+     * Milliseconds of solver allowed inside a single rendered frame.
+     *
+     * Changes how long the search takes in wall clock and NOTHING about what it
+     * decides — the decision is fixed by `maxCandidates`. Raise it and the AI
+     * answers sooner at the cost of frame time; lower it on a device that
+     * stutters.
+     *
+     * ── 6, and it is not the compromise it looks like ───────────────────────
+     * This sat at 4 on an earlier reading that also changed `maxRolloutSteps` in
+     * the same step, so the two were never separated. Measured again in the
+     * browser with only this number moving, `stepChunk` at 8, and the AI holding
+     * 강타+궤적 so the boost probe runs every turn:
+     *
+     *     4 ms   think frames p50 8.2  p95 12.4  worst 31.2   0.4% long   search 3.0 s
+     *     6 ms   think frames p50 7.9  p95 12.4  worst 25.6   0.3% long   search 2.3 s
+     *     (idle frames, for scale: p50 8.3  p95 9.1  worst 13.5  0.0% long)
+     *
+     * Better on both axes, which is not a trade-off and is worth saying plainly:
+     * a bigger slice finishes a chunk instead of abandoning it mid-way and
+     * resuming next frame, so there is less resume overhead and fewer frames
+     * carrying it. A thinking frame is now indistinguishable from an idle one.
+     */
+    frameBudgetMs: 6,
+    /**
+     * Physics steps run before the search checks the clock again.
+     *
+     * ── the frame budget is only honest if a CANDIDATE can be interrupted ────
+     * A whole rollout is ~95 steps and measured at 10.2 ms in the browser, so a
+     * search that evaluated one candidate atomically per frame spent 10 ms in
+     * frames that also have to render — 14 of 122 went over 16.7 ms and the
+     * worst hit 23.7. No frame budget below 10 could do anything about it,
+     * because the unit was indivisible.
+     *
+     * A chunk is also how far a frame can OVERSHOOT its budget, since the clock
+     * is only consulted between chunks — and 24 was too coarse once the boost
+     * probe and the combo's two replans were added. Measured over six turns with
+     * 강타+궤적 held, so the probe runs every time:
+     *
+     *     stepChunk 24   20.3% of think frames over 16.7 ms   worst 35.7 ms
+     *     stepChunk 12    0.3%                                worst 26.8 ms
+     *     stepChunk  8    0.1%                                worst 20.2 ms
+     *     stepChunk  4    0.0%                                worst 18.7 ms
+     *
+     * 8 is where the judder stops. The total solver work is identical at every
+     * setting — only its distribution changes — so this buys smoothness with
+     * more frames rather than with a worse decision, and the decision itself is
+     * fixed by `maxCandidates` either way. Lower it further on a slow device,
+     * for the reason `TrajectoryPreview` gives about spreading its own stepping.
+     */
+    stepChunk: 8,
+    /**
+     * Safety valve, not the normal path. Well above `maxCandidates x 14.5 ms`.
+     *
+     * If this trips the search did not finish its configured list, so that turn
+     * is not reproducible — it warns to the console rather than absorbing it.
+     * The fix is to lower `maxCandidates`, not to raise this.
+     */
+    totalBudgetMs: 2500,
+
+    /**
+     * What a position is worth. Every term is a line from the brief.
+     *
+     * They are absolute rather than normalised, so `dropOpponent` at 100 against
+     * `loseOwn` at 140 says plainly that the AI will not trade a cap for a cap —
+     * it needs to come out ahead. That asymmetry is the single most important
+     * pair of numbers in the file: at parity the search happily plays mutual
+     * destruction, which reads as an AI flailing rather than an AI attacking.
+     */
+    weights: {
+      /**
+       * Per opponent cap knocked off. The win condition, and it must WIN.
+       *
+       * ── 100 against `foeEdge` 60 was why kills got passed up ──────────────
+       * Two caps shoved to the brink scored 2 x 0.81 x 60 = 97, near enough to
+       * killing one outright that positional noise decided between them — so a
+       * shot that finished a cap lost to a shot that merely tidied the board.
+       * Reported from play as "90%로 죽일 수 있는데 안 죽이고 다른 판단할 때가
+       * 많다", which is exactly what that arithmetic produces.
+       *
+       * A cap is a third of a side here. Removing one has to dominate every
+       * amount of position, and at 260 against a reduced `foeEdge` it does.
+       */
+      dropOpponent: 260,
+      /** Per own cap lost. Above `dropOpponent`, deliberately — see above. */
+      loseOwn: 300,
+      /** Squared nearness to the brink, summed over surviving own caps. */
+      edgeRisk: 20,
+      /**
+       * Own caps an enemy is lined up to push off next turn, 0..1 each.
+       *
+       * ── the defensive half, and it is what makes retreating INTELLIGENT ───
+       * `edgeRisk` only knows how near the edge a cap is; this knows whether
+       * anybody can do anything about it. A cap on the rim with the enemy on the
+       * far side of the board scores nothing here, and a cap in mid-board with
+       * someone lined up behind it scores heavily — which is the difference
+       * between running away for a reason and running away on principle.
+       *
+       * Above `dropOpponent` per unit, because a fully-lined-up cap is close to
+       * a cap already lost and the AI should pay real value to break the line.
+       */
+      selfThreat: 40,
+      /**
+       * Opponent caps left near the brink, squared. The aggressive half.
+       *
+       * ── this is the gradient the evaluator did not have ──────────────────
+       * `dropOpponent` is all or nothing: shove a cap to within a hair of going
+       * over and score the same zero as missing it completely. So there was no
+       * reason to attack unless the kill resolved this turn, and the AI shuffled
+       * to the middle in every other position — reported as "너무 멍청하다".
+       *
+       * Pricing the opponent's edge makes a near miss into progress worth
+       * having, so the AI can work a cap outward over two turns. 45 means
+       * driving one from the middle to the rim is worth about 45, against 100
+       * for finishing it — enough to be worth doing, not enough to prefer over
+       * the kill.
+       */
+      foeEdge: 22,
+      /**
+       * Opponent caps THIS side is lined up to push off next turn. OFF.
+       *
+       * ── it was a proxy for lookahead and it got farmed ───────────────────
+       * The idea was to price "I am in position to kill next turn" without
+       * searching for it. Measured against a fixed opponent over ten matches at
+       * a weight of 60: zero kills, one cap lost, every match unfinished. Being
+       * in position scores WITHOUT COMMITTING, so hovering at range beat
+       * attacking, and the AI turtled.
+       *
+       * The reply search does the same job honestly — it asks what the opponent
+       * actually does rather than what the geometry hints at — so this is off.
+       * It is kept because it is cheap and a mode without a reply search (a
+       * lower `replyCandidates`, a slower device) can lean on it as a prior.
+       */
+      foeThreat: 0,
+      /**
+       * Credit for moving a cap inward. A TIEBREAKER now, not a policy.
+       *
+       * It was 12 and it was most of the reason the AI ever did anything: every
+       * inward shot scored, whether or not the cap was in any trouble, so
+       * "toward the middle" beat every attack that did not kill outright.
+       * Danger is priced by `selfThreat` now, which only fires when there is a
+       * real threat to answer. This is what is left: a nudge toward the middle
+       * when two moves are otherwise equal.
+       */
+      centre: 3,
+      /**
+       * Per orb this AI's own cap reaches. One card.
+       *
+       * ── it turned out to BE a weight, and this is the measurement ────────
+       * "오브 먹으면 죽는데 오브 먹으려고 목숨을 희생해" was reported from play, and
+       * two plies of lookahead did not fix it. This did. Five matches against a
+       * fixed opponent, same seeds, changing only this number:
+       *
+       *     orbGain 24   taken 12  lost 11   orb runs cost a cap 6 of 47
+       *     orbGain 10   taken 15  lost  1   orb runs cost a cap 0 of 30
+       *
+       * Same caps taken, an order of magnitude fewer lost, and the orb suicides
+       * gone. At 24 a card was worth a sixth of a cap and the search would walk
+       * into a losing position for one; at 10 it is worth a fourteenth and only
+       * a genuinely safe pickup clears the bar.
+       *
+       * ── and then lower still, once the search could actually shoot ────────
+       * It was raised to 16 on the reasoning that better card use makes cards
+       * worth more. That was wrong, and re-running the same five matches after
+       * the power ladder was fixed says so:
+       *
+       *     orbGain 16   taken 15  lost 2  over 100 turns   orb 39% of shots
+       *     orbGain 10   taken 15  lost 1  over  78 turns   orb 26%
+       *     orbGain  5   taken 15  lost 0  over  79 turns   orb 16%
+       *
+       * Same caps taken at every setting — so the orb runs were never buying
+       * kills, they were only costing caps and turns. At 5 the AI loses none of
+       * its own and spends 65% of its shots attacking instead of 38%, which is
+       * "오브만 모으지 말고" measured rather than asserted.
+       */
+      orbGain: 5,
+      /** Per orb an opponent's cap is pushed onto. A card handed over. */
+      orbGift: 34,
+      /** Per overlapping pair of own caps. Chain-fall risk. */
+      clump: 9,
+      /** How close counts as clumped, in cap diameters. */
+      clumpRadiusCaps: 1.6,
+    },
+
+    /**
+     * The geometry the threat model measures with. World units.
+     *
+     * "죽을 확률이 높은 위치" is a question about two distances: can the enemy get
+     * here, and is there any board left behind me. Both are absolute lengths on
+     * the board rather than fractions, because that is what they are.
+     */
+    /**
+     * How far ahead the search looks.
+     *
+     * ── one ply cannot see a cap die, which is where this came from ─────────
+     * The evaluator scores the instant a shot settles. A cap that grabs an orb
+     * and stops on the rim with nobody yet in range scores well and is dead next
+     * turn, and no weight can express that because the information is not in the
+     * position — it is in the reply. See `AiPlanner._finishStage1`.
+     */
+    /**
+     * Hard ceiling on a single rollout, in physics steps.
+     *
+     * ── most turns settle in 95 steps; the outliers cost ten times that ─────
+     * `TurnSettle`'s hard timeout is 8 s — 960 steps — and a messy position with
+     * caps still creeping runs to it. Measured during a ten-match sweep: turns
+     * that hit the timeout took 89 ms a candidate instead of the usual 10, and
+     * the search tripped its own safety valve at 2.5 s on four of them.
+     *
+     * 240 steps is 2 s of simulated time — two and a half times the 95-step
+     * median, so ordinary turns are untouched, and it bounds the tail. Measured
+     * in the browser over one AI turn, against 420:
+     *
+     *     420 steps, 6 ms budget   p50 12.2 ms  p95 18.9  23 of 104 frames long
+     *     240 steps, 4 ms budget   p50  6.5 ms  p95 16.3   3 of 137 frames long
+     *
+     * Same total work, spread properly. What it costs is the rare cap still
+     * rolling at two seconds whose fall goes uncounted — a fair trade against a
+     * turn that judders while it thinks.
+     */
+    maxRolloutSteps: 240,
+
+    /**
+     * How many shortlisted shots are re-fired at the edges of their own cone,
+     * and how many of them get that treatment.
+     *
+     * ── the AI must not see its DRAW, but it must see its SPREAD ────────────
+     * Planning is blind to the deviation so the search cannot aim off and cancel
+     * it. Implemented as "blind to the cone entirely", which is a different and
+     * worse thing: a forty-unit full charge looked exactly as reliable as a
+     * six-unit tap, because with the deviation zeroed both land perfectly. The
+     * AI took the long one and threw its cap off the board — "너무 멀면 오차가
+     * 심해지는데 그거 생각 안 하고 멀어도 풀차징해서 혼자 죽는다".
+     *
+     * 2 probes puts each shortlisted shot at both edges of the cone it would
+     * really be drawn from, and the score becomes the mean of the two edges and
+     * the middle. Power now costs accuracy in the search the way it does in the
+     * game. 0 turns it off and hands back the blind behaviour.
+     */
+    spreadProbes: 2,
+    spreadPool: 12,
+
+    /**
+     * How many shortlisted ATTACKS are also re-fired as 강타 would fire them.
+     *
+     * Three rollouts each — the boosted cone's centre and both edges — and only
+     * when 강타 is actually in hand and legal, so most turns pay nothing. It
+     * replaces `reachShortfall`, a proxy that was measured to be inverted: 강타
+     * was being spent at 40–48 units, where the shooter died, and held at 24–36,
+     * where it would have landed.
+     *
+     * 4 keeps the cost at twelve extra rollouts on a search that already runs
+     * about ninety. 0 turns the probe off, and with it every use of 강타.
+     */
+    boostPool: 4,
+
+    /** How many of the ranked candidates get a reply searched. 0 = one ply. */
+    replyPool: 5,
+    /**
+     * How many opponent answers to try per candidate. 0 = one ply. OFF.
+     *
+     * ── it was asked for, it was built, and the numbers say it does not pay ──
+     * Five matches against a fixed opponent, same seeds, counting caps taken and
+     * lost and how often collecting an orb cost a cap inside two turns:
+     *
+     *   1 ply, selfThreat 25    taken 6  lost 4   orb cost a cap 2%   394 ms
+     *   2 ply, selfThreat 25    taken 5  lost 4                 1%   761 ms
+     *   2 ply, selfThreat 10    taken 4  lost 7                 3%   761 ms
+     *   2 ply, selfThreat  0    taken 4  lost 9                 5%   761 ms
+     *   1 ply, selfThreat  0    taken 3  lost 9                 6%   394 ms
+     *
+     * Two readings, and they agree. At the same first-ply caution the reply
+     * search is indistinguishable — `replyWeight` 1.0 and 0.6 returned byte-
+     * identical results, which is what a term that never changes the ranking
+     * looks like. And handing it the safety job outright, by dropping
+     * `selfThreat` and letting the reply catch blunders, is worse than the cheap
+     * model on every count.
+     *
+     * The reason is that the two overlap: `threatOn` already refuses to leave a
+     * cap where it can be pushed off, so by the time a shortlist exists there is
+     * rarely a kill left for the second ply to find. It re-confirms the first
+     * ply's decision at twice the cost.
+     *
+     * Kept, with the slider, because that reasoning is width-dependent: a wider
+     * `replyPool`, more candidates, or a mode whose danger is less local could
+     * change it. Raise this to 10 to turn it on.
+     */
+    replyCandidates: 0,
+    /**
+     * How much of the opponent's best reply comes off the score.
+     *
+     * Below 1 on purpose. A full subtraction assumes both that the opponent
+     * plays their best answer and that ten candidates found it; over-trusting a
+     * sample that size makes the AI flinch from good moves because one plausible
+     * answer looked strong.
+     *
+     * Only the KILLS in the reply are counted now, not its whole score — see
+     * `AiPlanner`. Subtracting the full score turtled the AI twice: after any
+     * committal move the opponent has some decent answer, so every attack was
+     * penalised and standing still was not. Measured at zero caps taken across
+     * five matches. Kills are nearly binary and ten candidates estimate them
+     * well; a positional score they do not.
+     */
+    replyWeight: 1.0,
+
+    threat: {
+      /**
+       * How far away an enemy cap can still be a threat.
+       *
+       * Measured travel: a cap struck at power 0.54 covers about 20 units and
+       * at 0.75 about 27. 26 is therefore roughly "one solid shot away" — past
+       * it the attacker has spent the shot arriving and cannot also push
+       * anything off.
+       */
+      reach: 26,
+      /**
+       * How far a STRUCK cap travels. What decides whether a push kills.
+       *
+       * A cap with more than this much board behind it survives being hit; less
+       * and it goes over. 12 is the honest figure for the mid-power shots the
+       * search actually chooses — raise it and the AI treats more of the board
+       * as lethal, which makes it more timid.
+       */
+      pushDistance: 12,
+    },
+
+    /**
+     * Degrees of aim error injected AFTER the decision. 0 = perfect execution.
+     *
+     * "기본 오차 주입값은 0이다. 다만 오차 폭 슬라이더는 반드시 만들어라." This is
+     * that slider. It twists the chosen heading, so the AI still decides well and
+     * simply fails to carry it out — which is what a strong player missing looks
+     * like. It is NOT the charge cone: that is the game's own error, it applies
+     * to the AI untouched, and it is already in the shot by the time this runs.
+     */
+    executionErrorDeg: 0,
+    /**
+     * How far down the ranking the pick may wander. 0 = always the best move.
+     *
+     * A softmax temperature over `pickPoolSize` candidates. The right dial to
+     * reach for if the AI turns out too strong, for the reason the block header
+     * gives: it weakens the choice among good moves instead of making the
+     * execution bad.
+     */
+    pickRandomness: 0,
+    pickPoolSize: 5,
+
+    /**
+     * How long the AI's turn takes to WATCH. None of this is thinking time.
+     *
+     * "인위적인 '생각 중' 딜레이를 추가하지 마라. 이 연출이 그 역할을 한다." The
+     * search runs underneath these, so the animation is not covering a wait — it
+     * is the only reason a human can tell what the AI did. The calculation
+     * finishes during the card phase and the pause.
+     */
+    show: {
+      /**
+       * Draw, move to the middle, and turn face up. 0.6 s, and the floor is real.
+       *
+       * "그보다 짧으면 뭐가 뒤집혔는지 인지가 안 되어 애니메이션 의미가 사라진다.
+       * 0.6초 아래로 무리하게 줄이지 마라." Split three ways below; the sum is
+       * what matters and the split is taste.
+       */
+      cardPullSeconds: 0.18,
+      cardMoveSeconds: 0.22,
+      cardFlipSeconds: 0.2,
+      /** Face up and still, so it can be read. Short, but not zero. */
+      cardHoldSeconds: 0.32,
+
+      /** Between the card finishing and the aim starting. Keeps them separate. */
+      gapSeconds: 0.2,
+
+      /** The cap about to be fired is picked out before anything moves. */
+      aimHighlightSeconds: 0.22,
+      /** The pull vector grows from nothing to its full length. */
+      aimDrawSeconds: 0.62,
+      /** Held at full draw, then released. */
+      aimHoldSeconds: 0.16,
+    },
+
+    /**
+     * When the AI spends a card. Thresholds, not preferences — see
+     * `ai/cardPolicy.js`, where each of these is argued for.
+     *
+     * The five are 궤적 · 혼란 · 원모어 · 강타 · 침묵, which is what
+     * `CardHands.DRAWABLE` actually contains. 스왑 is shelved out of `CARDS` and
+     * cannot reach a hand, so there is deliberately no rule for it.
+     */
+    cards: {
+      /**
+       * Neither 강타 nor 궤적 has a threshold any more. Both are decided by
+       * simulating the shot — `ai.boostPool` for the boosted one, `spreadProbes`
+       * for the cone — so what used to be tuned here is now measured per turn.
+       *
+       * 강타's window was a band on `reachShortfall`, which turned out to read a
+       * fact about the board rather than about the shot. 궤적's was
+       * `trajectoryMaxGap`, a score-gap tiebreak, from when the card was thought
+       * to be worth only a nudge; it is now played whenever precision alone
+       * opens a kill, at any range. Both are gone rather than retuned, and their
+       * panel sliders with them — a dial that moves a number nothing reads is
+       * worse than no dial.
+       */
+      /** 원모어 needs the turn to be worth repeating, when it is not a kill. */
+      oneMoreMinScore: 25,
+      /** 혼란 when (my exposure − theirs) clears this. Positive = I am worse off. */
+      chaosThreatMin: 0.12,
+      /** 침묵 needs the opponent to actually be holding something. */
+      silenceMinCards: 2,
+      /**
+       * How many cards the AI may spend in one turn.
+       *
+       * The brief said one, written when the cards were judged independently.
+       * Two of them are complementary rather than alternative — 강타 buys the
+       * reach to arrive and 궤적 removes the spread that reach costs — and a
+       * long kill often needs both. `Match` allows it: a non-physical effect
+       * returns the turn to AIM, so a second card is legal.
+       *
+       * 2 rather than unlimited because each one costs a full reveal animation,
+       * and a turn with four of them stops being a turn and becomes a cutscene.
+       */
+      maxPerTurn: 2,
+    },
+
+    /**
+     * Draw the top N evaluated trajectories, with their scores. Panel only.
+     *
+     * "이게 있어야 AI가 왜 그 수를 뒀는지 알 수 있다." It is the only window into
+     * a decision that is otherwise 48 numbers computed and thrown away — a move
+     * that looks wrong is unreadable without seeing what it was chosen OVER.
+     *
+     * Off by default because collecting the paths costs an array per candidate
+     * and the lines are unreadable during actual play.
+     */
+    showCandidates: false,
+    candidateCount: 5,
+    /** Record one path point every N physics steps. As `preview.sampleEvery`. */
+    candidateSampleEvery: 4,
   },
 
   /**
@@ -1446,6 +2187,191 @@ export const CONFIG = {
     showHitAreas: false,
   },
 
+  /**
+   * The sound system's mix, and nothing else.
+   *
+   * ── NOTHING IN HERE CAN REACH THE SIMULATION ────────────────────────────
+   * Stated the way `cardFx` and `victory` state it, and it is stronger here than
+   * for either of them: the audio layer only ever READS the world — velocities,
+   * narrow-phase contacts, match state — and its randomness comes from its own
+   * stream (`audio/audioRng.js`), never from `nextSeed()`. Every value below
+   * changes what is heard and nothing else. Same seed, same input, same result,
+   * whatever any of these are set to.
+   *
+   * ── the PLAYER's settings are not here ──────────────────────────────────
+   * Master volume and mute live behind `audio/AudioSettings.js`, because they
+   * are persisted and `CONFIG` is not written to storage anywhere in this
+   * project. What is here is what the developer drags on the panel.
+   *
+   * ── and neither are the sounds ──────────────────────────────────────────
+   * The per-sound parameter tables live in `audio/soundBank.js`. They have to:
+   * `deepAssign` treats an ARRAY as a leaf and assigns it by reference, so a
+   * sound definition holding one would alias `CONFIG_DEFAULTS` after a single
+   * press of 전체 리셋 and the next panel edit would corrupt the defaults. The
+   * bank keeps its own frozen copy and its own reset, exactly as `PALETTE` does.
+   */
+  audio: {
+    /**
+     * A trim under the player's own master, so the shipping loudness can be set
+     * without moving anybody's saved slider. 1 = whatever they chose.
+     */
+    masterTrim: 1,
+
+    /**
+     * Per-category trims, multiplied under the master.
+     *
+     * Keyed by the bus names in `audio/categories.js`. A keyed object rather
+     * than an array, for the `deepAssign` reason in the block header above.
+     */
+    category: {
+      /** The continuous beds: sliding, the stun hum, the orb shimmer, the shake. */
+      ambient: 0.75,
+      impact: 1,
+      /** The mark editor's brush, which the brief singles out as fatiguing. */
+      draw: 0.6,
+      ui: 0.85,
+      orb: 1,
+      card: 1,
+      stinger: 1,
+    },
+
+    // ── the tone ───────────────────────────────────────────────────────────
+    /**
+     * Bit depth of the global crusher, in bits. 16 switches it off entirely.
+     *
+     * The audio half of the 5-bit colour quantiser — see `RetroPass`. 7 is the
+     * band where the grain is plainly there on a noise burst without turning a
+     * quiet UI blip into a buzz; below 5 everything develops a permanent fizz
+     * on its decay tail, which is authentic and is also exhausting.
+     */
+    crushBits: 7,
+    /**
+     * Sample-and-hold rate, in Hz. At or above the device rate it does nothing.
+     *
+     * Needs the AudioWorklet — see `Mixer`. Where it is unavailable the bit
+     * crush still runs and this is ignored. 16 kHz is roughly a mid-90s console
+     * sampler and takes the top off the noise bursts, which is most of what
+     * makes them read as an era rather than as a modern game being dirtied up.
+     */
+    crushRateHz: 16000,
+
+    // ── the physical mapping ──────────────────────────────────────────────
+    /**
+     * How far a pitch may wander from the written value, either side, as a
+     * fraction. "같은 소리가 반복되지 않게 피치를 미세하게 랜덤 변조 (±5% 정도)."
+     * Each sound scales this by its own `jitter`.
+     */
+    pitchJitter: 0.05,
+    /** Time constant for a loop's gain and pitch writes. See `SynthVoice.set`. */
+    smoothingSeconds: 0.02,
+
+    // ── overload control ──────────────────────────────────────────────────
+    /** Voices that may sound at once, across everything. */
+    maxVoices: 14,
+    /** And of any one sound id, unless its own definition says otherwise. */
+    voicesPerSound: 3,
+    /** Multiplies every definition's cooldown. 0 disables cooldowns entirely. */
+    cooldownScale: 1,
+    /**
+     * How far past its cooldown a repeat is still ducked, as a multiple of the
+     * cooldown itself, and how far down. A chain should taper rather than
+     * machine-gun and then stop dead. See `VoicePool.request`.
+     */
+    repeatWindowScale: 3,
+    repeatDuck: 0.45,
+
+    // ── collisions ────────────────────────────────────────────────────────
+    /**
+     * How the contact observer turns a frame of physics into a few sounds.
+     *
+     * ── the thresholds are in cm/s of velocity CHANGE ──────────────────────
+     * A cap resting on the board is in permanent contact carrying about 18
+     * g·cm/s of impulse, so a level test fires continuously; what separates a
+     * hit from a rest is that a hit CHANGES a velocity. `gravityBias` is added
+     * to the floor in proportion to how many physics steps the frame ran, since
+     * a body in free fall legitimately gains 8.2 cm/s per step.
+     */
+    impact: {
+      /** Minimum velocity change to count as a hit at all, in cm/s. */
+      minDeltaV: 26,
+      /** Added to that per physics step in the frame. Gravity's own share. */
+      gravityBias: 9,
+      /** The change that maps to full intensity. Above this it is just loud. */
+      fullDeltaV: 320,
+      /**
+       * How many impacts one frame may sound, loudest first.
+       *
+       * "연쇄 충돌은 가장 강한 충돌 몇 개만 소리를 낸다. 전부 내면 소음이다."
+       * Three is enough to read as a chain and few enough to stay a chain.
+       */
+      perFrame: 3,
+      /** Cap-on-board landings are real but dull. Their share of a wall hit. */
+      groundGain: 0.5,
+      /**
+       * How far apart two caps may be and still be judged to have hit each
+       * other when the narrow phase has already let go of the pair, in
+       * multiples of the cap radius. The fallback classifier; see `ContactAudio`.
+       */
+      pairRadius: 2.6,
+    },
+
+    /**
+     * The sliding bed: how cap speed becomes level.
+     *
+     * `full` is the speed at which it reaches its own volume; below `min` it is
+     * silent, so a board that is nearly at rest is actually at rest.
+     */
+    slide: {
+      minSpeed: 14,
+      fullSpeed: 190,
+      /** Level at full speed, before the category trim. */
+      gain: 0.5,
+      /** Pitch at full speed. Below it the bed drops toward 1. */
+      rateAtFull: 1.5,
+    },
+
+    /** A cap turning over. Angular speed, in rad/s, that counts as a flip. */
+    flipMinSpin: 3.0,
+    /**
+     * A cap falling off the board. World y, in cm, below which it is falling.
+     *
+     * The board's top surface is y = 0 and the knockout pit's ceiling is at -6,
+     * so anything under this is over the edge and on its way down.
+     */
+    fallY: -3.0,
+
+    // ── the continuous UI sounds ──────────────────────────────────────────
+    /**
+     * ── the bow has no bed, and no clamp blip ──────────────────────────
+     * Both existed and both were removed on the player's own instruction. A
+     * sustained tone under every aim, and a chirp every time the pull crosses
+     * the clamp, are the two sounds a player hears most in this game — which is
+     * exactly what makes them the two that wear out first. Aiming is silent now
+     * apart from the grab and the release.
+     */
+
+    /** The stun hum, per confused player. Deliberately very quiet. */
+    chaosGain: 0.3,
+    /**
+     * ── and the mark editor draws in silence ───────────────────────────
+     * A rate-limited brush tick was built, tuned and then removed on the
+     * player's instruction, together with its settings-screen toggle. The brief
+     * warned it would be fatiguing; it was.
+     */
+    /**
+     * The menu bottle being worked up. Level at a fully wound shake.
+     *
+     * Higher than it reads on a meter, and deliberately. The sound is a thin
+     * band of noise around 4-5 kHz with nothing under it — measured, its energy
+     * below 500 Hz is about 1.4% of its energy above 2 kHz — and a band that
+     * narrow and that high is perceived far quieter than the same peak spread
+     * across the spectrum. The previous version did not need this because it had
+     * a 62 Hz sawtooth doing the work, which is exactly why it sounded like an
+     * engine.
+     */
+    shakeGain: 0.55,
+  },
+
   view: {
     /**
      * Internal render target, by key into RENDER_MODES.
@@ -1559,23 +2485,21 @@ export const CONFIG = {
     knockoutMinZoom: 1.1,
 
     /**
-     * The curling lane's zoom range, and the zoom a turn opens at.
+     * The curling table's zoom range, and the zoom a turn opens at.
      *
-     * ── the lane needs its own three, and the reason is its shape ────────────
-     * A 1:4.5 rectangle in a 4:3 frame is bound by its LENGTH, so at the
-     * whole-field fit it is a ribbon down the middle of the screen and the caps
-     * on it are small — measured, about ten framebuffer pixels across against
-     * the knockout board's seventeen. That is legible and it is not comfortable
-     * to aim with, which is the trade the brief asks to be measured: "최소 줌에서
-     * 레인 전체가 보여야 한다" against "하우스가 너무 작게 보이면 플레이가
-     * 어렵다".
+     * ── the floor is 1, and that is a GUARANTEE rather than a setting ────────
+     * "최소 줌에서 책상 전체가 보인다" is a completion criterion, and zoom 1 is
+     * the whole-of-`extents` fit by construction — see `GameCamera.fitDistance`.
+     * So the criterion holds at every table width the panel can produce rather
+     * than at the one it was measured against, and the slider on the panel is
+     * bounded at 1 from below for the same reason. Raising it above 1 frames
+     * tighter than the whole table and is the one way to break the criterion,
+     * which is why the row says so.
      *
-     * `curlingMinZoom` is 1, so the first of those is true by construction —
-     * zoom 1 IS the whole-lane fit. The other two are what make the second one
-     * workable: the ceiling is lower than the shared 4x because there is nothing
-     * on a lane worth filling the screen with, and the turn opens at the widest
-     * rather than at the shared 1.45 because in curling you are aiming from one
-     * end AT the other and a view that shows neither end is useless.
+     * The ceiling is lower than the shared 4x because a table two caps wide on
+     * screen is not a view anybody aims from, and the turn opens at the widest
+     * because in curling you are throwing from one end AT the other — a view
+     * that shows only one of them is useless whichever end it picks.
      *
      * `maxZoom` and `turnZoom` are injected by the mode — see `MODES.curling` —
      * exactly as `minZoom` already was.
@@ -1615,6 +2539,83 @@ export const CONFIG = {
      * wait before your turn.
      */
     turnViewSec: 0.55,
+
+    /**
+     * ── riding the thrown cap ────────────────────────────────────────────────
+     *
+     * A separate thing from `followBall`, and deliberately so. That one keeps a
+     * BALL in frame in football and is a straight pan target with the camera's
+     * own glide behind it. This is the survival and curling behaviour: a spring
+     * on the cap the shot was taken with, a fast cut to whatever goes over the
+     * edge, and a hand-back at the end of the turn. `CamTracker` owns all of it;
+     * WHICH modes it runs in is decided by `MODES.*.camera.track` and not here.
+     *
+     * Nothing in this block can reach the simulation. Every one of them is read
+     * on the render clock by a module that writes to the camera's pan and to
+     * nothing else, so a match played with tracking on and one played with it
+     * off produce the same hashes.
+     */
+    track: true,
+    /**
+     * The spring pulling the view toward the cap: `a = k*(x-look) - c*v`.
+     *
+     * Critical damping is `2*sqrt(k)` — 18.97 at this stiffness — and the
+     * damping sits just above it. Overshoot is what an underdamped camera does
+     * at the end of every travel, and at 320x240 a view that arrives, slides
+     * past and comes back reads as the board wobbling rather than as the camera
+     * settling. Being slightly over costs a little arrival time and nothing else.
+     *
+     * ── 90 rather than the 30 this started at, and it cost nothing ───────────
+     * A second-order follow lags a moving target by `v*c/k`, and a curling
+     * throw crosses the table at about 150 units a second — so at 30 the cap
+     * was a board-length ahead of the view and spent most of a zoomed-in throw
+     * off screen. Measured over a ricocheting knockout shot at 2.2x, raising it
+     * to 90 took the cap from on screen 34% of the turn to 58%, and the
+     * camera's peak pan speed and acceleration — which is what actually makes a
+     * view unwatchable — barely moved: 44 and 382 at 30 against 40 and 361 at
+     * 90. They barely move because the pan CLAMP is what bounds the travel, not
+     * the spring. Past about 160 the tracking stops improving for the same
+     * reason and the acceleration starts climbing again, so there is nothing up
+     * there worth having.
+     *
+     * It still plainly lags — peak lag is around 18 units on a 58-unit board —
+     * which is the point. Wind it up toward 400 and the camera locks to the cap
+     * and the low-res frame turns to mush on every ricochet; wind it down toward
+     * 8 and the shot is over before the view arrives.
+     */
+    trackStiffness: 90,
+    trackDamping: 20,
+    /**
+     * How long the cut onto a cap that has just gone over the edge takes.
+     *
+     * "스냅이라 하되 순간이동은 아니다." A duration and not a stiffness, so it is
+     * the same length of move whether the cap went over the near rim or the far
+     * corner. Under about 0.15 it reads as a cut and the eye loses where it is;
+     * over about 0.4 the fall is finished before the camera arrives.
+     */
+    trackFallSnapSec: 0.25,
+    /**
+     * How long the pan takes to come back to the default framing, in seconds.
+     *
+     * Only ever used on a turn that ended WITHOUT the seat changing — an AI or
+     * online opponent, or today an extra-turn card. A local handover is put back
+     * by the turn-over reset itself and never reaches this. See
+     * `CamTracker._release`.
+     */
+    trackReturnSec: 0.4,
+    /**
+     * How far inside the frame's edge curling's target line is kept, in world
+     * units.
+     *
+     * The same inset guards the cap, so when the two are too far apart to both
+     * fit — a throw still at the near end, zoomed in — the cap sits exactly this
+     * far inside its own edge and the line is as close as the frame can bring
+     * it. At the turn's opening zoom the whole table is on screen and this does
+     * nothing at all. Roughly two cap diameters.
+     */
+    trackLineInset: 8,
+    /** The two trails, drawn on the board. A tuning instrument; see `TrackPathView`. */
+    trackPath: false,
 
     /**
      * Camera bearing, in radians. LIVE.
@@ -1702,18 +2703,78 @@ export const CONFIG = {
     /** Rapier's own outlines for the goal sensors, drawn as boxes. */
     goalSensors: false,
     /**
-     * The curling house volume and the in-play volume, outlined.
+     * The curling target line and the fall-judgement volume, outlined.
      *
      * Its own switch rather than sharing `goalSensors`, because the two answer
      * different questions and are looked at while tuning different things — one
-     * is "where does a goal start counting" and this is "where does a cap stop
-     * being on the lane", which is the number the whole overshoot penalty rests
-     * on. Drawn through the geometry, like the goal boxes, because half of each
-     * volume is behind the fence.
+     * is "where does a goal start counting" and this is "where exactly is the
+     * line every distance is measured to, and where does a cap have to get to
+     * before it counts as fallen". Both are numbers the whole mode rests on and
+     * neither is visible from the sliders.
+     *
+     * Drawn through the geometry, like the goal boxes, because the pit spans
+     * everything under the table and would otherwise be entirely hidden by it.
      */
-    curlingSensors: false,
+    curlingGuides: false,
     /** Tint the run-off apart from the pitch, and mark the lines it is judged by. */
     showRunoff: true,
+  },
+
+  /**
+   * Online play.
+   *
+   * ── NONE OF THIS IS IN THE CONFIG FINGERPRINT, and that is deliberate ────
+   * `protocol.js` hashes the groups the SIMULATION reads — physics, shot, turn,
+   * cards, orbs and the three modes — and refuses to pair two clients whose
+   * hashes differ. Everything here is presentation and timing: how long the
+   * match-found sequence runs, where to find the relay, how the countdown is
+   * drawn. Two players with different intro lengths are still playing the same
+   * game, and folding these in would refuse matches over nothing.
+   *
+   * The authority for the numbers that MATTER is the server. `turnMs` and the
+   * heartbeat below are what this client shows and what a locally-run relay is
+   * started with; the running server's own values arrive in the handshake and
+   * win. A client cannot give itself a longer turn by editing a slider.
+   */
+  online: {
+    /**
+     * ── there is no `server` here, and there was ─────────────────────────────
+     * A `config.online.server` sat here with a panel field bound to it, and
+     * nothing anywhere read it: the address actually comes from
+     * `Profile.server`, which is what the settings screen writes and what
+     * survives a reload. A config key that looks like a setting and changes
+     * nothing is worse than no key at all — it answers the question "where do I
+     * put the address" wrongly. See `Transport.defaultServerUrl` for the
+     * build-time override and the host-derived fallback.
+     */
+    /** What the countdown shows. The server's value overrides it on connect. */
+    turnMs: 15000,
+    /** How long without a pong before the relay calls a client gone. */
+    heartbeatTimeoutMs: 15000,
+  },
+
+  /**
+   * The opening sequence, in seconds, one slider per segment.
+   *
+   * ── top level, not under `online`, because every mode plays it ───────────
+   * It was written for 매칭 성립 and lived under `online` while that was the
+   * only caller. It is not an online feature: the placement it teaches —
+   * opponent top-left, you bottom-right, both sliding into the corners the match
+   * keeps those hands in — reads the same whether the other cap belongs to a
+   * stranger, to the computer, or to the person across the table. Leaving it
+   * nested would have meant a local match reading its timings out of a group
+   * named for a network it is not using.
+   *
+   * Sums to 2.5 at the defaults, inside the brief's two-to-three. The order is
+   * the brief's too. See `MatchFoundLayer`.
+   */
+  intro: {
+    selfSec: 0.55,
+    opponentSec: 0.55,
+    holdSec: 0.9,
+    exitSec: 0.5,
+    /** Play it at all. Off, the match opens straight onto the board. */
+    enabled: true,
   },
 };
 

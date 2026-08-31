@@ -47,6 +47,32 @@ import { DISPLAY_ASPECT } from '../core/Viewport.js';
 
 const FOV = 30;
 const FIT_MARGIN = 1.12;
+
+/**
+ * The board-canvas width, in CSS pixels, the default framing was judged at.
+ *
+ * A 1280x800 window letterboxes to a 1067-wide canvas, which is where the
+ * current `view.zoom` of 1.45 was chosen and where a cap measures 40 CSS px.
+ * Any canvas at least this wide frames exactly as it always did; narrower ones
+ * step in so the cap stays that size. See `GameCamera.screenZoom`.
+ */
+const REFERENCE_BOARD_CSS = 1067;
+
+/**
+ * How far the screen factor may actually step in, whatever the ratio says.
+ *
+ * Full parity is a factor of 2.65 on a 402-px phone, and it does produce a cap
+ * exactly the 40 CSS px it is on a desktop. It also produces a board you cannot
+ * play on: the board band is 4:3, so stepping in on WIDTH crops HEIGHT twice as
+ * hard, and at 2.65 the knockout rows measure 24 world units against 23.9 of
+ * visible height — both rows clipped, including your own.
+ *
+ * 2.1 is where they fit again with a margin, measured rather than guessed. The
+ * cap lands at 32 CSS px, four fifths of the desktop size and twice what it was.
+ * Raise it toward 2.65 for a larger cap and a tighter board; the trade is a
+ * straight line between those two ends.
+ */
+const MAX_SCREEN_ZOOM = 2.1;
 /** Below this the rotation has stopped; keeping it would spin forever. */
 const SPIN_EPSILON = 1e-4;
 
@@ -89,8 +115,16 @@ export class GameCamera {
     minZoom = null,
     maxZoom = null,
     turnZoom = null,
+    screenZoomMax = null,
   }) {
     this.config = config;
+
+    /**
+     * The board's on-screen width in CSS pixels, written by `main.js` on resize.
+     * Drives `screenZoom`; the reference default means an unset camera frames
+     * exactly as it always did.
+     */
+    this.boardCssWidth = REFERENCE_BOARD_CSS;
     this.extents = { x: extents.x, z: extents.z };
     this.fixedPitch = fixedPitch;
     this.rotatable = rotatable;
@@ -107,6 +141,8 @@ export class GameCamera {
      */
     this.maxZoomFn = maxZoom;
     this.turnZoomFn = turnZoom;
+    /** The mode's ceiling on `screenZoom`. See that getter. */
+    this.screenZoomMaxFn = screenZoomMax;
 
     /**
      * A bearing and a zoom the camera is travelling to on its own.
@@ -119,6 +155,20 @@ export class GameCamera {
     this._autoAzimuth = null;
     this._autoZoom = null;
 
+    /**
+     * The play area's shape, which the camera takes as its aspect.
+     *
+     * Was the fixed 4:3 of `DISPLAY_ASPECT`. On a portrait phone the play area
+     * is no longer 4:3 — it is whatever is left after the HUD and card bands —
+     * and a camera that kept framing 4:3 inside a taller region showed the same
+     * horizontal slice with the map cut off top and bottom at the region's
+     * edges. Matching the region means a tall screen shows MORE board, which is
+     * the whole point of giving the board that space.
+     *
+     * Written from `main.js` on resize, alongside `boardCssWidth`. 4:3 on every
+     * landscape window, so nothing there moves.
+     */
+    this.boardAspect = DISPLAY_ASPECT;
     this.camera = new PerspectiveCamera(FOV, DISPLAY_ASPECT, 1, 1200);
     this._target = new Vector3(0, 0, 0);
 
@@ -149,7 +199,10 @@ export class GameCamera {
   }
 
   get tanX() {
-    return DISPLAY_ASPECT * this.tanY;
+    // The PLAY AREA's aspect, not the display's — `fitDistance`, the pan clamp
+    // and the pan gain all key off this, and all three are about the region the
+    // scene is actually drawn into. See `boardAspect`.
+    return this.boardAspect * this.tanY;
   }
 
   /** Distance at which the whole field is on screen at any bearing. */
@@ -182,13 +235,86 @@ export class GameCamera {
     return Math.max(1, v || 1);
   }
 
+  /**
+   * How much tighter a small screen has to frame to keep a CAP the same size.
+   *
+   * ── the framing was authored in world units, and a phone is not ────────────
+   * `fitDistance` puts the whole field on screen, and `view.zoom` steps in from
+   * there. Both are in WORLD units, so they describe the same slice of board on
+   * every display — which means a cap is however many pixels the display happens
+   * to give that slice. On a 1067-px-wide desktop canvas that is 40 px across;
+   * on a 402-px phone the identical framing makes it 15, and a 15-pixel cap is
+   * not something you can aim at with a thumb.
+   *
+   * So the default framing steps in by the same ratio the screen lost, and a cap
+   * comes out the same physical size it has on a desktop. `REFERENCE_BOARD_CSS`
+   * is the canvas width that framing was judged at.
+   *
+   * Written from `main.js` on every resize, because the camera has no viewport.
+   * 1 on any canvas at least the reference wide, so no desktop window moves.
+   */
+  get screenZoom() {
+    const want = REFERENCE_BOARD_CSS / Math.max(1, this.boardCssWidth);
+    /**
+     * The ceiling is the MODE's, because how much stepping in costs depends
+     * entirely on how the pieces are spread.
+     *
+     * Knockout packs six caps into 24 world units of depth and can take the full
+     * 2.1 without losing any of them. Football spreads eleven over 56, on a
+     * pitch whose point is the goal at the far end, and the same 2.1 leaves you
+     * aiming at something off screen. One number cannot serve both, so it comes
+     * from the mode — the same seam `minZoom` and `maxZoom` already use.
+     */
+    const cap = this.screenZoomMaxFn
+      ? this.screenZoomMaxFn(this.config)
+      : MAX_SCREEN_ZOOM;
+    return Math.min(Math.max(1, cap || MAX_SCREEN_ZOOM), Math.max(1, want));
+  }
+
+  /**
+   * The STORED zoom, clamped — and deliberately free of the screen factor.
+   *
+   * ── this getter is round-tripped, so it must not be derived ────────────────
+   * Three sites write what this returns straight back into `config.view.zoom`:
+   * `zoomBy`, the `_autoZoom` animation, and `setZoomRange`. That is fine while
+   * the getter only CLAMPS — clamping is idempotent, so a round trip is a no-op.
+   * It is not fine if the getter also SCALES: every write then multiplies the
+   * stored value again, and two mode changes are enough to slam the zoom to its
+   * ceiling. That was a real bug and it looked like the map being cut off.
+   *
+   * So the screen factor lives in `distance`, which nothing writes back, and
+   * this stays purely the value the player's pinch owns.
+   *
+   * The floor is divided by the factor rather than left alone. `minZoom` means
+   * "the whole field fits", and with the factor multiplying the distance the
+   * stored value that achieves that is `minZoom / screenZoom`. Dividing keeps
+   * the guarantee the floor exists for — a phone can still pinch out to the
+   * whole board — while the tighter framing remains where the default sits.
+   */
+  /**
+   * The lowest STORED zoom, i.e. how far out the player may pinch.
+   *
+   * `minZoom` is a statement about what must be VISIBLE — "the whole field
+   * fits" — and with the screen factor multiplying the distance, the stored
+   * value that achieves it is `minZoom / screenZoom`. Every site that clamps a
+   * stored zoom has to use this one rather than `minZoom`, or the two disagree
+   * and the pinch stops short of the thing the floor exists to guarantee.
+   */
+  get zoomFloor() {
+    return this.minZoom / this.screenZoom;
+  }
+
   get zoom() {
-    const max = Math.max(this.minZoom, this.maxZoom);
-    return Math.min(max, Math.max(this.minZoom, this.config.view.zoom));
+    const min = this.zoomFloor;
+    const max = Math.max(min, this.maxZoom);
+    return Math.min(max, Math.max(min, this.config.view.zoom));
   }
 
   get distance() {
-    return this.fitDistance / this.zoom;
+    // The screen factor is applied HERE, and only here: nothing writes a
+    // distance back into stored state, so there is nothing for it to compound
+    // through. See the note on `zoom`.
+    return this.fitDistance / (this.zoom * this.screenZoom);
   }
 
   /** Bearing in radians. Persisted, so it survives turns and rebuilds. */
@@ -212,7 +338,21 @@ export class GameCamera {
    * cent of the range and is on the panel.
    */
   get atMinZoom() {
-    return this.zoom <= this.minZoom * (1 + Math.max(0, this.config.view.rotateBand));
+    /**
+     * Measured from `zoomFloor`, not `minZoom`, and the difference is not
+     * cosmetic.
+     *
+     * `zoom` is a STORED value whose floor is `minZoom / screenZoom`; `minZoom`
+     * is an EFFECTIVE one. Comparing them puts the two sides in different
+     * spaces and makes this band wider by exactly `screenZoom` — on a phone,
+     * true across most of the useful zoom range rather than a few per cent of
+     * it. Since `dragMode` reads this, a drag then ROTATED when it should have
+     * panned, and `update` force-centres the pan while rotating, so panning was
+     * not merely mislabelled: it was unreachable. Both sides are stored values
+     * now. Identical on desktop, where `screenZoom` is 1 and the two floors are
+     * the same number.
+     */
+    return this.zoom <= this.zoomFloor * (1 + Math.max(0, this.config.view.rotateBand));
   }
 
   /** Which drag this is, given where the zoom currently sits. */
@@ -274,7 +414,8 @@ export class GameCamera {
    * @param {number} factor  >1 moves in
    */
   zoomBy(factor) {
-    const min = this.minZoom;
+    // `zoomFloor`, not `minZoom`: this clamps a STORED value. See that getter.
+    const min = this.zoomFloor;
     const max = Math.max(min, this.maxZoom);
     this.config.view.zoom = Math.min(max, Math.max(min, this.zoom * factor));
     this._autoZoom = null;
@@ -414,8 +555,9 @@ export class GameCamera {
     this.spin = 0;
     this.userTurned = false;
     if (zoom) {
-      this.panTarget.x = 0;
-      this.panTarget.z = 0;
+      const home = this.defaultFraming(azimuth);
+      this.panTarget.x = home.panX;
+      this.panTarget.z = home.panZ;
     }
 
     if (this.rotatable && azimuth !== null && azimuth !== undefined) {
@@ -425,9 +567,73 @@ export class GameCamera {
       this._autoAzimuth = { from: this.azimuth, delta: angleDelta(this.azimuth, azimuth), t: 0 };
     }
     if (zoom) {
-      this._autoZoom = { from: this.zoom, to: this.turnZoom, t: 0 };
+      this._autoZoom = { from: this.zoom, to: this.defaultFraming(azimuth).zoom, t: 0 };
       this._following = false;
     }
+  }
+
+  /**
+   * THE default framing, as four numbers. One definition, two callers.
+   *
+   * ── it exists so the reset button and the turn change cannot drift ─────────
+   * "기본 구도 = 로컬 모드에서 턴이 바뀔 때 자동으로 잡히는 그 구도와 완전히
+   * 동일해야 한다. 그 구도 계산을 함수로 분리해라. 상수를 두 군데 복사하지 마라."
+   *
+   * `faceTo` above builds its tween out of this, and `atDefaultFraming` below
+   * tests against it — so there is no third place holding a copy of "zoom back
+   * out to the turn zoom and centre the pan", and moving the opening zoom moves
+   * the reset button with it by construction rather than by anybody remembering.
+   *
+   * The reset button itself does not call this at all: it calls
+   * `faceCurrentPlayer(true)` in `main.js`, which is the same function the turn
+   * change calls, which calls `faceTo`, which calls this. Requirement 15 asks
+   * for one function shared by both paths, and there are two of them stacked —
+   * the framing numbers here, and the "which bearing does this player get"
+   * decision up there.
+   *
+   * @param {number|null} azimuth  the bearing this turn wants, or null
+   */
+  defaultFraming(azimuth) {
+    return {
+      azimuth: this.rotatable && azimuth !== null && azimuth !== undefined ? azimuth : this.azimuth,
+      zoom: this.turnZoom,
+      panX: 0,
+      panZ: 0,
+    };
+  }
+
+  /**
+   * Is the view already sitting at the default framing?
+   *
+   * What the reset button's dimming reads. Deliberately NOT what the button's
+   * hit test reads: "흐린 상태에서도 클릭은 동작한다" — the dimming is a hint that
+   * there is nothing to undo, and a control that stopped answering would be a
+   * different and worse thing, especially mid-glide when a player who wants to
+   * cancel their own drag would find the button dead.
+   *
+   * `settling` counts as being there: the camera is already on its way, and a
+   * button that lit up again for the half second of the ease would flicker on
+   * every single turn change.
+   *
+   * The tolerances are proportional rather than absolute so they mean the same
+   * thing on a board of any size — the pan one is a fraction of the visible
+   * patch, not a number of world units.
+   */
+  atDefaultFraming(azimuth) {
+    if (this.settling) return true;
+    const home = this.defaultFraming(azimuth);
+
+    if (Math.abs(this.zoom - home.zoom) > home.zoom * 0.02) return false;
+
+    const { u, v } = this.visibleHalf();
+    const slack = Math.max(u, v) * 0.02;
+    if (Math.abs(this.pan.x - home.panX) > slack) return false;
+    if (Math.abs(this.pan.z - home.panZ) > slack) return false;
+
+    if (this.rotatable && azimuth !== null && azimuth !== undefined) {
+      if (Math.abs(angleDelta(this.azimuth, home.azimuth)) > 0.01) return false;
+    }
+    return true;
   }
 
   /**
@@ -448,8 +654,14 @@ export class GameCamera {
     // `curlingTurnZoom` — because a lane is aimed from one end at the other and
     // opening halfway in shows neither.
     const want = this.turnZoomFn ? this.turnZoomFn(this.config) : this.config.view.turnZoom;
-    if (!want) return this.minZoom;
-    return Math.min(Math.max(this.minZoom, this.maxZoom), Math.max(this.minZoom, want));
+    // Stored-value territory again — this is fed into `_autoZoom` endpoints and
+    // into `defaultFraming`, both of which are compared against and written to
+    // `config.view.zoom`. Clamping it to `minZoom` would make "already at the
+    // default framing" unreachable on a phone, because the default sits below
+    // that floor once the screen factor is in play.
+    const floor = this.zoomFloor;
+    if (!want) return floor;
+    return Math.min(Math.max(floor, this.maxZoom), Math.max(floor, want));
   }
 
   // ── following the ball ───────────────────────────────────────────────────
@@ -475,6 +687,19 @@ export class GameCamera {
   /** Let go of whatever was being followed. */
   stopFollow() {
     this._following = false;
+  }
+
+  /**
+   * Is something steering the pan right now?
+   *
+   * Read-only, and it exists so a follower can find out that a HAND has taken
+   * the view off it: `panByPixels` calls `stopFollow`, and a follower which
+   * rewrites the target every frame would otherwise put it straight back and
+   * the drag would do nothing. See `CamTracker._handTookIt`. Nothing here
+   * changes — this getter reports the flag that was already being kept.
+   */
+  get following() {
+    return this._following;
   }
 
   /** The player has taken over. */
@@ -711,6 +936,12 @@ export class GameCamera {
   apply() {
     const d = this.distance;
     const cam = this.camera;
+    // Kept in step here rather than at the write site, so there is exactly one
+    // place the projection can fall out of date with the region it draws into.
+    if (cam.aspect !== this.boardAspect) {
+      cam.aspect = this.boardAspect;
+      cam.updateProjectionMatrix();
+    }
     const deg = this._pitchClamped();
     const a = this.azimuth;
     const tx = this.pan.x;
@@ -781,10 +1012,37 @@ export class GameCamera {
    * a lower ceiling than the last one's floor would push the zoom to a value
    * neither mode allows.
    */
-  setZoomRange({ min = null, max = null, turn = null } = {}) {
+  /**
+   * The board's on-screen width changed — a rotation, a resize, a URL bar.
+   *
+   * Not a bare field, because every derived value hangs off it. `distance` moves
+   * with it, and `update` only calls `apply()` when something has MOVED — at
+   * rest nothing has, so the camera matrix kept the old distance until the next
+   * input. Worse in one direction than the other: a board that gets WIDER drops
+   * `screenZoom`, which grows `distance`, which grows the visible patch, which
+   * SHRINKS the pan limits — leaving a pan that was legal a moment ago outside
+   * them with nothing to bring it back.
+   *
+   * The stored zoom is deliberately NOT rewritten here. `get zoom()` clamps on
+   * read, so nothing stale is ever reported, and writing it back would destroy a
+   * framing that is legal in the orientation the player is about to return to.
+   */
+  setBoardCssWidth(px, aspect = this.boardAspect) {
+    const w = Math.max(1, px || 1);
+    const a = aspect > 0 ? aspect : this.boardAspect;
+    // A sliding URL bar fires a dozen resizes with the same numbers.
+    if (w === this.boardCssWidth && a === this.boardAspect) return;
+    this.boardCssWidth = w;
+    this.boardAspect = a;
+    this._clampPan();
+    this.apply();
+  }
+
+  setZoomRange({ min = null, max = null, turn = null, screenMax = null } = {}) {
     this.minZoomFn = min;
     this.maxZoomFn = max;
     this.turnZoomFn = turn;
+    this.screenZoomMaxFn = screenMax;
     // Re-clamped through the getter, so a zoom left outside the new range is
     // brought in rather than silently reported as something it is not.
     this.config.view.zoom = this.zoom;

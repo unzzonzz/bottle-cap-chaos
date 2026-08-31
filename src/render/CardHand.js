@@ -1,6 +1,7 @@
 import { Group, Mesh, MeshBasicMaterial, PlaneGeometry, Vector3 } from 'three';
 import { CARD_BY_ID } from '../game/cards/cardCatalog.js';
 import { cardFaceTexture, cardBackTexture } from './cardTexture.js';
+import { PALETTE } from '../core/palette.js';
 
 /**
  * One player's hand, as meshes.
@@ -34,6 +35,55 @@ import { cardFaceTexture, cardBackTexture } from './cardTexture.js';
 
 /** Height as a multiple of width. Matches the texture generator's. */
 export const CARD_ASPECT = 1.5;
+
+/**
+ * How much of a hand shows, given the band it has to live in.
+ *
+ * ── why this is a function and not three config numbers ─────────────────────
+ * `idleExposure`, `activeExposure` and `inactiveExposure` were authored against
+ * a hand that hangs off the EDGE of a 4:3 frame with the board behind it: 54
+ * pixels of card peeking up, raised to 120 when the pointer comes near. That is
+ * the right shape when the alternative is covering the play area.
+ *
+ * In portrait the hand has a band of its own and the reasoning inverts. Nothing
+ * is behind it to protect, so peeking 54 pixels into a 333-pixel band just looks
+ * like the cards fell off the bottom of the screen. Worse, the tuck-until-hovered
+ * behaviour those numbers exist to serve cannot work on a phone at all: there is
+ * no hover on a touch screen, so a hand that only comes up when the pointer
+ * approaches is a hand that comes up when you are already dragging it.
+ *
+ * So with a band the exposures are derived from the band instead — a share of it,
+ * capped by the card's own height so a very tall band never blows the card up
+ * past its own size. Without one, the authored numbers are returned untouched
+ * and every existing layout is bit-identical.
+ *
+ * Exported because `HudLayer` has to agree about where the OPPONENT's parked
+ * hand reaches down to — it hangs the score off that line, and the two drifting
+ * apart is exactly the bug `PARKED_HAND_REACH` used to be.
+ *
+ * @param {number} band       frame pixels of band this hand lives in, 0 if none
+ * @param {number} cardHeight the card's own height in frame pixels
+ * @param {number} rootScale  the hand's current scale
+ */
+export function handExposure(cfg, band, cardHeight, rootScale) {
+  if (!(band > 0)) {
+    return { idle: cfg.idleExposure, active: cfg.activeExposure, parked: cfg.inactiveExposure };
+  }
+  const card = cardHeight * rootScale;
+  return {
+    // The WHOLE card, sitting on the frame's bottom edge. `expose` is measured
+    // from that edge to the card's top, so an exposure of exactly the card's
+    // height puts its lower edge on the edge and all of it in view. Anything
+    // more would float the hand off the bottom of the screen, which reads as a
+    // bug rather than as a hand on a table; anything less goes back to peeking.
+    // The band's own share caps it so a short band never over-exposes.
+    idle: Math.min(card, band * 0.55),
+    // Clear of the idle line by enough that the lift is unmistakable.
+    active: Math.min(cardHeight + 40, band * 0.78),
+    // The opponent's, at the top. Smaller — it is not yours and not playable.
+    parked: Math.min(card * 0.62, band * 0.42),
+  };
+}
 
 /**
  * Unit quad, gripped at the bottom edge.
@@ -95,15 +145,74 @@ export class CardHand {
     this.raise = 0;
     /** Whether this hand answers the pointer at all. */
     this.live = false;
+    /** How much of a just-lifted 침묵's grey is still on this hand, 1..0. */
+    this.sealFade = 0;
 
     this.hovered = null;
     this.dragging = null;
+    /** The card being turned over for an AI play, or null. See `beginReveal`. */
+    this.revealing = null;
+
+    /**
+     * How far in from each frame edge the device has taken, in frame pixels.
+     *
+     * Only `top` and `bottom` are read — a hand hangs off a horizontal edge —
+     * but the whole set is stored so the field has the same shape everywhere it
+     * appears. `CardLayer.setSafeInsets` writes it. See src/platform/safeArea.js.
+     */
+    this.safeInsets = { top: 0, right: 0, bottom: 0, left: 0 };
 
     this._grab = { x: 0, y: 0 };
   }
 
   get faceDown() {
     return this.place < 0.5;
+  }
+
+  /**
+   * Start turning one card over, out of a face-down hand.
+   *
+   * ── the AI's cards are backs, so a play has to SHOW what was played ────────
+   * A human's card is face up in their own hand the whole time, so playing it is
+   * just a fly-out. The AI's hand is parked at the top and therefore face down —
+   * `faceDown` is already `place < 0.5`, so the backs come for free — and a card
+   * that simply vanished from it would tell the player nothing at all about what
+   * had just been done to them.
+   *
+   * So the card is drawn out of the fan, brought to the middle, and turned over
+   * where it can be read. The 0.6 s the brief insists on is not padding: it is
+   * how long it takes to notice a thing move, follow it, and read a word off it.
+   *
+   * It reuses the card already in the fan rather than building a second mesh —
+   * same geometry, same material, same texture cache — so the thing that lands
+   * in the middle is visibly the thing that came out of the hand.
+   *
+   * @param {string} cardId
+   * @returns {boolean} whether a card of that type was there to reveal
+   */
+  beginReveal(cardId) {
+    const card = this.cards.find((c) => c.data.cardId === cardId && c.flying <= 0);
+    if (!card) return false;
+    this.revealing = card;
+    card.faceUp = false;
+    // Where it was sitting when it was picked, so the pull starts from the fan
+    // rather than from wherever the springs happened to have got to.
+    card.revealFrom = { x: card.x.value, y: card.y.value, s: card.s.value, a: card.a.value };
+    return true;
+  }
+
+  /** Hand the revealed card back to the ordinary play path. */
+  endReveal() {
+    const card = this.revealing;
+    this.revealing = null;
+    if (!card) return;
+    // `flying` is what `syncTo` checks to keep a card whose state entry has gone,
+    // and what `_fly` drives. Handing over here means the card dissolves out of
+    // the middle of the screen exactly as a human's played card does — it is
+    // already at the destination, so what plays is the dissolve alone.
+    card.flying = 0.0001;
+    card.faceUp = null;
+    card.flipWidth = 1;
   }
 
   // ── contents ─────────────────────────────────────────────────────────────
@@ -203,7 +312,7 @@ export class CardHand {
     // the card's own scale every frame. It lives in the root so its world
     // matrix is maintained for free, and it is invisible unless the panel asks.
     const hit = new Mesh(QUAD, new MeshBasicMaterial({
-      color: 0x40e0a0,
+      color: PALETTE.debug.hitQuad,
       wireframe: true,
       transparent: true,
       opacity: 0.7,
@@ -234,6 +343,13 @@ export class CardHand {
       homeY: 0,
       armed: false,
       flying: 0,
+      /**
+       * Face override for the AI's reveal: null follows the hand, true/false
+       * forces. Every other card leaves it null and behaves exactly as before.
+       */
+      faceUp: null,
+      /** Horizontal squash while turning over. 1 at rest. See `_reveal`. */
+      flipWidth: 1,
       /** Whether the game would refuse this card right now, and why. */
       blocked: false,
       reason: '',
@@ -244,6 +360,7 @@ export class CardHand {
   }
 
   _destroy(c) {
+    if (this.revealing === c) this.revealing = null;
     this.root.remove(c.shadow, c.mesh, c.hit);
     c.mat.dispose();
     c.shadowMat.dispose();
@@ -368,12 +485,25 @@ export class CardHand {
    *   asked once per card per frame. The SAME predicate the game will apply when
    *   the card is played — see `cardCatalog` — so a card that looks playable is
    *   playable and one that does not, is not.
+   * @param {number} [sealFade]
+   *   1 the instant a 침묵 seal lifts off this hand, decaying to 0. The colour
+   *   coming BACK, and nothing else — the seal itself is already gone by the time
+   *   this is non-zero, and every card is answering `usable` with `ok` again.
+   *
+   *   It exists because the release is otherwise invisible. The seal greys the
+   *   whole hand through the ordinary blocked path, and when it lifts the hand
+   *   would snap from grey to colour between two frames, which tells the player
+   *   nothing about the thing they most need to know. `CardLayer` owns the
+   *   timer; this only reads it, so a hand rebuilt mid-fade does not restart it.
+   * @param {{cardId: string, phase: string, t: number}|null} [reveal]
+   *   The AI turning one of its face-down cards over. See `beginReveal`.
    */
-  update(dt, { place, raise, live, lock, usable }) {
+  update(dt, { place, raise, live, lock, usable, sealFade = 0, reveal = null }) {
     const cfg = this.config.cards;
     this.place = place;
     this.raise = raise;
     this.live = live;
+    this.sealFade = Math.max(0, Math.min(1, sealFade));
     if (!live && !this.dragging) this.hovered = null;
 
     const h = cfg.width * CARD_ASPECT;
@@ -398,13 +528,30 @@ export class CardHand {
     const present = atBottom ? r : 0;
     const rootScale = lerp(cfg.inactiveScale, 1, present);
 
-    const endExposure = atBottom
-      ? lerp(cfg.idleExposure, cfg.activeExposure, r)
-      : cfg.inactiveExposure;
+    // The band this hand lives in — its own edge's, not the other one's. Zero
+    // in landscape, where `handExposure` hands back the authored numbers.
+    const band = atBottom ? (this.frame.bottomBand ?? 0) : (this.frame.topBand ?? 0);
+    const ex = handExposure(cfg, band, h, rootScale);
+    const endExposure = atBottom ? lerp(ex.idle, ex.active, r) : ex.parked;
     const expose = swapFrac * endExposure;
+    /**
+     * The edge the hand hangs off, moved in by whatever iOS has taken.
+     *
+     * `expose` is literally how many frame pixels of card stick out past the
+     * screen edge — the `grip` term cancels — so an inset here does exactly the
+     * right thing: the same amount of card is visible, on the near side of the
+     * home indicator instead of under it. That matters more than it sounds. In
+     * landscape on a notched iPhone the bottom inset is ~26 frame pixels against
+     * an idle exposure of 54, so half of the only visible part of your own hand
+     * was sitting under the indicator strip.
+     *
+     * Zero on every desktop browser, and zero in portrait as well — see the note
+     * on `_safe` in HudLayer, and src/platform/safeArea.js for the arithmetic.
+     */
     const half = this.frame.height / 2;
+    const edge = half - (atBottom ? this.safeInsets.bottom : this.safeInsets.top);
     const grip = h * rootScale;
-    this.root.position.set(0, atBottom ? -half + expose - grip : half - expose + grip, 0);
+    this.root.position.set(0, atBottom ? -edge + expose - grip : edge - expose + grip, 0);
     this.root.rotation.z = atBottom ? 0 : Math.PI;
     this.root.scale.setScalar(rootScale);
 
@@ -433,7 +580,11 @@ export class CardHand {
       c.blocked = !verdict.ok;
       c.reason = verdict.reason ?? '';
 
-      if (c.flying > 0) {
+      if (c === this.revealing && reveal) {
+        // Scripted, not sprung: the whole point is that it takes a known length
+        // of time to read. A spring would arrive when it arrived.
+        this._reveal(c, reveal, h);
+      } else if (c.flying > 0) {
         this._fly(c, dt);
       } else if (c === this.dragging) {
         // Under the hand there is no spring: the card is where the pointer is.
@@ -459,7 +610,10 @@ export class CardHand {
         c.shakeX = 0;
       }
 
-      this._applyTexture(c, wantFace, c === this.hovered || c === this.dragging);
+      // A revealed card overrides the hand's face/back rule for itself: the
+      // whole hand is still face down and this one card is being turned over.
+      const face = c.faceUp ?? wantFace;
+      this._applyTexture(c, face, c === this.hovered || c === this.dragging || c === this.revealing);
       this._place(c, i, cfg, h, opacity, drain, level);
 
       if (c.flying > 1) done.push(c);
@@ -544,7 +698,9 @@ export class CardHand {
     // `+ 2` so a fully drawn card clears the tallest stack a hand can build.
     const order = level[i] + this._forward(c, cfg, h) * (this.cards.length + 2);
 
-    const sx = w * c.s.value;
+    // `flipWidth` is 1 for every card that is not mid-flip, so this is the
+    // identity everywhere except the eight frames an AI card is turning over.
+    const sx = w * c.s.value * (c.flipWidth ?? 1);
     const sy = h * c.s.value;
     /** The spring's place, plus whatever the refusal shake is adding. */
     const px = c.x.value + c.shakeX;
@@ -590,11 +746,45 @@ export class CardHand {
 
     const u = c.mat.uniforms;
     u.uOpacity.value = alpha;
+
+    /**
+     * The card being turned over is exempt from every drain there is.
+     *
+     * A parked hand is greyed BECAUSE it is not yours — `idleDrain` is the full
+     * `greyStrength` for the top hand whatever else is happening — and the whole
+     * point of the reveal is that this one card must be read. Left on the hand's
+     * drain it arrives at the middle of the screen desaturated and dim, which is
+     * the one outcome that makes the 0.6 seconds pointless.
+     *
+     * Full opacity too, not just full colour: `inactiveOpacity` is 0.55 on a
+     * parked hand, and a card at just over half alpha over a busy board is not
+     * legible however saturated it is.
+     */
+    if (c === this.revealing) {
+      u.uOpacity.value = 1;
+      u.uDrain.value = 0;
+      u.uTint.value.setScalar(1);
+      return;
+    }
+
+    /**
+     * The seal lifting, as a fraction of the blocked look still hanging on.
+     *
+     * Zero unless a 침묵 has just expired off this hand, so every path below is
+     * bit-for-bit what it was for every other card. It is applied to the
+     * UNBLOCKED branches only: a card that is still refused for its own reasons
+     * — an armed 강타, say — is at the full blocked look already and must not
+     * brighten partway through somebody else's transition.
+     */
+    const seal = this.sealFade ?? 0;
+
     // An unplayable card is drained and dimmed WHERE IT LIES, before anyone
     // touches it. Finding out by dragging it to the top and having it bounce is
     // the version of this that reads as the game being broken — the card has to
     // say no before the gesture starts, not after it has been completed.
-    u.uDrain.value = c.blocked ? Math.max(drain, cfg.blockedGrey) : drain;
+    u.uDrain.value = c.blocked
+      ? Math.max(drain, cfg.blockedGrey)
+      : Math.max(drain, cfg.blockedGrey * seal);
 
     // Armed goes warm rather than swapping to a second texture: the state has to
     // read at a glance while the card is moving, and a tint costs no memory and
@@ -602,7 +792,7 @@ export class CardHand {
     const tint = u.uTint.value;
     if (c.blocked) tint.setScalar(cfg.blockedBrightness);
     else if (c.armed) tint.set(1.3, 1.16, 0.72);
-    else tint.set(1, 1, 1);
+    else tint.setScalar(lerp(1, cfg.blockedBrightness, seal));
   }
 
   /** Swap the LOD, and the face, only when what is wanted actually changes. */
@@ -633,6 +823,114 @@ export class CardHand {
     const armed = c.y.value - c.homeY >= cfg.useLiftFactor * h;
     if (armed && !c.armed) c.s.vel += cfg.snapKick;
     c.armed = armed;
+  }
+
+  /**
+   * The AI's card, on its way out of the hand and over.
+   *
+   * ── four phases, and the flip is the only interesting one ─────────────────
+   * Pull and move are a lift and a glide. The flip is a horizontal scale through
+   * zero with the texture swapped at the crossing, which is the cheapest honest
+   * card flip there is: at the halfway point the quad has no width, so the
+   * moment the back becomes the face is a moment when neither is visible. A
+   * cross-fade would show both at once, which reads as a dissolve rather than as
+   * something turning over.
+   *
+   * `|cos(pi t)|` and not `1 - |cos|`: the card has to be full width at both
+   * ends and edge-on exactly in the middle.
+   *
+   * ── it ends up UPRIGHT, which takes a pi ──────────────────────────────────
+   * This hand's root is rotated by pi so its fan opens downward off the top edge
+   * (see `update`), and a card left at angle 0 inside it hangs upside down. The
+   * target is therefore pi, which cancels the root exactly — animated alongside
+   * the glide, so the card turns the right way up as it comes in rather than
+   * snapping at the end.
+   *
+   * @param {{phase: string, t: number}} reveal
+   */
+  _reveal(c, reveal, h) {
+    const cfg = this.config.cards;
+    const from = c.revealFrom ?? { x: c.x.value, y: c.y.value, s: c.s.value, a: c.a.value };
+    const t = smoothstep(reveal.t);
+
+    // Where the middle of the frame is, in this hand's own coordinates. The same
+    // conversion `_fly` makes, and for the same reason: the hand is parked and
+    // rotated, so "the centre of the screen" is not (0, 0) in here.
+    _v.set(0, 0, 0);
+    this.root.worldToLocal(_v);
+
+    // Big enough to read against the board, expressed in FRAME terms and then
+    // divided back through the parked hand's own shrink — otherwise the reveal
+    // would come out `inactiveScale` smaller than asked for.
+    const target = cfg.revealScale / Math.max(0.01, this.root.scale.x);
+    const lift = cfg.hoverLift * 1.4;
+
+    /**
+     * Half a card, ADDED, because a card is gripped at its bottom edge.
+     *
+     * `QUAD` is translated so the origin is the point the hand holds — which is
+     * what makes the fan pivot from a grip rather than splaying from centres —
+     * so a card placed AT the middle of the frame hangs entirely off that point
+     * instead of straddling it, and half of it lands off the screen.
+     *
+     * ── the sign is the pi, and it caught me out ────────────────────────────
+     * There are TWO pi rotations here and they cancel for ORIENTATION while
+     * stacking for EXTENT. The parked hand's root is turned pi so its fan opens
+     * downward; the card is turned pi inside it so it reads upright again. The
+     * card therefore looks the right way up, and it grows from its grip in the
+     * direction a naive reading of the root alone says it should not.
+     *
+     * Measured rather than reasoned in the end: with the offset subtracted, the
+     * grip sat at world y +125 and the card ran from +125 to +374 — entirely
+     * above a frame whose top edge is +240. Added, it spans −125 to +125.
+     */
+    const midY = _v.y + (h * target) / 2;
+
+    switch (reveal.phase) {
+      case 'cardPull':
+        // Straight up out of the fan, still where it sat horizontally, so the
+        // eye can see WHICH card was taken.
+        c.x.value = from.x;
+        c.y.value = from.y + lift * t;
+        c.s.value = lerp(from.s, cfg.hoverScale, t);
+        c.a.value = lerp(from.a, 0, t);
+        break;
+      case 'cardMove':
+        c.x.value = lerp(from.x, _v.x, t);
+        c.y.value = lerp(from.y + lift, midY, t);
+        c.s.value = lerp(cfg.hoverScale, target, t);
+        c.a.value = lerp(0, Math.PI, t);
+        break;
+      case 'cardFlip':
+        c.x.value = _v.x;
+        c.y.value = midY;
+        c.s.value = target;
+        c.a.value = Math.PI;
+        // Swapped at the crossing, where the quad is edge-on and neither face is
+        // visible. Held on the card so `_applyTexture` does the actual upload.
+        c.faceUp = reveal.t >= 0.5;
+        break;
+      case 'cardHold':
+      default:
+        c.x.value = _v.x;
+        c.y.value = midY;
+        c.s.value = target;
+        c.a.value = Math.PI;
+        c.faceUp = true;
+        break;
+    }
+
+    c.x.vel = 0;
+    c.y.vel = 0;
+    c.s.vel = 0;
+    c.a.vel = 0;
+    c.armed = false;
+    /** How wide the card is drawn, near zero at the crossing. See `_place`. */
+    c.flipWidth =
+      reveal.phase === 'cardFlip' ? Math.max(0.02, Math.abs(Math.cos(Math.PI * reveal.t))) : 1;
+    // `_forward` reads this to decide the paint order, and a card being turned
+    // over has to be in front of everything else in the hand.
+    c.homeY = c.y.value - cfg.useLiftFactor * h;
   }
 
   _fly(c, dt) {

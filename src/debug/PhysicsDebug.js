@@ -4,6 +4,11 @@ import { RENDER_MODES } from '../core/Viewport.js';
 import { describeCapColliders, nestingClearance } from '../physics/capCollider.js';
 import { resetConfig } from '../game/config.js';
 import { MODES, MODE_KEYS } from '../game/modes.js';
+// Both for the curling folder's round-stepper: it fires a real shot through the
+// real path, so it needs the same seed source every other unpinned shot uses and
+// the state enum to know whether a turn is open or still being played out.
+import { MATCH_STATE } from '../game/Match.js';
+import { nextSeed } from '../physics/rng.js';
 import { FORMATION_KEYS } from '../game/layout/formations.js';
 import { RATIO } from '../game/layout/pitchMetrics.js';
 import { FRAME as CARD_FRAME } from '../render/CardLayer.js';
@@ -15,6 +20,7 @@ import { clearFxTextureCache } from '../render/fxTextures.js';
 // far as the end.
 import { DRAWABLE } from '../game/cards/CardHands.js';
 import { CARD_BY_ID } from '../game/cards/cardCatalog.js';
+import { addAudioFolder } from '../audio/audioDebug.js';
 
 /** The card scene's layout box is a fixed width whatever the target is. */
 const CARD_FRAME_WIDTH = CARD_FRAME.width;
@@ -44,6 +50,7 @@ export function bootPhysicsDebug({
   match,
   view,
   camera,
+  tracker,
   router,
   retro,
   retroPass,
@@ -54,8 +61,21 @@ export function bootPhysicsDebug({
   cardFx,
   hud,
   victory,
+  audio,
+  audioSettings,
   onRebuild,
   onModeChange,
+  onNewMatch,
+  onReplaySeed,
+  controllers,
+  setOpponent,
+  onRecenter,
+  online = null,
+  profile = null,
+  onReplayIntro,
+  onForceDesync,
+  onDumpLog,
+  onExportLog,
 }) {
   const gui = new GUI({ title: 'BOTTLE CAP CHAOS — 물리 코어' });
 
@@ -89,6 +109,10 @@ export function bootPhysicsDebug({
   // Ticked with the camera rather than with the slow readouts: the hold is under
   // a second and a 400 ms poll would show it once, if at all.
   const holdRow = gui.add(stats, 'hold').name('골 딜레이 상태').disable();
+  // Its own stash rather than a seventh field on `stats`, because its row lives
+  // down in the follow folder next to the sliders it explains rather than up
+  // here with the readouts about the world.
+  const trackStats = { line: '—' };
 
   const refresh = () => {
     const desc = describeCapColliders(
@@ -129,6 +153,11 @@ export function bootPhysicsDebug({
     refreshCards();
     refreshHands();
     refreshCurling();
+    // Last, and on the slow poll rather than per frame: it only ever changes
+    // when a match starts, and every path that starts one comes back through
+    // here. Defined further down — `refresh` is not called until it exists.
+    refreshSeed();
+    seedDisplay.updateDisplay();
   };
 
   /** The camera's whole state in one line. Ticked every frame from the loop. */
@@ -152,10 +181,30 @@ export function bootPhysicsDebug({
         : '—';
     holdRow.updateDisplay();
 
+    /**
+     * What the follow is doing, and the one row the flight greys out.
+     *
+     * Both here rather than on the 400 ms poll: a throw is a second or two and
+     * a fall snap is a quarter of one, so a slow poll would show neither the
+     * hand-over from the spring to the fall nor the hand-back.
+     *
+     * `'live'` is the literal `MATCH_STATE.LIVE`, spelt the way the goal-hold
+     * test above spells its own state — the panel compares state strings rather
+     * than importing the enum.
+     */
+    trackStats.line = tracker ? tracker.label : '—';
+    trackRow.updateDisplay();
+    centreRow.enable(match.state !== 'live');
+
     // Ticked with the camera and not with the slow poll, for the same reason
     // the goal hold is: the whole sequence is under two seconds and a 400 ms
     // poll would show three of its five stages, if that.
     refreshVictory();
+
+    // The relay's readouts, when there is a relay. Declared below and called
+    // here so the network shares the panel's single refresh rather than adding
+    // a second clock — the ping and the countdown both want to be live.
+    netRefresh?.();
   };
 
   const rebuild = () => {
@@ -164,8 +213,213 @@ export function bootPhysicsDebug({
   };
   const retune = () => match.arena.applyMaterialTuning();
 
+  // ── the opening sequence ─────────────────────────────────────────────────
+  //
+  // Its own folder rather than a corner of the online one: every mode plays it,
+  // so a local match must be able to reach these without a relay in sight.
+  const intro = gui.addFolder('시작 연출');
+  intro.add(config.intro, 'enabled').name('연출 사용');
+  intro.add(config.intro, 'selfSec', 0, 3, 0.05).name('본인 등장 (초)');
+  intro.add(config.intro, 'opponentSec', 0, 3, 0.05).name('상대 등장 (초)');
+  intro.add(config.intro, 'holdSec', 0, 3, 0.05).name('대치 (초)');
+  intro.add(config.intro, 'exitSec', 0, 3, 0.05).name('퇴장 (초)');
+  intro.add({ replay: () => onReplayIntro?.() }, 'replay').name('▶ 다시 재생');
+
+  // ── online ───────────────────────────────────────────────────────────────
+
+  /** Filled in by the online folder below, if there is one. */
+  let netRefresh = null;
+
+  /**
+   * The relay, when there is one.
+   *
+   * Built only for an online match. In local and AI play there is nothing here
+   * to inspect and a folder full of dashes is worse than no folder — the panel
+   * is read to find out what IS happening.
+   */
+  if (online) {
+    const net = gui.addFolder('온라인');
+
+    const netRow = {
+      state: '',
+      ping: '',
+      room: '',
+      seat: '',
+      turn: '',
+      mine: '',
+      theirs: '',
+    };
+    const stateRow = net.add(netRow, 'state').name('연결 상태').disable();
+    const pingRow = net.add(netRow, 'ping').name('핑 (ms)').disable();
+    const roomRow = net.add(netRow, 'room').name('방 / 모드').disable();
+    const seatRow = net.add(netRow, 'seat').name('내 자리 / 상대').disable();
+    const turnRow = net.add(netRow, 'turn').name('턴 / 남은 시간').disable();
+    /**
+     * The two hashes, side by side.
+     *
+     * This is the readout the desync rule exists for: when the relay stops a
+     * match it sends BOTH clients' reports, and being able to see them next to
+     * each other is the difference between "it desynced" and knowing which turn
+     * and by how much. Blank until one happens, which is the normal state.
+     */
+    const mineRow = net.add(netRow, 'mine').name('내 해시').disable();
+    const theirsRow = net.add(netRow, 'theirs').name('상대 해시').disable();
+
+    net.add(config.online, 'turnMs', 3000, 60000, 500).name('턴 제한 (ms)');
+    net.add(config.online, 'heartbeatTimeoutMs', 3000, 60000, 500).name('heartbeat 타임아웃 (ms)');
+    /**
+     * Bound to the PROFILE, not to the config.
+     *
+     * This used to write `config.online.server`, which nothing read — the panel
+     * showed a field, the field accepted an address, and the client went on
+     * connecting to the derived one. Pointed at the model the connection
+     * actually consults, and it persists, which a config value would not.
+     */
+    if (profile) {
+      const relay = {
+        get url() {
+          return profile.server;
+        },
+        set url(v) {
+          profile.setServer(v);
+        },
+      };
+      net
+        .add(relay, 'url')
+        .name('서버 주소 (빈칸 = 자동)')
+        // Takes effect on the NEXT connection: this one is already open, and
+        // re-pointing a live match at another relay is not a thing to offer.
+        .onFinishChange(() => {});
+    }
+
+    /**
+     * The two failure modes, on demand.
+     *
+     * Both are paths that must never run in normal play, which is exactly why
+     * they need a button: a disconnect handler nobody has watched fire is a
+     * disconnect handler nobody has tested. The desync one lies in the REPORT
+     * rather than damaging the world — see `OnlineMatch.forceDesync` — because a
+     * half-corrupted simulation is a worse thing to leave behind than a stopped
+     * match.
+     */
+    net
+      .add({ drop: () => online.transport.close() }, 'drop')
+      .name('▶ 강제 연결 끊기 (몰수패 테스트)');
+    /**
+     * The one that matters: silence WITHOUT a close.
+     *
+     * A killed mobile app, a phone that walks out of range, a laptop lid — none
+     * of them produce a close event, and that is precisely the case the server's
+     * heartbeat exists for. Closing the socket tests the easy path; this tests
+     * the path that was actually broken.
+     */
+    net
+      .add(
+        {
+          mute: () => {
+            online.transport.muted = !online.transport.muted;
+            netRow.state = online.transport.muted ? '무응답 모드' : '연결됨';
+          },
+        },
+        'mute',
+      )
+      .name('▶ 강제 무응답 (close 없이 멈춤)');
+    net
+      .add({ desync: () => onForceDesync?.() }, 'desync')
+      .name('▶ 강제 데스싱크');
+
+    const log = net.addFolder('입력 로그');
+    log.add({ dump: () => onDumpLog?.() }, 'dump').name('▶ 콘솔에 출력');
+    log.add({ save: () => onExportLog?.() }, 'save').name('▶ 파일로 내보내기');
+
+    netRefresh = () => {
+      const t = online.transport;
+      netRow.state = t.muted
+        ? '무응답 모드 (테스트)'
+        : !t.connected
+          ? (t.lastError ?? t.state)
+          : t.unstable
+            ? '연결 불안정'
+            : '연결됨';
+      netRow.ping = String(Math.round(t.ping));
+      netRow.room = `${online.match?.roomId ?? '-'} / ${online.match?.mode ?? '-'}`;
+      netRow.seat = `${online.mySeat} (${online.nickname}) vs ${online.opponent?.nickname ?? '-'}`;
+      const left = online.remaining;
+      netRow.turn = `${online.turn} · ${online.current === online.mySeat ? '내 차례' : '상대'}` +
+        (left === null ? '' : `  ${left.toFixed(1)}s`);
+      netRow.turn +=
+        online.over?.cause ? `   [${online.over.cause}]` : '';
+      const d = online.desync;
+      netRow.mine = d ? String(d.reports?.[online.mySeat]?.hash ?? '') : '';
+      netRow.theirs = d ? String(d.reports?.[online.opponentSeat]?.hash ?? '') : '';
+      stateRow.updateDisplay();
+      pingRow.updateDisplay();
+      roomRow.updateDisplay();
+      seatRow.updateDisplay();
+      turnRow.updateDisplay();
+      mineRow.updateDisplay();
+      theirsRow.updateDisplay();
+    };
+  }
+
   // ── determinism ──────────────────────────────────────────────────────────
   const det = gui.addFolder('결정론 검증');
+
+  /**
+   * The MATCH's root seed: the whole match's luck in one number.
+   *
+   * Two different things are called a seed in this folder and they must not be
+   * confused. `lockSeed` below pins one SHOT so the same flick can be fired
+   * twice; this pins the match — every shot seed, every card seed, and through
+   * those every orb spawn and every card an orb yields.
+   *
+   * It is shown as hex because that is what `?seed=` accepts back and what a
+   * player would copy into a bug report. Read live rather than latched: the
+   * value changes under this panel every time a match is started.
+   */
+  const seedRow = { seed: '', pin: '' };
+  const refreshSeed = () => {
+    seedRow.seed = `0x${(match.seed >>> 0).toString(16).padStart(8, '0')}`;
+  };
+  refreshSeed();
+  const seedDisplay = det.add(seedRow, 'seed').name('매치 시드').disable();
+  det
+    .add(
+      {
+        again: () => {
+          onReplaySeed?.(match.seed);
+          refresh();
+        },
+      },
+      'again',
+    )
+    // The other half of the fix this folder is about. A new match now draws a
+    // fresh seed — which is the point — so getting the SAME one again has to be
+    // something you can ask for rather than something you get by default.
+    .name('▶ 같은 시드로 재시작');
+  det
+    .add(
+      {
+        fresh: () => {
+          onNewMatch?.();
+          refresh();
+        },
+      },
+      'fresh',
+    )
+    .name('▶ 새 시드로 재시작');
+  det.add(seedRow, 'pin').name('시드 지정 (0x… 또는 10진)').onFinishChange((raw) => {
+    const n = Number(String(raw).trim());
+    if (!Number.isFinite(n)) {
+      // Silently seeding 0 off a typo is the one outcome worth guarding: it is a
+      // legal seed, so nothing downstream would ever report it as wrong.
+      window.alert('시드를 읽을 수 없다. 10진수나 0x… 형식으로 입력해라.');
+      return;
+    }
+    onReplaySeed?.(n >>> 0);
+    refresh();
+  });
+
   det.add(config.shot, 'lockSeed').name('시드 고정');
   det.add(config.shot, 'lockedSeed', 0, 0xffffff, 1).name('고정 시드값');
   det
@@ -373,85 +627,131 @@ export function bootPhysicsDebug({
   // ── curling ──────────────────────────────────────────────────────────────
   // Its own folder and its own numbers, top to bottom. Nothing in here touches
   // `config.arena` or `config.football`: "다른 모드의 물리 파라미터 수정 — 컬링
-  // 전용값으로 분리한다", so the lane's friction, its walls and its turn-end
-  // clock are all separate values that only this mode reads.
+  // 전용값으로 분리한다", so the table's friction and its turn-end clock are
+  // separate values that only this mode reads.
   const curl = gui.addFolder('컬링 (변경 시 재구성)');
 
-  const curlStats = { lane: '', house: '' };
-  // The completion criteria, as readouts. Measured off the BUILT lane rather
-  // than off the config, so they check the geometry that exists and not the
-  // arithmetic that was supposed to produce it — the house clamp in particular
-  // is invisible from the sliders alone.
-  const laneRow = curl.add(curlStats, 'lane').name('레인 / 하우스 여백').disable();
-  // The tiebreaker's own working, shown live. It is the one thing about this
-  // mode that cannot be checked by looking at the board: two caps a millimetre
-  // apart decide a 2–2, and which of them is nearer is not a thing the eye can
-  // resolve at this zoom.
-  const houseRow = curl.add(curlStats, 'house').name('하우스 안 (거리순)').disable();
+  const curlStats = { table: '', marks: '', round: '' };
+  /**
+   * The size trade, as a readout, measured off the BUILT table.
+   *
+   * Off the geometry rather than off the config, so it checks what exists and
+   * not the arithmetic that was supposed to produce it. The cap's diameter is in
+   * it because the whole tuning problem is the ratio between the two numbers —
+   * see the note on `widthCaps` — and the throw's RUN is in it because that is
+   * what the friction slider has to be tuned against: a full-power throw has to
+   * be able to cover it and then some.
+   */
+  const tableRow = curl.add(curlStats, 'table').name('책상 / 뚜껑 / 던지는 거리').disable();
+  /**
+   * Every cap's distance to the target line, live.
+   *
+   * The one thing about this mode that cannot be checked by looking at the
+   * board: two caps a centimetre apart decide a round, and which of them is
+   * nearer is not something the eye can resolve at this zoom — that is the whole
+   * reason the marks are drawn on the table at all. This is the same number the
+   * judge uses, read straight off the rules, so a disagreement between what the
+   * game awarded and what this says is a bug in one place rather than two.
+   *
+   * Live rather than the settled marks: it answers "where is everything right
+   * now", including mid-slide, which is what you want while dragging friction.
+   */
+  const marksRow = curl.add(curlStats, 'marks').name('목표 라인까지 거리 (실시간)').disable();
+  /** The round bookkeeping, so the alternation can be watched rather than assumed. */
+  const roundRow = curl.add(curlStats, 'round').name('라운드 / 선공 / 승수').disable();
 
   const refreshCurling = () => {
-    const layout = match.arena.layout;
-    const m = layout?.metrics;
-    if (!m || match.arena.layout.describe?.().kind !== 'lane') {
-      curlStats.lane = '—';
-      curlStats.house = '—';
+    const rules = match.rules;
+    const m = match.arena.layout?.metrics;
+    if (!m || match.arena.layout.describe?.().kind !== 'table') {
+      curlStats.table = '—';
+      curlStats.marks = '—';
+      curlStats.round = '—';
     } else {
-      curlStats.lane =
-        `${m.length.toFixed(0)} x ${m.width.toFixed(1)}  ·  1:${m.ratio.toFixed(2)}  ·  ` +
-        `하우스 r${m.houseRadius.toFixed(1)}${m.houseClamped ? ' (여백에 걸림)' : ''}  ·  ` +
-        `벽 여백 ${m.houseMargin.toFixed(1)}`;
-      const list = match.rules.inHouse?.() ?? [];
-      curlStats.house = list.length
-        ? list.map((e) => `P${e.player + 1}#${e.cap} ${e.distance.toFixed(2)}`).join('  ·  ')
-        : '없음';
+      curlStats.table =
+        `${m.width.toFixed(1)} x ${m.length.toFixed(1)}  ·  ` +
+        `폭 ${m.widthCaps.toFixed(1)}뚜껑 (⌀${m.cap.toFixed(2)})  ·  ` +
+        `1:${m.ratio.toFixed(2)}  ·  던지는 거리 ${m.run.toFixed(1)}`;
+
+      const live = rules.standings?.() ?? [];
+      curlStats.marks = live.length
+        ? live.map((e) => `P${e.player + 1}#${e.cap} ${e.distance.toFixed(2)}`).join('  ·  ')
+        : '책상 위에 없음';
+
+      const total = rules.rounds ?? 0;
+      const now = Math.min((rules.round ?? 0) + 1, total);
+      const lead = rules.leadFor?.(Math.min(rules.round ?? 0, total - 1)) ?? 0;
+      curlStats.round =
+        `${now}/${total}R  ·  이번 선공 P${lead + 1}  ·  ` +
+        `승수 ${rules.wins?.[0] ?? 0} : ${rules.wins?.[1] ?? 0}` +
+        `${rules.draws ? `  ·  무승부 ${rules.draws}R` : ''}` +
+        `${rules.closest ? `  ·  최근접 P${rules.closest.player + 1} ${rules.closest.distance.toFixed(2)}` : ''}`;
     }
-    laneRow.updateDisplay();
-    houseRow.updateDisplay();
+    tableRow.updateDisplay();
+    marksRow.updateDisplay();
+    roundRow.updateDisplay();
   };
 
-  // ── the lane ─────────────────────────────────────────────────────────────
-  curl.add(config.curling, 'laneLength', 40, 200, 2).name('레인 길이').onChange(rebuild);
-  // The brief's band is 1:4 to 1:5. It goes wider both ways so the reason for
-  // the band is visible: at 2 the walls are so far apart that a reflection never
-  // comes back, and at 8 there is no room to miss.
-  curl.add(config.curling, 'laneRatio', 2, 8, 0.1).name('레인 비율 (길이:너비)').onChange(rebuild);
-  curl.add(config.curling, 'runoff', 2, 40, 1).name('라인 뒤 런오프').onChange(rebuild);
-  curl.add(config.curling, 'wallHeight', 0.6, 6, 0.1).name('벽 높이').onChange(rebuild);
-  curl.add(config.curling, 'wallThickness', 0.3, 3, 0.05).name('벽 두께').onChange(rebuild);
-  curl.add(config.curling, 'capsPerTeam', 1, 8, 1).name('팀당 뚜껑 수').onChange(rebuild);
-
-  // ── the house ────────────────────────────────────────────────────────────
-  curl.add(config.curling, 'houseRadius', 2, 24, 0.5).name('하우스 크기 (반경)').onChange(rebuild);
-  // Clamps the radius above rather than merely being checked against it — a
-  // house touching the walls deletes the wall-reflection game, which is the
-  // mode. The readout says when the clamp bit.
-  curl.add(config.curling, 'houseMargin', 0, 20, 0.5).name('하우스-벽 여백 (최소)').onChange(rebuild);
+  // ── the table ────────────────────────────────────────────────────────────
+  /**
+   * The width, in CAP DIAMETERS, and it is the cap-size control as well.
+   *
+   * The brief asks for a width, a length and a cap size. There are only two
+   * degrees of freedom here and this row is one of them: the camera frames the
+   * table's own extents, so the table is always the same size on screen and the
+   * only thing a cap-size slider could change is how much of it one cap covers —
+   * which is exactly what this changes. A real cap slider would also have to
+   * move `CAP_DEFAULTS`, which is shared by the survival board and the football
+   * team, and "다른 모드 건드리지 마라" rules that out. See `curlingTableMetrics`.
+   *
+   * The brief's starting band was 6 to 8 and playing it moved the default to
+   * 10.5 — see the note in `config.js`. The slider goes well past both ends of
+   * that so the two failure modes stay visible: at 5 the opponent's cap is
+   * unmissable, at 18 it is unhittable and the far line is out of reach at full
+   * draw. The readout above says what each end costs in world units, and the
+   * friction row below is what has to move with it.
+   */
+  curl.add(config.curling, 'widthCaps', 5, 18, 0.25).name('책상 폭 (뚜껑 지름 배수)').onChange(rebuild);
+  // Length. The brief's band is 2 to 2.5; it goes to 3.5 so the point at which
+  // the far line stops being reachable can be found rather than guessed at.
+  curl.add(config.curling, 'ratio', 1.2, 3.5, 0.05).name('책상 길이 (폭 배수)').onChange(rebuild);
   curl
-    .add(config.curling, 'houseFromBack', 2, 60, 1)
-    .name('하우스 위치 (뒤 라인에서)')
-    .onChange(rebuild);
-  curl
-    .add(config.curling, 'throwFromFront', 1, 40, 1)
-    .name('발사 지점 (앞 라인에서)')
+    .add(config.curling, 'throwFromEdge', 1, 20, 0.5)
+    .name('발사 지점 (앞 가장자리에서)')
     .onChange(rebuild);
   curl.add(config.curling, 'throwClearance', 0, 4, 0.1).name('발사 지점 여유 간격');
+  // The fall itself. The slope is thickness / run, and it has to stay steeper
+  // than the friction angle or a cap can come to rest hanging over the edge —
+  // drag the run out past 6 and watch caps start balancing on the rim instead of
+  // going over it.
+  curl.add(config.curling, 'tableThickness', 0.4, 4, 0.1).name('책상 두께').onChange(rebuild);
+  curl.add(config.curling, 'slopeRun', 0.4, 6, 0.1).name('가장자리 경사 길이').onChange(rebuild);
+
+  // ── the match ────────────────────────────────────────────────────────────
+  // Structural: the number of rounds IS the number of caps each player gets, so
+  // changing it rebuilds the world. One throw each per round, always.
+  curl.add(config.curling, 'rounds', 1, 8, 1).name('라운드 수').onChange(rebuild);
+  curl
+    .add(config.curling, 'firstLead', { 'P1 선공': 'p1', 'P2 선공': 'p2', '시드 랜덤': 'random' })
+    .name('1R 선공')
+    .onChange(rebuild);
+  // Only read when the row above is on 시드 랜덤. Rebuilds, because the draw is
+  // taken once when the rule set is created.
+  curl.add(config.curling, 'leadSeed', 0, 0xffff, 1).name('선공 시드').onChange(rebuild);
 
   // ── materials ────────────────────────────────────────────────────────────
-  // Low, and the number the cap actually gets: the lane combines friction by
-  // `Min` against the cap's own 0.34, so this slider is not averaged with
-  // anything. Drag it toward 0.3 and the throw stops arriving.
-  curl.add(config.curling, 'laneFriction', 0.01, 0.6, 0.005).name('표면 마찰 (컬링)').onChange(retune);
+  // The number the cap actually gets: the table combines friction by `Min`
+  // against the cap's own 0.34, so this slider is not averaged with anything.
+  // It is the mode's single most important value — drag it up and nothing
+  // reaches the line, drag it down and everything goes over it.
   curl
-    .add(config.curling, 'laneRestitution', 0, 0.5, 0.01)
-    .name('표면 반발계수 (컬링)')
+    .add(config.curling, 'tableFriction', 0.02, 0.6, 0.005)
+    .name('표면 마찰 (컬링 전용)')
     .onChange(retune);
-  // Combined by `Max`, so this one is not averaged either. High enough that the
-  // reflection angle reads; drop it and a wall shot dies against the fence.
   curl
-    .add(config.curling, 'wallRestitution', 0, 1, 0.01)
-    .name('벽 반발계수 (컬링)')
+    .add(config.curling, 'tableRestitution', 0, 0.5, 0.01)
+    .name('표면 반발계수 (컬링 전용)')
     .onChange(retune);
-  curl.add(config.curling, 'wallFriction', 0, 0.6, 0.01).name('벽 마찰 (컬링)').onChange(retune);
 
   // ── turn end, curling's own ──────────────────────────────────────────────
   // The shared values in 턴 종료 above are for a cap on a 0.34 mat. These
@@ -467,7 +767,7 @@ export function bootPhysicsDebug({
   curlTurn.open();
 
   // ── camera ───────────────────────────────────────────────────────────────
-  // Curling's own range. A 1:4.5 lane frames unlike a square board and unlike a
+  // Curling's own range. A 1:2.2 table frames unlike a square board and unlike a
   // 105:68 pitch — see the note on `curlingMinZoom`.
   //
   // The camera already holds getters onto these three, so dragging one changes
@@ -485,11 +785,55 @@ export function bootPhysicsDebug({
     });
   };
   const curlZoom = curl.addFolder('줌 범위 (컬링 전용)');
-  curlZoom.add(config.view, 'curlingMinZoom', 1, 3, 0.05).name('최소 줌').onChange(applyZoom);
+  // Bounded at 1 from below because 1 IS the whole-table fit, and "최소 줌에서
+  // 책상 전체가 보인다" is a completion criterion — anything above 1 here breaks
+  // it, which is why the row says what 1 means rather than leaving it a number.
+  curlZoom
+    .add(config.view, 'curlingMinZoom', 1, 3, 0.05)
+    .name('최소 줌 (1 = 책상 전체)')
+    .onChange(applyZoom);
   curlZoom.add(config.view, 'curlingMaxZoom', 1.5, 8, 0.1).name('최대 줌').onChange(applyZoom);
   curlZoom.add(config.view, 'curlingTurnZoom', 1, 4, 0.05).name('턴 시작 줌').onChange(applyZoom);
 
-  curl.add(config.view, 'curlingSensors').name('하우스/아웃 라인 와이어프레임');
+  curl.add(config.view, 'curlingGuides').name('목표 라인 / 낙하 판정 와이어프레임');
+
+  /**
+   * Move the round on without playing it out.
+   *
+   * Not a shortcut around the turn loop: it goes through the same two doors a
+   * player does. While a turn is LIVE it stops the world, which trips the settle
+   * detector's rest branch on the next steps and ends the turn exactly as coming
+   * to a halt would; while a turn is open it fires a real shot down the middle
+   * at a fixed power. So the verdict, the judging, the sweep and the replay
+   * record are all produced by the ordinary path and are worth the same as a
+   * played round's.
+   *
+   * The shot's seed comes from `nextSeed()`, which is the same counter every
+   * other unpinned shot in the project draws from — so a session driven by this
+   * button is still reproducible from the reset button.
+   *
+   * Two presses is one round, because a round is two throws.
+   */
+  curl
+    .add(
+      {
+        step: () => {
+          if (match.state === MATCH_STATE.LIVE) {
+            match.arena.freezeAll();
+            return;
+          }
+          const cap = match.shooter;
+          if (cap < 0) return;
+          // Straight up the table at three-quarter draw: hard enough to arrive,
+          // short of the power that puts a cap over the far edge every time.
+          match.fire({ capIndex: cap, dirX: 0, dirZ: 1, power: 0.75, seed: nextSeed() });
+          refresh();
+        },
+      },
+      'step',
+    )
+    .name('▶ 라운드 강제 진행 (1투)');
+
   curl.open();
 
   // ── the ball coming back ─────────────────────────────────────────────────
@@ -555,13 +899,77 @@ export function bootPhysicsDebug({
   // hover ring on the board is drawn at exactly this radius.
   cam.add(config.view, 'grabRadius', 1, 3.5, 0.05).name('뚜껑 집기 여유 반경 (배)');
   cam.add(config.view, 'transitionSec', 0.02, 1, 0.01).name('모드 전환 보간 (s)');
-  cam
+  /**
+   * The camera reset, and the one control the flight takes away.
+   *
+   * "카메라 리셋 버튼: 발사 도중 비활성. 흐리게 표시하거나 반응하지 않게 처리."
+   * `.disable()` is lil-gui's own greying, which is the same treatment every
+   * read-only row in this panel already wears — so an unavailable control looks
+   * unavailable here in exactly the way it does everywhere else, and it stops
+   * taking the press as well as stops inviting it. Re-enabled by `refreshCamera`
+   * the frame the turn ends; see there.
+   *
+   * It is a real reset and not a cosmetic one, which is why it cannot be left
+   * live: it writes the bearing straight to zero, and doing that in the middle
+   * of a tracked throw would spin the field under a camera that is mid-follow.
+   */
+  const centreRow = cam
     .add(
       { centre: () => { config.view.azimuth = 0; camera.stopSpin(); camera.apply(); } },
       'centre',
     )
     .name('↺ 회전각 0으로');
   cam.open();
+
+  /**
+   * ── riding the thrown cap ────────────────────────────────────────────────
+   * Its own folder rather than more rows on `카메라 조작`, because everything
+   * above is about what the HAND does to the view and everything here is about
+   * what the view does on its own while nobody is touching it. They are tuned in
+   * different sittings and against different things.
+   *
+   * A subfolder of the camera controls all the same — it is still the camera —
+   * which is the arrangement `줌 범위 (컬링 전용)` already uses inside the
+   * curling folder.
+   */
+  const follow = cam.addFolder('발사 추적 (서바이벌 · 컬링)');
+  // The master switch. Off gives the fixed view the two modes had before, with
+  // the fall snap and the hand-back off with it.
+  follow.add(config.view, 'track').name('발사 뚜껑 추적');
+  /**
+   * The spring, and the pair that decides whether this is watchable.
+   *
+   * Critical damping is 2*sqrt(stiffness) — 19.0 at the default 90 — and the
+   * default damping sits just above it. Below that line the camera overshoots
+   * the cap and swings back, which at this resolution reads as the board
+   * wobbling rather than as the camera settling. Above about 160 the follow
+   * stops improving and only the jerk goes up; see the note in `config.view`.
+   */
+  follow.add(config.view, 'trackStiffness', 5, 400, 1).name('스프링 강성 (k)');
+  follow.add(config.view, 'trackDamping', 1, 45, 0.5).name('스프링 감쇠 (c)');
+  // A duration, not a rate: the cut onto a fallen cap takes the same time
+  // whatever distance it covers. Under ~0.15 it reads as a hard cut.
+  follow.add(config.view, 'trackFallSnapSec', 0.05, 0.8, 0.01).name('낙사 스냅 전환 (s)');
+  // Only ever used on a turn that ended without the seat changing — an AI or
+  // online opponent, or today an extra-turn card. A local handover is put back
+  // by the turn-over reset and never reaches this.
+  follow.add(config.view, 'trackReturnSec', 0.1, 1.2, 0.01).name('턴 종료 후 복귀 (s)');
+  // How far inside the frame's edge the curling target line is kept — and, by
+  // the same number, the cap. Nothing at all at the opening zoom, where the
+  // whole table is already on screen.
+  follow.add(config.view, 'trackLineInset', 0, 24, 0.5).name('컬링 목표 라인 여유 (거리)');
+  // The two trails on the board: where it aimed, where it looked. The GAP is
+  // the spring, and it is the only way to see whether the pair above is right.
+  follow.add(config.view, 'trackPath').name('추적 경로 표시');
+  /**
+   * What it is following, live.
+   *
+   * Ticked per frame with the camera rather than on the 400 ms poll, for the
+   * reason the goal hold is: a fall snap is a quarter of a second start to
+   * finish and a slow poll would miss the whole of it.
+   */
+  const trackRow = follow.add(trackStats, 'line').name('현재 추적 대상').disable();
+  follow.open();
   look
     .add(config.view, 'wireframe')
     .name('와이어프레임')
@@ -725,6 +1133,16 @@ export function bootPhysicsDebug({
   hand.add(config.cards, 'blockedBrightness', 0.2, 1, 0.01).name('사용 불가 밝기');
   hand.add(config.cards, 'refuseShakeAmount', 0, 30, 1).name('거절 흔들림 (px)');
   hand.add(config.cards, 'refuseShakeSeconds', 0.05, 1, 0.01).name('거절 흔들림 시간 (s)');
+
+  // The drop guide. No position dial, and that is deliberate: it is placed from
+  // `useLiftFactor` and the card's own resting height, so dragging the threshold
+  // above moves the slot with it. A separate position would be a second answer
+  // to a question the rule already answers.
+  hand.add(config.cards, 'showUseGuide').name('사용 가이드 표시');
+  hand.add(config.cards, 'guideMargin', 0, 40, 1).name('가이드 여백 (px)');
+  hand.add(config.cards, 'guideOpacity', 0, 1, 0.01).name('가이드 농도 (도달 전)');
+  hand.add(config.cards, 'guideArmedOpacity', 0, 1, 0.01).name('가이드 농도 (임계 통과)');
+  hand.add(config.cards, 'guideArmedGrow', 0, 0.4, 0.01).name('가이드 확대 (임계 통과)');
   refreshTexels();
 
   // ── card effects ─────────────────────────────────────────────────────────
@@ -751,6 +1169,19 @@ export function bootPhysicsDebug({
         ? `강타 P${c.smash.player + 1} ×${config.cards.smashImpulseMul.toFixed(2)}/오차×${config.cards.smashSpreadMul.toFixed(2)}`
         : '강타 —',
     );
+    /**
+     * Who is sealed, by whom, and for how much longer.
+     *
+     * All three, because any two of them are ambiguous: "침묵 → P2" does not say
+     * whether P2 can answer it (they cannot if P1 cast it — 침묵 is refused to a
+     * sealed player), and a victim with no count does not say whether the next
+     * turn end will clear it. Same shape as the 혼란 line above, which is also a
+     * per-victim slot and is read the same way.
+     */
+    const silenced = [0, 1]
+      .filter((v) => c.silencedOn(v))
+      .map((v) => `P${v + 1}←P${c.silence[v].by + 1} ${c.silenceTurnsLeft(v)}턴`);
+    bits.push(silenced.length ? `침묵 ${silenced.join(' / ')}` : '침묵 —');
     const bad = match.swapOverlap?.length ?? 0;
     if (bad) bits.push(`⚠ 스왑 후 겹침 ${bad}`);
     fxStats.active = bits.join('  ·  ');
@@ -771,6 +1202,10 @@ export function bootPhysicsDebug({
     .onChange(refreshCards);
   fx.add(config.cards, 'swapSeconds', 0.1, 1.5, 0.05).name('스왑 이동 시간 (s)');
   fx.add(config.cards, 'swapArcHeight', 0, 6, 0.1).name('스왑 호 높이');
+  // Whole turns, from 1. Read at the CAST, so dragging this never changes a
+  // lockout somebody is already inside — see `CardEffects.play`.
+  fx.add(config.cards, 'silenceTurns', 1, 5, 1).name('침묵 지속 턴 수').onChange(refreshCards);
+  fx.add(config.cards, 'silenceReleaseSeconds', 0.05, 1.5, 0.05).name('침묵 해제 전환 (s)');
 
   // Per card, because they are different lengths of statement: a swap has two
   // ends to read and a one-more has none.
@@ -781,6 +1216,7 @@ export function bootPhysicsDebug({
     ['chaos', '혼란'],
     ['onemore', '원모어'],
     ['smash', '강타'],
+    ['silence', '침묵'],
   ]) {
     lengths.add(config.cards.fxSeconds, id, 0.1, 1, 0.05).name(label);
   }
@@ -794,6 +1230,7 @@ export function bootPhysicsDebug({
     ['chaos', '혼란'],
     ['onemore', '원모어'],
     ['smash', '강타'],
+    ['silence', '침묵'],
   ]) {
     previewFx
       .add({ go: () => cardFx?.play(id, match.rules.currentPlayer, config.cards.fxSeconds[id]) }, 'go')
@@ -809,6 +1246,7 @@ export function bootPhysicsDebug({
     ['chaos', '혼란'],
     ['onemore', '원모어'],
     ['smash', '강타'],
+    ['silence', '침묵'],
   ]) {
     force
       .add(
@@ -823,6 +1261,59 @@ export function bootPhysicsDebug({
       )
       .name(`▶ ${label}`);
   }
+
+  /**
+   * 침묵, in a stated direction. The one card whose force button needs two.
+   *
+   * ── why the other five get away with one ────────────────────────────────────
+   * Every other card acts for whoever is on turn, so `playCard` — which is
+   * `currentPlayer`'s by definition — is the whole of forcing one. 침묵 is about
+   * a PAIR, and the thing worth testing is the victim's turn: the greyed hand,
+   * the padlock, the refusal, the release. Waiting for the turn to come round
+   * before you can arm the state you want to look at is most of the reason a
+   * force button exists.
+   *
+   * So when the caster is on turn this is the real path, effect and hand-spend
+   * and all. When they are not, the state is armed directly and the effect is
+   * replayed on top of it — the same picture, without pretending it was a legal
+   * play by somebody whose turn it is not.
+   */
+  const forceSilence = fx.addFolder('침묵 강제 발동');
+  for (const by of [0, 1]) {
+    forceSilence
+      .add(
+        {
+          go: () => {
+            if (match.rules.currentPlayer === by) {
+              const r = match.playCard('silence');
+              if (!r.ok) console.warn(`[card] silence: ${r.reason}`);
+            } else {
+              // Straight into the effect state. The seed is unused by this card
+              // — nothing about a seal is random — so there is no sequence here
+              // for a forced cast to pull out from under a replay.
+              match.cards.play('silence', by, 0);
+              cardFx?.play('silence', by, config.cards.fxSeconds.silence);
+            }
+            refreshCards();
+          },
+        },
+        'go',
+      )
+      .name(`▶ P${by + 1} → P${2 - by}`);
+  }
+  // The seal has no other way off the board: it is spent by the victim's own
+  // turn ending, which is a long way to go to re-test the arming.
+  forceSilence
+    .add(
+      {
+        go: () => {
+          match.cards.silence = [null, null];
+          refreshCards();
+        },
+      },
+      'go',
+    )
+    .name('■ 침묵 즉시 해제');
 
   // ── how the effects are drawn ────────────────────────────────────────────
   const fxLook = fx.addFolder('연출 (그리기)');
@@ -868,6 +1359,32 @@ export function bootPhysicsDebug({
     .name('오라 팔레트 순환 속도');
   smashLook.add(config.cardFx, 'smashJitterAmount', 0, 0.5, 0.005).name('뚜껑 진동 강도');
   smashLook.add(config.cardFx, 'smashJitterHz', 0, 40, 0.5).name('뚜껑 진동 주기 (Hz)');
+
+  // ── 침묵 ────────────────────────────────────────────────────────────────
+  // Its own folder for the reason 강타 has one, and the two halves are the same
+  // two: the half-second the seal lands in, and the turn the padlock then sits
+  // there for. Every length below is in FRAME PIXELS — this card is drawn in the
+  // card scene's fixed 640x480 box and never touches the world.
+  const sealLook = fxLook.addFolder('침묵');
+  // No cache clear on this one, unlike the stun pair above. Each size is its own
+  // cache key and the lock is re-fetched every frame, so a new value simply
+  // draws a new texture — and clearing would take every OTHER effect's texture
+  // with it for no reason.
+  sealLook.add(config.cardFx, 'sealLockTexels', 8, 48, 4).name('자물쇠 텍스처 해상도');
+  // The cast, which is the flash and nothing else.
+  sealLook.add(config.cardFx, 'sealDarkenFrames', 0, 6, 1).name('어두운 플래시 (프레임)');
+  sealLook.add(config.cardFx, 'sealDarkenStrength', 0, 1, 0.01).name('어두운 플래시 강도');
+  // And the arrival, which happens on the VICTIM's turn rather than the cast.
+  sealLook.add(config.cardFx, 'sealStampStart', 1, 8, 0.1).name('봉인 찍힘 시작 크기 (배)');
+  sealLook.add(config.cardFx, 'sealStampSteps', 1, 8, 1).name('봉인 찍힘 단계 수');
+  sealLook.add(config.cardFx, 'sealStampSeconds', 0.05, 1, 0.01).name('봉인 찍힘 시간 (s)');
+  // Size and place of the padlock. The one marker the sealed player reads on
+  // their own turn, so it is worth being able to move it off whatever it
+  // happens to collide with on a given board.
+  sealLook.add(config.cardFx, 'sealIconSize', 6, 64, 1).name('봉인 아이콘 크기 (px)');
+  sealLook.add(config.cardFx, 'sealIconX', 0, 300, 2).name('봉인 아이콘 X (중앙 기준)');
+  sealLook.add(config.cardFx, 'sealIconY', 0, 240, 2).name('봉인 아이콘 Y (아래쪽 기준)');
+  sealLook.add(config.cardFx, 'sealPaletteCyclesPerSecond', 0, 6, 0.1).name('봉인 팔레트 순환 속도');
 
   refreshCards();
 
@@ -1035,6 +1552,17 @@ export function bootPhysicsDebug({
   }
   syncMode();
 
+  /**
+   * ── the sound folder ─────────────────────────────────────────────────────
+   * Built by `audio/audioDebug.js` so this panel and the menu's are the same
+   * folder rather than two copies that drift. Everything in it edits
+   * `config.audio` and `soundBank`, so turning the panel off changes nothing
+   * about what the game sounds like — the numbers are the same numbers.
+   */
+  const audioPanel = audio
+    ? addAudioFolder(gui, { audio, config: config.audio, settings: audioSettings })
+    : null;
+
   // ── reset ────────────────────────────────────────────────────────────────
   gui
     .add(
@@ -1063,6 +1591,14 @@ export function bootPhysicsDebug({
            */
           victory?.layout();
           hud?.layout();
+          /**
+           * And the audio graph, for exactly the same reason as the two above.
+           * A `WaveShaper` curve is built from the bit depth when the bit depth
+           * CHANGES; restoring the number without re-applying it leaves the old
+           * curve in the chain forever, and the panel would report a default
+           * the game is not running at.
+           */
+          audio?.applyConfig();
           refresh();
         },
       },
@@ -1122,13 +1658,216 @@ export function bootPhysicsDebug({
   };
   refreshVerify();
 
+  /**
+   * ── AI ─────────────────────────────────────────────────────────────────────
+   *
+   * Everything the opponent does, and everything needed to find out why it did
+   * it. The readouts matter as much as the sliders here: a search that evaluates
+   * dozens of exact rollouts and keeps one answer is otherwise a black box, and
+   * "the AI played a strange move" is not a reproducible bug report without the
+   * runners-up and the score that beat them.
+   *
+   * Built unconditionally, like the rest of this panel. A match against a person
+   * simply has an AI folder whose readouts say nothing, which is cheaper than a
+   * conditional that would have to be re-evaluated on every opponent switch.
+   */
+  const ai = gui.addFolder('AI 상대');
+  const aiCfg = config.ai;
+
+  // Same distinction: a seat driven over the network is not the AI override's
+  // business, and offering to swap it for a computer mid-match would desync it.
+  const opponent = { kind: controllers?.[1]?.planner ? 'ai' : 'human' };
+  ai.add(opponent, 'kind', { 플레이어: 'human', AI: 'ai' })
+    .name('상대 타입')
+    .onChange((v) => setOpponent?.(v));
+
+  const aiStats = { think: '—', chose: '—', cards: '—' };
+  // Per-frame like the camera row, not on the 400 ms poll: a search finishes
+  // inside half a second and a slow poll would miss it entirely.
+  const thinkRow = ai.add(aiStats, 'think').name('계산 (ms / 후보)').disable();
+  const choseRow = ai.add(aiStats, 'chose').name('선택한 수').disable();
+  const cardRow = ai.add(aiStats, 'cards').name('카드 판단').disable();
+
+  const aiSampling = ai.addFolder('후보 샘플링');
+  aiSampling.add(aiCfg.sampling, 'maxShooters', 1, 8, 1).name('뚜껑 개수 상한');
+  aiSampling.add(aiCfg.sampling, 'anglesPerTarget', 1, 9, 2).name('표적당 각도 수');
+  aiSampling.add(aiCfg.sampling, 'angleSpreadDeg', 0, 40, 0.5).name('각도 폭 (°)');
+  aiSampling.add(aiCfg.sampling, 'powerSteps', 1, 10, 1).name('세기 단계');
+  /**
+   * The one that actually costs time, and the one that must stay a COUNT.
+   *
+   * At the measured 14.5 ms a rollout this is the whole compute budget. It is a
+   * count rather than a millisecond deadline because a deadline made the AI pick
+   * a different move on two identical runs — see the header in `ai/AiPlanner.js`.
+   */
+  aiSampling.add(aiCfg.sampling, 'maxCandidates', 4, 200, 1).name('평가 후보 수 (=예산)');
+  aiSampling.add(aiCfg, 'frameBudgetMs', 1, 16, 0.5).name('프레임당 상한 (ms)');
+  aiSampling.add(aiCfg, 'stepChunk', 4, 120, 1).name('중단 단위 (물리 스텝)');
+  aiSampling.add(aiCfg, 'maxRolloutSteps', 60, 960, 10).name('시뮬 최대 길이 (스텝)');
+  /**
+   * The second ply. `replyCandidates` at 0 makes the search one-ply again,
+   * which is the setting to reach for if a slow device cannot afford it.
+   */
+  aiSampling.add(aiCfg, 'replyPool', 0, 12, 1).name('상대 응수 검토 후보 수');
+  aiSampling.add(aiCfg, 'replyCandidates', 0, 24, 1).name('응수 후보 수 (0=1수만)');
+  aiSampling.add(aiCfg, 'replyWeight', 0, 1.5, 0.05).name('응수 반영 비중');
+  // The cone probe — 0 turns it off and gives back the old, spread-blind ranking
+  // where a forty-unit full charge rates as safely as a tap. These replace the
+  // `robustness*` pair, which were bound to a value no code read.
+  aiSampling.add(aiCfg, 'spreadProbes', 0, 4, 1).name('콘 가장자리 검증 (0=오차 무시)');
+  aiSampling.add(aiCfg, 'spreadPool', 1, 24, 1).name('콘 검증 후보 수');
+  aiSampling.add(aiCfg, 'totalBudgetMs', 200, 8000, 50).name('전체 상한 (ms, 안전밸브)');
+
+  const aiWeights = ai.addFolder('평가 가중치');
+  aiWeights.add(aiCfg.weights, 'dropOpponent', 0, 400, 1).name('상대 낙사 (+)');
+  aiWeights.add(aiCfg.weights, 'loseOwn', 0, 400, 1).name('자책 낙사 (−)');
+  aiWeights.add(aiCfg.weights, 'edgeRisk', 0, 200, 1).name('내 뚜껑 가장자리 (−)');
+  aiWeights.add(aiCfg.weights, 'selfThreat', 0, 300, 1).name('내 뚜껑 피격 위험 (−)');
+  aiWeights.add(aiCfg.weights, 'foeEdge', 0, 200, 1).name('상대 가장자리로 밀기 (+)');
+  aiWeights.add(aiCfg.weights, 'foeThreat', 0, 300, 1).name('상대 조준 확보 (+)');
+  aiWeights.add(aiCfg.weights, 'centre', 0, 100, 1).name('중앙 이동 (+, 동점 처리용)');
+  aiWeights.add(aiCfg.weights, 'orbGain', 0, 200, 1).name('오브 획득 (+)');
+  aiWeights.add(aiCfg.weights, 'orbGift', 0, 200, 1).name('오브 헌납 (−)');
+  aiWeights.add(aiCfg.weights, 'clump', 0, 100, 1).name('아군 뭉침 (−)');
+  aiWeights.add(aiCfg.weights, 'clumpRadiusCaps', 0, 5, 0.1).name('뭉침 판정 (뚜껑 지름)');
+  // The geometry the two threat terms are measured with — see `config.ai.threat`.
+  aiWeights.add(aiCfg.threat, 'reach', 4, 60, 1).name('위협 사거리 (단위)');
+  aiWeights.add(aiCfg.threat, 'pushDistance', 2, 40, 1).name('피격 시 밀리는 거리 (단위)');
+
+  const aiSkill = ai.addFolder('실력 조절');
+  // Both default to 0 and are meant to. See the block header in `config.js` for
+  // why aim error is the wrong dial and `pickRandomness` is the right one.
+  aiSkill.add(aiCfg, 'executionErrorDeg', 0, 20, 0.1).name('실행 오차 폭 (°, 기본 0)');
+  aiSkill.add(aiCfg, 'pickRandomness', 0, 1, 0.01).name('상위 후보 랜덤성 (기본 0)');
+  aiSkill.add(aiCfg, 'pickPoolSize', 1, 20, 1).name('랜덤 선택 풀 크기');
+
+  const cardJudge = ai.addFolder('카드 판단 기준');
+  // 강타 has no threshold to show: it is decided by re-simulating the boosted
+  // shot, so its dial is the probe's size rather than a number to compare against.
+  cardJudge.add(aiCfg, 'boostPool', 0, 12, 1).name('강타: 부스트 시뮬 후보 수');
+  cardJudge.add(aiCfg.cards, 'oneMoreMinScore', 0, 200, 1).name('원모어: 최소 이득');
+  cardJudge.add(aiCfg.cards, 'chaosThreatMin', -1, 1, 0.01).name('혼란: 최소 위협도');
+  cardJudge.add(aiCfg.cards, 'silenceMinCards', 0, 5, 1).name('침묵: 상대 최소 손패');
+
+  const aiShow = ai.addFolder('턴 연출 길이');
+  aiShow.add(aiCfg.show, 'cardPullSeconds', 0, 1, 0.01).name('카드 뽑기 (s)');
+  aiShow.add(aiCfg.show, 'cardMoveSeconds', 0, 1, 0.01).name('카드 이동 (s)');
+  aiShow.add(aiCfg.show, 'cardFlipSeconds', 0, 1, 0.01).name('카드 뒤집기 (s)');
+  aiShow.add(aiCfg.show, 'cardHoldSeconds', 0, 1.5, 0.01).name('뒤집힌 채 정지 (s)');
+  aiShow.add(aiCfg.show, 'gapSeconds', 0, 1, 0.01).name('카드↔조준 정지 (s)');
+  aiShow.add(aiCfg.show, 'aimHighlightSeconds', 0, 1, 0.01).name('뚜껑 강조 (s)');
+  aiShow.add(aiCfg.show, 'aimDrawSeconds', 0, 2, 0.01).name('당김 (s)');
+  aiShow.add(aiCfg.show, 'aimHoldSeconds', 0, 1, 0.01).name('발사 전 정지 (s)');
+  /**
+   * The floor the brief puts on the card animation, as a readout rather than a
+   * clamp.
+   *
+   * "0.6초 아래로 무리하게 줄이지 마라" is a design instruction, not a rule the
+   * code should enforce — someone tuning this needs to be able to go under it to
+   * see WHY. So the panel adds the three up, shows the total, and says when it
+   * has gone below the line.
+   */
+  const aiShowStats = { total: '' };
+  const showRow = aiShow.add(aiShowStats, 'total').name('뽑기~뒤집기 합계').disable();
+
+  const aiViz = ai.addFolder('후보 시각화');
+  aiViz.add(aiCfg, 'showCandidates').name('상위 후보 궤적 표시');
+  aiViz.add(aiCfg, 'candidateCount', 1, 12, 1).name('표시 개수');
+  aiViz.add(aiCfg, 'candidateSampleEvery', 1, 12, 1).name('궤적 샘플 간격');
+
+  ai.add(
+    {
+      recenter: () => onRecenter?.(),
+    },
+    'recenter',
+  ).name('▶ 카메라 기본 구도로');
+
+  /**
+   * The AI readouts, per frame.
+   *
+   * Read straight off the controller rather than pushed to it, the same way the
+   * camera row reads the camera: an AI that had to report itself would be an AI
+   * that knows a panel exists.
+   */
+  function refreshAi() {
+    /**
+     * The controller with a PLANNER, not the one that claims to be a computer.
+     *
+     * `isAi` is overloaded: `main.js` uses it as the drive gate AND as the
+     * presentation switch, and `OnlineController` reports true for both of those
+     * on purpose — one person at this screen, opponent's hand face down, no
+     * viewpoint flip, all correct. It has no planner, so reading `c.planner`
+     * off it threw and took the whole panel down with it.
+     *
+     * Asking for the thing this readout actually needs is the fix, rather than
+     * adding an "and not online" clause that the next controller kind would have
+     * to be added to as well.
+     */
+    const c = controllers?.find((x) => x?.planner);
+    if (!c) {
+      aiStats.think = '— (사람 상대)';
+      aiStats.chose = '—';
+      aiStats.cards = '—';
+    } else {
+      const p = c.planner;
+      const per = p.evaluated ? (c.thinkMs / p.evaluated).toFixed(1) : '—';
+      aiStats.think =
+        `${c.thinkMs.toFixed(0)}ms · ${p.evaluated}/${p.generated}개 · ${per}ms/개` +
+        (p.cutShort ? '  ⚠ 상한 도달' : '') +
+        (c.phase === 'idle' ? '' : `  [${c.phase}]`);
+
+      const e = c.plan?.entry;
+      /**
+       * The chosen move AND the four terms that decide between attacking and
+       * getting out of the way.
+       *
+       * Without them a strange-looking move is unreadable: "attack" and "flee"
+       * are labels, and what actually chose between them is whether this cap was
+       * lined up (`self`) and whether the shot lines one of theirs up (`foe`).
+       */
+      aiStats.chose = !e
+        ? '—'
+        : `${e.candidate.intent} · 뚜껑${e.candidate.capIndex} · 세기 ${e.candidate.power.toFixed(2)} · ${e.score.toFixed(0)}점` +
+          `  [내위험 ${e.terms.selfThreat.toFixed(2)} / 상대위험 ${e.terms.foeThreat.toFixed(2)} / 상대끝 ${e.terms.foeEdge.toFixed(2)}]`;
+
+      aiStats.cards = !c.cardLog.length
+        ? '손패 없음'
+        : c.cardLog.map((l) => `${l.play ? '●' : '○'}${l.cardId}: ${l.why}`).join('   |   ');
+    }
+    thinkRow.updateDisplay();
+    choseRow.updateDisplay();
+    cardRow.updateDisplay();
+
+    const s = aiCfg.show;
+    const reveal = s.cardPullSeconds + s.cardMoveSeconds + s.cardFlipSeconds;
+    aiShowStats.total = `${reveal.toFixed(2)}s${reveal < 0.6 ? '  ⚠ 0.6s 미만 — 인지 어려움' : ''}`;
+    showRow.updateDisplay();
+  }
+  refreshAi();
+
   refresh();
   return {
     gui,
     refresh: () => {
       refresh();
       refreshVerify();
+      // Voice counts and the device state change on the same timescale as the
+      // rest of these — a turn boundary, a rebuild — so they ride the 400 ms
+      // poll rather than the per-frame one.
+      audioPanel?.refresh();
     },
-    refreshCamera,
+    /**
+     * Per frame, alongside the camera row.
+     *
+     * The AI's readouts belong on this clock rather than the 400 ms poll for the
+     * same reason the camera's do: a whole search starts and finishes inside a
+     * third of a second, so a slow poll would show the "thinking" state roughly
+     * never and the phase readout would be useless for watching the sequence
+     * step through.
+     */
+    refreshCamera: () => {
+      refreshCamera();
+      refreshAi();
+    },
   };
 }

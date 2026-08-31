@@ -93,6 +93,27 @@ export class CardEffects {
      * shot record. See `impulseMulFor`.
      */
     this.smash = null;
+    /**
+     * ONE SLOT PER VICTIM, indexed by the player who may not play cards.
+     *
+     * `silence[p]` is `{by, turns}` while player `p` is sealed and null when
+     * they are not. `turns` is what is LEFT, counted down at the end of each of
+     * that player's own turns — see `onTurnEnd` — so the whole duration lives in
+     * one number the panel can move.
+     *
+     * Two slots for the reason `chaos` has two, and the note above is the long
+     * version of it: a single record would make sealing someone clear your own
+     * seal, which is a one-click self-cure, and blocking the victim to hide that
+     * would tell the player a rule nobody designed.
+     *
+     * ── the seal is on the PLAYER, not on the controller ────────────────────
+     * Nothing in here knows or asks whether player `p` is a person or an AI, and
+     * nothing downstream does either: the hand greys because `canUseCard` was
+     * refused, and an AI will be refused by the same call for the same reason.
+     * That is the whole of what "컨트롤러 종류와 무관하게" needs, and it needs it
+     * to still be true when the AI arrives.
+     */
+    this.silence = [null, null];
   }
 
   // ── queries ──────────────────────────────────────────────────────────────
@@ -119,6 +140,10 @@ export class CardEffects {
       oneMoreArmed: this.oneMore?.player === player,
       trajectoryArmed: this.trajectory?.player === player,
       smashArmed: this.smash?.player === player,
+      /** The seal on ME. Read by `canUseCard`'s gate, which refuses everything. */
+      silencedMe: this.silencedOn(player),
+      /** 침묵's self-block, and the exact analogue of `chaosCastByMe`. */
+      silenceCastByMe: this.castSilenceOnOpponent(player),
     };
   }
 
@@ -134,6 +159,28 @@ export class CardEffects {
   /** Whether this player has a live chaos running on the other one. */
   castChaosOnOpponent(player) {
     const onThem = this.chaos[1 - player];
+    return !!onThem && onThem.by === player;
+  }
+
+  /**
+   * Whether this player's hand is sealed. The one question the view asks.
+   *
+   * A method rather than a field so there is nothing for a second copy of the
+   * answer to disagree with, and so the AI work later has exactly one call to
+   * reach for. Whoever is holding the hand, this is what decides.
+   */
+  silencedOn(player) {
+    return !!this.silence[player];
+  }
+
+  /** Turns of seal left on this player, 0 when they are not sealed. For the panel. */
+  silenceTurnsLeft(player) {
+    return this.silence[player]?.turns ?? 0;
+  }
+
+  /** Whether this player has a live seal running on the other one. */
+  castSilenceOnOpponent(player) {
+    const onThem = this.silence[1 - player];
     return !!onThem && onThem.by === player;
   }
 
@@ -231,6 +278,26 @@ export class CardEffects {
       case 'smash':
         this.smash = { player };
         return { physical: false };
+      /**
+       * Into the OPPONENT's slot, exactly as 혼란 goes. Mine is untouched, so
+       * being sealed does not stop me sealing — except that a sealed player
+       * never reaches this call at all, because `canUseCard` refused them.
+       *
+       * The length is read from the config HERE, at the moment of the cast,
+       * rather than at each turn end. A slider dragged mid-seal would otherwise
+       * change a lockout the player is already inside, and — the half that
+       * matters — the replay re-reads the record instead of the slider, so a
+       * turn replayed after a drag is still the turn that was played.
+       *
+       * No seed. Nothing about this card is random: it is a duration and a
+       * victim, and both are decided by the cast.
+       */
+      case 'silence':
+        this.silence[1 - player] = {
+          by: player,
+          turns: Math.max(1, Math.round(this.config.cards.silenceTurns)),
+        };
+        return { physical: false };
       case 'swap':
         return { physical: true };
       default:
@@ -275,6 +342,28 @@ export class CardEffects {
     // catches the turn that ended without a shot in it at all.
     if (this.smash?.player === shooter) this.smash = null;
 
+    /**
+     * The seal is spent by the turn it was serving on, and only the SHOOTER's.
+     *
+     * The same rule as chaos's line above and for the same reason: a seal I cast
+     * on the other player is waiting for THEIR turn and has to survive the end
+     * of mine. Only the person whose turn just ended pays a turn off theirs.
+     *
+     * Counted down rather than cleared outright, because the length is a dial:
+     * at the default 1 this is exactly "cleared when their turn ends", and at 2
+     * it is the same code doing the obvious thing.
+     *
+     * Not gated on a shot having been fired. A turn that ended without one — a
+     * goal reset, a settle with nothing struck — is still a turn the player did
+     * not get to use their cards in, and the seal has to expire on it or a
+     * player could sit under a lockout that never counts down.
+     */
+    const seal = this.silence[shooter];
+    if (seal) {
+      seal.turns -= 1;
+      if (seal.turns <= 0) this.silence[shooter] = null;
+    }
+
     if (this.oneMore?.player === shooter) {
       this.oneMore = null;
       return true;
@@ -310,6 +399,10 @@ export class CardEffects {
       oneMore: this.oneMore ? { ...this.oneMore } : null,
       trajectory: this.trajectory ? { ...this.trajectory } : null,
       smash: this.smash ? { ...this.smash } : null,
+      // Copied per slot, not by reference: `turns` is MUTATED in place by
+      // `onTurnEnd`, so a shared object would let a replayed turn count down a
+      // snapshot that the next replay is going to be restored from.
+      silence: this.silence.map((v) => (v ? { ...v } : null)),
     };
   }
 
@@ -326,5 +419,11 @@ export class CardEffects {
     this.oneMore = s.oneMore ? { ...s.oneMore } : null;
     this.trajectory = s.trajectory ? { ...s.trajectory } : null;
     this.smash = s.smash ? { ...s.smash } : null;
+    // Tolerates a state saved before this card existed, the way `chaos` above
+    // tolerates the shape from before its own split: a mid-turn reload of an old
+    // snapshot must come back unsealed rather than as `undefined[player]`.
+    this.silence = Array.isArray(s.silence)
+      ? s.silence.map((v) => (v ? { ...v } : null))
+      : [null, null];
   }
 }

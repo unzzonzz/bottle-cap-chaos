@@ -17,6 +17,7 @@ import {
   labelTexture,
   shadowTexture,
 } from './menuTextures.js';
+import { PALETTE } from '../core/palette.js';
 
 /**
  * The bottle on the menu: five meshes, a fixed lean, and two ways of moving.
@@ -65,8 +66,8 @@ import {
  */
 
 /** Bottle-cap red, the same one the viewer starts its picker at. */
-const CAP_COLOR = '#c8342f';
-const LINER_COLOR = '#ddd6c2';
+const CAP_COLOR = PALETTE.player[0];
+const LINER_COLOR = PALETTE.metal.liner;
 
 export class Bottle {
   /**
@@ -96,14 +97,14 @@ export class Bottle {
     // Opaque and lit, so the drink picks up the same key and fill as the glass
     // around it. `gloss: 0` — a liquid seen through brown glass with a specular
     // highlight on it looks like a solid.
-    this.liquidMaterial = retro.create({ color: '#4a2409', gloss: 0 });
+    this.liquidMaterial = retro.create({ color: PALETTE.liquid.core, gloss: 0 });
     this.labelMaterial = retro.create({ map: this.labelMap, uvScale: [1, 1] });
 
     this.capBodyMaterial = retro.create({ color: CAP_COLOR });
     // WHITE, not the cap colour. The panel map used to be a greyscale
     // placeholder that got its red by being multiplied by this; the logo brings
     // its own, and multiplying red by red would come out nearly black.
-    this.capPanelMaterial = retro.create({ map: this.capTopMap, color: '#ffffff' });
+    this.capPanelMaterial = retro.create({ map: this.capTopMap, color: PALETTE.untinted });
     this.capLinerMaterial = retro.create({ color: LINER_COLOR, gloss: 0.35 });
 
     // Foam is OPAQUE and lit — a head you can see through is not a head, and

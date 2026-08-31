@@ -5,6 +5,7 @@ import {
   NormalBlending,
   OneFactor,
   OneMinusDstColorFactor,
+  ReverseSubtractEquation,
   ShaderMaterial,
   Vector2,
   Vector3,
@@ -81,6 +82,30 @@ const FRAG = /* glsl */ `
   }
 `;
 
+/**
+ * The subtractive twin of `FRAG`.
+ *
+ * ── the alpha is folded into the COLOUR, and it has to be ───────────────────
+ * Under `dst - src` the blend factors are both One and alpha does not reach the
+ * arithmetic at all, so a transparent texel would subtract its full RGB and the
+ * sprite would come out as a dark rectangle with a shape faintly inside it. So
+ * the mask is multiplied in here instead: `rgb * a * opacity`, which makes a
+ * fully transparent texel subtract exactly nothing, and a half-lit one subtract
+ * half. Alpha is then written as 0 for tidiness — the blend ignores it.
+ */
+const DARKEN_FRAG = /* glsl */ `
+  uniform sampler2D uMap;
+  uniform vec3  uTint;
+  uniform float uOpacity;
+
+  varying vec2 vUv;
+
+  void main() {
+    vec4 tex = texture2D(uMap, vUv);
+    gl_FragColor = vec4(tex.rgb * uTint * tex.a * uOpacity, 0.0);
+  }
+`;
+
 export class FxMaterials {
   /** @param {import('three').Vector2} resolution  the low-res target's size */
   constructor({ resolution }) {
@@ -108,6 +133,57 @@ export class FxMaterials {
       blending: additive ? AdditiveBlending : NormalBlending,
       depthTest,
       depthWrite,
+      uniforms: {
+        ...this.shared,
+        uMap: { value: map },
+        uTint: { value: new Vector3(1, 1, 1) },
+        uOpacity: { value: 1 },
+        uUvRect: { value: new Vector4(0, 0, 1, 1) },
+        uUvScroll: { value: new Vector2(0, 0) },
+      },
+    });
+    this._materials.add(material);
+    const dispose = material.dispose.bind(material);
+    material.dispose = () => {
+      this._materials.delete(material);
+      dispose();
+    };
+    return material;
+  }
+
+  /**
+   * The same sprite pipeline, subtracting instead of adding.
+   *
+   * ── `dst - src` is a mode the hardware actually had ─────────────────────────
+   * The console's four semi-transparency modes were `B/2 + F/2`, `B + F`,
+   * `B - F` and `B + F/4`. `create` above is the second of them; this is the
+   * third, and it is the ONLY period-correct way to put darkness into a frame.
+   * The alternatives all fail on their own terms: an alpha-blended black quad is
+   * a fade rather than a subtraction and cannot darken a colour without also
+   * flattening it toward one hue, and a second pass reading the target back is
+   * not something the fixed-function pipeline could do at all.
+   *
+   * 침묵 is the only card that needs it, and it needs it twice — the bolt that
+   * reaches for the hand, and the one-or-two-frame flash when the seal lands.
+   * Both are things being TAKEN from the picture, which is the card.
+   *
+   * Alpha is left untouched (`Zero`/`One`), for the same reason the inversion
+   * leaves it alone: this must not punch a hole in the target the retro pass is
+   * about to sample.
+   */
+  createDarken(map) {
+    const material = new ShaderMaterial({
+      vertexShader: VERT,
+      fragmentShader: DARKEN_FRAG,
+      transparent: true,
+      blending: CustomBlending,
+      blendEquation: ReverseSubtractEquation,
+      blendSrc: OneFactor,
+      blendDst: OneFactor,
+      blendSrcAlpha: ZeroFactor,
+      blendDstAlpha: OneFactor,
+      depthTest: false,
+      depthWrite: false,
       uniforms: {
         ...this.shared,
         uMap: { value: map },

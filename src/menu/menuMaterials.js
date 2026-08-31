@@ -8,6 +8,7 @@ import {
   ShaderMaterial,
   Vector2,
 } from 'three';
+import { PALETTE } from '../core/palette.js';
 
 /**
  * Two materials the menu needs and `RetroMaterial` deliberately does not have.
@@ -189,7 +190,7 @@ const SPRITE_FRAG = /* glsl */ `
  * @param {import('three').Texture} opts.map  the baked highlight strips
  * @param {'front'|'back'} opts.face
  */
-export function createGlassMaterial(retro, { map, face = 'front', color = '#8a5c2a' } = {}) {
+export function createGlassMaterial(retro, { map, face = 'front', color = PALETTE.glass.tint } = {}) {
   return new ShaderMaterial({
     vertexShader: VERT,
     fragmentShader: FRAG,
@@ -244,7 +245,7 @@ export function createSpriteMaterial(
   {
     map,
     blend = 'alpha',
-    tint = '#ffffff',
+    tint = PALETTE.untinted,
     opacity = 1,
     uvScale = [1, 1],
     uvOffset = [0, 0],

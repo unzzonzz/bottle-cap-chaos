@@ -1,15 +1,19 @@
-import { Mesh, OrthographicCamera, PlaneGeometry, Raycaster, Scene, Vector2 } from 'three';
+import { Mesh, PlaneGeometry, Raycaster, Scene, Vector2 } from 'three';
+import { FRAME, frameCamera, refitFrameCamera } from '../core/frame.js';
+import { CARD_ASPECT, handExposure } from '../render/CardHand.js';
 import { MATCH_STATE } from '../game/Match.js';
 import { scoreboardFor } from '../game/modes.js';
-import { PLAYER_COLORS } from '../render/ArenaView.js';
+import { PLAYER_COLORS } from '../render/playerColors.js';
 import { HudMaterials } from './HudMaterial.js';
 import {
   buttonTexture,
   clearHudTextureCache,
+  iconButtonTexture,
   notePlateTexture,
   scorePlateTexture,
   turnPlateTexture,
 } from './hudTextures.js';
+import { PALETTE } from '../core/palette.js';
 
 /**
  * The readouts, as meshes.
@@ -49,7 +53,14 @@ import {
  */
 
 /** The layout box, in frame pixels. 4:3, matching the display. */
-export const HUD_FRAME = { width: 640, height: 480 };
+/**
+ * The layout box, in frame pixels — now the shared one.
+ *
+ * Re-exported rather than redeclared so every existing `HUD_FRAME.width` read
+ * keeps working, but it is the LIVE object from core/frame.js: 640 wide always,
+ * 480 tall in landscape, taller in portrait. See that file's header.
+ */
+export const HUD_FRAME = FRAME;
 
 /**
  * How far down the frame the opponent's parked hand reaches.
@@ -61,7 +72,23 @@ export const HUD_FRAME = { width: 640, height: 480 };
  *
  * The score sits below it. Anything above this line is the opponent's hand.
  */
-const PARKED_HAND_REACH = 48;
+/**
+ * How far down the frame the opponent's parked hand reaches — ASKED, not assumed.
+ *
+ * This was the literal `48`, a hand-copied duplicate of `cards.inactiveExposure`,
+ * and the note above explains the derivation that produced it. The derivation is
+ * still right; what changed is that the answer is no longer a constant, because
+ * a hand with a band of its own shows more of itself than one peeking over an
+ * edge. Calling the same function the hand calls is what keeps the score from
+ * drifting under the cards — the exact failure the old duplicate invited.
+ */
+function parkedHandReach(config) {
+  const cfg = config.cards;
+  const cardHeight = cfg.width * CARD_ASPECT;
+  // The parked hand is never raised, so its scale is always `inactiveScale`.
+  const scale = cfg.inactiveScale;
+  return handExposure(cfg, FRAME.topBand ?? 0, cardHeight, scale).parked;
+}
 
 /**
  * The other end of the score's band: the far row of pieces.
@@ -89,7 +116,16 @@ const SCORE_GAP = 3;
 
 const SCORE = { width: 208, height: 42 };
 const BUTTON = { width: 104, height: 34 };
+/** The camera-reset button. Square, because it is an icon and not a word. */
+const ICON = 34;
+/** Between the icon and the labelled button beside it. */
+const ICON_GAP = 6;
 const TURN = { width: 152, height: 26 };
+/** The online turn clock, under the turn plate. */
+const TIMER_HEIGHT = 5;
+const TIMER_GAP = 3;
+/** Below this many seconds the bar starts flashing. The brief's five. */
+const TIMER_URGENT_SEC = 5;
 const NOTE_HEIGHT = 22;
 const MARGIN = 12;
 
@@ -103,13 +139,31 @@ export class HudLayer {
    * @param {HTMLCanvasElement} canvas  for mapping pointer coordinates
    * @param {import('three').Vector2} resolution  the low-res target's size
    * @param {() => void} onExit
-   * @param {() => void} onRestart
    */
-  constructor({ canvas, config, resolution, onExit, onRestart, reserved }) {
+  /**
+   * @param {() => void} [onRecenter]
+   *   Put the camera back to the framing a turn change gives you. Handed in
+   *   rather than reached for: the HUD has no camera and no idea what the
+   *   default framing IS — `main.js` passes the same `faceCurrentPlayer(true)`
+   *   the turn change calls, which is the whole of requirement 15.
+   * @param {() => boolean} [atDefaultView]
+   *   Whether the view is already there, for the dimming. Not for the hit test:
+   *   the button answers a press whatever this says.
+   */
+  constructor({
+    canvas,
+    config,
+    resolution,
+    onExit,
+    onRecenter,
+    atDefaultView,
+    reserved,
+  }) {
     this.canvas = canvas;
     this.config = config;
     this.onExit = onExit ?? (() => {});
-    this.onRestart = onRestart ?? (() => {});
+    this.onRecenter = onRecenter ?? (() => {});
+    this._atDefaultView = atDefaultView ?? (() => false);
     /**
      * Whether a point belongs to the BOARD whatever is drawn over it.
      *
@@ -133,15 +187,7 @@ export class HudLayer {
     this._isReserved = reserved ?? (() => false);
 
     this.scene = new Scene();
-    this.camera = new OrthographicCamera(
-      -HUD_FRAME.width / 2,
-      HUD_FRAME.width / 2,
-      HUD_FRAME.height / 2,
-      -HUD_FRAME.height / 2,
-      -100,
-      100,
-    );
-    this.camera.position.z = 10;
+    this.camera = frameCamera();
 
     this.materials = new HudMaterials({ resolution });
 
@@ -159,8 +205,46 @@ export class HudLayer {
     this.score = plate(10);
     this.turn = plate(11);
     this.note = plate(11);
+
+    /**
+     * The online turn clock, as two rectangles.
+     *
+     * ── it is drawn as GEOMETRY, and that is not a style choice ─────────────
+     * A countdown is the one readout whose content changes every frame, and
+     * `hudTextures` caches by literal content and is only ever emptied
+     * wholesale. Drawing "12.4초" as type would allocate a canvas and a GPU
+     * texture per tick and never free one — a texture leak for the length of the
+     * match, growing fastest exactly when the player is under pressure.
+     *
+     * `iconButtonTexture` exists in that file for the same reason and says so:
+     * rectangles are immune. So this is a track and a fill, and the countdown is
+     * `fill.scale.x` — one material, no texture, nothing to cache.
+     *
+     * `createSolid` also means no `uMap`, so these two are deliberately NOT in
+     * the plate list: the shared fade loop writes `uOpacity` on plates and reads
+     * `userData.want`, which these follow, but they are appended to that list
+     * below rather than built by `plate()`.
+     */
+    const bar = (renderOrder, opacity) => {
+      const m = new Mesh(new PlaneGeometry(1, 1), this.materials.createSolid(opacity));
+      m.renderOrder = renderOrder;
+      m.visible = false;
+      this.scene.add(m);
+      return m;
+    };
+    this.timerTrack = bar(11, 0.55);
+    this.timerFill = bar(12, 1);
+    /**
+     * The track's colour, set once.
+     *
+     * `createSolid` defaults its tint to the debug hit-area green, which is the
+     * right default for the one thing it was written for and very much the wrong
+     * one here — the spent portion of the clock came out bright green, reading as
+     * a second, growing gauge rather than as an empty groove.
+     */
+    this.timerTrack.material.uniforms.uTint.value.set(0.09, 0.11, 0.15);
     this.exit = plate(12);
-    this.restart = plate(12);
+    this.recenter = plate(12);
 
     /**
      * The press targets, as oversized invisible quads.
@@ -176,7 +260,7 @@ export class HudLayer {
      */
     this._hits = [
       { id: 'exit', mesh: this._hitQuad(), plate: this.exit },
-      { id: 'restart', mesh: this._hitQuad(), plate: this.restart },
+      { id: 'recenter', mesh: this._hitQuad(), plate: this.recenter },
     ];
 
     this._ray = new Raycaster();
@@ -205,6 +289,47 @@ export class HudLayer {
      */
     this._handParked = true;
 
+    /**
+     * How much of each frame edge iOS has taken, in frame pixels.
+     *
+     * Zero everywhere but on a notched phone, and zero even there in portrait —
+     * the canvas is letterboxed to 4:3 and centred, so the notch lands in the
+     * black band beside it rather than on the game. It is landscape that bites,
+     * and only along the bottom, where the home indicator strip runs under the
+     * card hand. `SafeArea` does that overlap arithmetic; this is only the
+     * answer. See src/platform/safeArea.js.
+     */
+    this._safe = { top: 0, right: 0, bottom: 0, left: 0 };
+
+    this.layout();
+  }
+
+  /**
+   * Take the unsafe edges out of the layout box.
+   *
+   * Pushed in on change rather than read per frame, for the reason `layout`
+   * itself is not called per frame — and a no-op when nothing moved, so the
+   * resize path can call it unconditionally.
+   *
+   * @param {{top:number,right:number,bottom:number,left:number}} insets frame px
+   */
+  setSafeInsets(insets) {
+    const next = {
+      top: Math.max(0, insets?.top ?? 0),
+      right: Math.max(0, insets?.right ?? 0),
+      bottom: Math.max(0, insets?.bottom ?? 0),
+      left: Math.max(0, insets?.left ?? 0),
+    };
+    const s = this._safe;
+    if (
+      next.top === s.top &&
+      next.right === s.right &&
+      next.bottom === s.bottom &&
+      next.left === s.left
+    ) {
+      return;
+    }
+    this._safe = next;
     this.layout();
   }
 
@@ -237,6 +362,12 @@ export class HudLayer {
 
   setResolution(resolution) {
     this.materials.setResolution(resolution);
+    // The frame can now change SHAPE, not just the target its pixels land in —
+    // so the ortho box has to follow, and everything anchored to a frame edge
+    // has to be placed again. `layout()` was previously only reachable from the
+    // constructor and a mode change; this is the third door and the reason it
+    // needed one.
+    if (refitFrameCamera(this.camera)) this.layout();
   }
 
   /**
@@ -250,6 +381,20 @@ export class HudLayer {
     const ui = this.config.ui;
     const halfW = HUD_FRAME.width / 2;
     const halfH = HUD_FRAME.height / 2;
+
+    /**
+     * MARGIN, per edge, with whatever the device has taken added on.
+     *
+     * MARGIN stays a single scalar because it is a design decision — 12 pixels
+     * of breathing room — and the insets are a fact about the hardware. Adding
+     * rather than replacing keeps the breathing room on a phone too: the exit
+     * button 12 pixels from the frame edge and 12 from the notch, not flush
+     * against the notch. There is no bottom edge in this layer; the card hand
+     * owns it, and takes its own inset in `CardHand.update`.
+     */
+    const edgeTop = MARGIN + this._safe.top;
+    const edgeRight = MARGIN + this._safe.right;
+    const edgeLeft = MARGIN + this._safe.left;
 
     /**
      * Top centre, hung from the parked hand and reaching down no further than
@@ -273,7 +418,17 @@ export class HudLayer {
      * The number is a consequence of the card layer's layout, so it moves with
      * the card layer being there. See `setHandParked`.
      */
-    const scoreTop = halfH - (this._handParked ? PARKED_HAND_REACH + SCORE_GAP : MARGIN);
+    /**
+     * The top inset applies whichever branch this takes, but for two different
+     * reasons. Hung from the parked hand, it follows because the HAND has moved
+     * down by the inset (`CardHand.update` applies the same number) and the
+     * plate hangs from the hand. Hung from the margin, it follows because it is
+     * then an edge-anchored element like any other.
+     */
+    const scoreTop =
+      halfH -
+      this._safe.top -
+      (this._handParked ? parkedHandReach(this.config) + SCORE_GAP : MARGIN);
     this.score.scale.set(SCORE.width, SCORE.height, 1);
     this._scoreHome = {
       x: ui.scoreOffsetX,
@@ -282,18 +437,51 @@ export class HudLayer {
     this.score.position.set(this._scoreHome.x, this._scoreHome.y, 0);
 
     // Top right, clear of the hand's fan — which is centred on x = 0 and never
-    // reaches this far out. Two buttons, stacked downward.
-    const right = halfW - MARGIN - BUTTON.width / 2 + ui.exitOffsetX;
-    const top = halfH - MARGIN - BUTTON.height / 2 + ui.exitOffsetY;
+    // reaches this far out. One button now: 재시작 was removed, so the column it
+    // used to head is a single plate and nothing below it moved up into a gap.
+    const right = halfW - edgeRight - BUTTON.width / 2 + ui.exitOffsetX;
+    const top = halfH - edgeTop - BUTTON.height / 2 + ui.exitOffsetY;
     this.exit.scale.set(BUTTON.width, BUTTON.height, 1);
     this.exit.position.set(right, top, 0);
-    this.restart.scale.set(BUTTON.width, BUTTON.height, 1);
-    this.restart.position.set(right, top - BUTTON.height - 6, 0);
+
+    /**
+     * The camera reset, immediately left of 나가기 on the same row.
+     *
+     * "나가기 버튼 근처. 겹치지 않게." Beside rather than below, because below
+     * would put a square icon at the foot of a column of two wide plates and
+     * read as a third, broken button — and because the column is already as deep
+     * as the score's band allows. Left of the row keeps it in the corner cluster
+     * where the player is already looking for controls, and the fan of cards is
+     * centred and never reaches this far out.
+     */
+    this.recenter.scale.set(ICON, ICON, 1);
+    this.recenter.position.set(right - BUTTON.width / 2 - ICON_GAP - ICON / 2, top, 0);
 
     // Top left.
     this.turn.scale.set(TURN.width, TURN.height, 1);
-    this.turn.position.set(-halfW + MARGIN + TURN.width / 2, halfH - MARGIN - TURN.height / 2, 0);
-    this._noteLeft = -halfW + MARGIN;
+    this.turn.position.set(
+      -halfW + edgeLeft + TURN.width / 2,
+      halfH - edgeTop - TURN.height / 2,
+      0,
+    );
+    /**
+     * The plate's LEFT edge, kept because the plate is no longer a fixed width.
+     *
+     * `position` is a centre, so a plate that grew to fit a nickname and was not
+     * re-anchored would grow in both directions and hang off the left of the
+     * screen. `_updateTurn` re-centres it against this every time the width
+     * changes.
+     */
+    this._turnLeft = -halfW + edgeLeft;
+    this._noteLeft = -halfW + edgeLeft;
+
+    // Directly under the turn plate, the same width, so the clock reads as
+    // belonging to the name above it rather than as a separate instrument.
+    this._timerY = this.turn.position.y - TURN.height / 2 - TIMER_GAP - TIMER_HEIGHT / 2;
+    this.timerTrack.scale.set(TURN.width, TIMER_HEIGHT, 1);
+    this.timerTrack.position.set(this._turnLeft + TURN.width / 2, this._timerY, 0);
+    this.timerFill.scale.set(TURN.width, TIMER_HEIGHT, 1);
+    this.timerFill.position.copy(this.timerTrack.position);
     this._noteY = this.turn.position.y - TURN.height - 6;
 
     for (const h of this._hits) {
@@ -318,7 +506,27 @@ export class HudLayer {
    *   precision matters. Applied last so it cannot argue with the score's own
    *   zoom fade or the buttons' dimming — both still run underneath it.
    */
-  update({ dt, match, gameCamera, fade = 1 }) {
+  /**
+   * @param {(player: number) => string} [labelFor]
+   *   What to append after "PLAYER n" for a given seat. `" (AI)"` for a computer
+   *   opponent, empty for a person.
+   *
+   *   A function of the PLAYER rather than a flag, because the HUD has no
+   *   business knowing which seats are computers — it is handed the suffix by
+   *   whoever built the controllers, the same way `usable` and `silenced` are
+   *   handed to the card layer. Local play passes nothing and the plate is
+   *   character for character what it was.
+   */
+  update({
+    dt,
+    match,
+    gameCamera,
+    fade = 1,
+    labelFor = null,
+    nameFor = null,
+    outcomeFor = null,
+    turnClock = null,
+  }) {
     const ui = this.config.ui;
     this.materials.shared.uSnapAmount.value = ui.vertexSnap;
     this._fade = fade;
@@ -333,7 +541,8 @@ export class HudLayer {
     }
 
     this._updateScore(dt, match, gameCamera);
-    this._updateTurn(match);
+    this._updateTurn(match, labelFor, nameFor, outcomeFor);
+    this._updateTimer(turnClock);
     this._updateNote(match);
     this._updateButtons();
 
@@ -345,7 +554,15 @@ export class HudLayer {
      * a plate hidden by the fade in one of those frames would never be told to
      * come back and would stay gone for the rest of the match.
      */
-    for (const m of [this.score, this.turn, this.note, this.exit, this.restart]) {
+    for (const m of [
+      this.score,
+      this.turn,
+      this.note,
+      this.exit,
+      this.recenter,
+      this.timerTrack,
+      this.timerFill,
+    ]) {
       // ASSIGNED from the plate's own base, never multiplied into what is
       // already there. Multiplying looks equivalent and is not: `turn` and
       // `note` do not rewrite their opacity every frame, so the product
@@ -418,29 +635,110 @@ export class HudLayer {
     this.score.userData.want = shown > 0.004;
   }
 
-  _updateTurn(match) {
+  _updateTurn(match, labelFor, nameFor, outcomeFor) {
     this.turn.userData.want = true;
     this.turn.userData.base = 1;
     const over = match.state === MATCH_STATE.OVER;
     const player = match.rules.currentPlayer;
+    // The suffix is on the TURN line only. The result line names a winner, and
+    // whether that winner was a computer is not what the player is reading it
+    // for — "PLAYER 2 (AI) 승리" is a longer way of saying the same thing on a
+    // 152-pixel plate that has to hold it.
+    const suffix = labelFor ? labelFor(player) : '';
+    /**
+     * A whole name, when somebody has one.
+     *
+     * Online seats are people with nicknames, and "PLAYER 2 (온라인)" would be a
+     * longer way of not saying who you are playing. `nameFor` replaces the
+     * "PLAYER n" half outright rather than appending to it — a suffix cannot
+     * express "call this seat 한별 instead" — and returning nothing falls back to
+     * exactly the plate this always drew, which is what local and AI play do.
+     */
+    const named = (nameFor ? nameFor(player) : '') || '';
+    const winnerName = (over && nameFor ? nameFor(match.winner) : '') || '';
+    /**
+     * The same sentence the victory screen uses, for the same reason.
+     *
+     * This plate sits behind that screen, so a "AI 승리" here under a "패배"
+     * there would be the game contradicting itself in two places at once.
+     * `outcomeFor` answers null when there are two people at the board, and the
+     * winner's name comes back.
+     */
+    const outcome = over && match.winner >= 0 ? outcomeFor?.(match.winner) : null;
     const text = over
       ? match.winner === -1
         ? '무승부'
-        : `PLAYER ${match.winner + 1} 승리`
-      : `PLAYER ${player + 1}`;
+        : (outcome ?? `${winnerName || `PLAYER ${match.winner + 1}`} 승리`)
+      : named || `PLAYER ${player + 1}${suffix}`;
     const color = over
       ? match.winner >= 0
         ? PLAYER_COLORS[match.winner]
-        : '#888888'
+        : PALETTE.neutral
       : PLAYER_COLORS[player];
 
     const key = `${text}|${color}`;
     if (key === this._turnKey) return;
     this._turnKey = key;
-    this.turn.material.uniforms.uMap.value = turnPlateTexture(text, color, {
+    const tex = turnPlateTexture(text, color, {
       ...TURN,
       scale: this.config.ui.textureScale,
     });
+    this.turn.material.uniforms.uMap.value = tex;
+    // The plate sizes to its text now, so the quad has to follow it — the same
+    // contract the note line has. Scaling to anything else resamples the type.
+    const w = tex.userData?.width ?? TURN.width;
+    this.turn.scale.set(w, TURN.height, 1);
+    if (this._turnLeft !== undefined) this.turn.position.x = this._turnLeft + w / 2;
+    // The clock sits under the plate and is as wide as it is, so a long nickname
+    // widens both together rather than leaving a bar that no longer lines up.
+    this._timerWidth = w;
+    if (this._timerY !== undefined) {
+      this.timerTrack.scale.x = w;
+      this.timerTrack.position.x = this._turnLeft + w / 2;
+    }
+  }
+
+  /**
+   * The turn clock.
+   *
+   * @param {{remaining: number, total: number}|null} clock
+   *   Null in local and AI play — there is no clock, so there is no bar. The
+   *   server owns the real timer; this is a readout of what it last said, which
+   *   is why it takes a value rather than counting anything itself.
+   */
+  _updateTimer(clock) {
+    const on = !!clock && clock.total > 0 && clock.remaining !== null;
+    this.timerTrack.userData.want = on;
+    this.timerFill.userData.want = on;
+    this.timerTrack.userData.base = 1;
+    if (!on) return;
+
+    const t = Math.max(0, Math.min(1, clock.remaining / clock.total));
+    // Scaled from the LEFT rather than about the centre: a bar that shrinks
+    // toward its middle reads as two bars closing, not as time running out.
+    const full = this._timerWidth ?? TURN.width;
+    const w = Math.max(0.001, full * t);
+    this.timerFill.scale.x = w;
+    this.timerFill.position.x = this._turnLeft + w / 2;
+
+    const urgent = clock.remaining <= TIMER_URGENT_SEC;
+    const tint = this.timerFill.material.uniforms.uTint.value;
+    if (urgent) {
+      tint.set(1, 0.33, 0.25);
+      /**
+       * Flashing, on the clock's own value rather than on a frame counter.
+       *
+       * `remaining` is seconds, so this is 3 Hz whatever the frame rate — and it
+       * cannot drift or stall on a throttled tab, which a per-frame counter
+       * would. Never fully off: a bar that vanishes on alternate frames looks
+       * broken rather than urgent.
+       */
+      const pulse = 0.55 + 0.45 * (Math.sin(clock.remaining * Math.PI * 6) * 0.5 + 0.5);
+      this.timerFill.userData.base = pulse;
+    } else {
+      tint.set(0.88, 0.76, 0.42);
+      this.timerFill.userData.base = 1;
+    }
   }
 
   _updateNote(match) {
@@ -481,16 +779,29 @@ export class HudLayer {
    */
   _updateButtons() {
     this.exit.userData.want = true;
-    this.restart.userData.want = true;
+    this.recenter.userData.want = true;
     const ui = this.config.ui;
     const dim = Math.min(1, Math.max(0, ui.dimOpacity));
     const shown = smoothstep(this._scoreShown);
+
+    /**
+     * Nothing to put back, so the button says so — and still works.
+     *
+     * "이미 기본 구도 상태면 흐리게 표시한다 (나가기 버튼의 줌인 시 처리와 동일한
+     * 방식). 흐린 상태에서도 클릭은 동작한다." Same mechanism as the exit
+     * button's zoom dimming, which is why it is the same `base` weight rather
+     * than a second kind of fade — and `_hits` is untouched, so the hit quad
+     * neither knows nor cares. A player who presses a dim reset gets the reset.
+     */
+    const settled = !!this._atDefaultView();
 
     for (const h of this._hits) {
       const hot = this.hovered === h.id;
       // Full weight when the board is wide (the same moment the score is up) or
       // when the pointer is on it; dimmed the rest of the time.
-      h.plate.userData.base = hot ? 1 : dim + (1 - dim) * shown;
+      let base = hot ? 1 : dim + (1 - dim) * shown;
+      if (h.id === 'recenter' && settled && !hot) base = dim;
+      h.plate.userData.base = base;
     }
 
     const key = `${this.hovered ?? '-'}|${ui.textureScale}`;
@@ -502,10 +813,10 @@ export class HudLayer {
       this.hovered === 'exit' ? 'hover' : 'idle',
       size,
     );
-    this.restart.material.uniforms.uMap.value = buttonTexture(
-      '재시작',
-      this.hovered === 'restart' ? 'hover' : 'idle',
-      size,
+    this.recenter.material.uniforms.uMap.value = iconButtonTexture(
+      'recenter',
+      this.hovered === 'recenter' ? 'hover' : 'idle',
+      { size: ICON, scale: ui.textureScale },
     );
   }
 
@@ -567,7 +878,7 @@ export class HudLayer {
     if (!id || cancelled) return false;
     if (this.hovered !== id) return false;
     if (id === 'exit') this.onExit();
-    else if (id === 'restart') this.onRestart();
+    else if (id === 'recenter') this.onRecenter();
     return true;
   }
 
@@ -580,7 +891,15 @@ export class HudLayer {
   }
 
   dispose() {
-    for (const m of [this.score, this.turn, this.note, this.exit, this.restart]) {
+    for (const m of [
+      this.score,
+      this.turn,
+      this.note,
+      this.exit,
+      this.recenter,
+      this.timerTrack,
+      this.timerFill,
+    ]) {
       m.geometry.dispose();
     }
     for (const h of this._hits) h.mesh.geometry.dispose();

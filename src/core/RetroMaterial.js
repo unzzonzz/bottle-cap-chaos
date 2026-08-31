@@ -1,4 +1,5 @@
 import { Color, DoubleSide, FrontSide, ShaderMaterial, Vector2, Vector3 } from 'three';
+import { PALETTE } from './palette.js';
 
 /**
  * The PS1 material.
@@ -181,22 +182,26 @@ export class RetroMaterials {
       uFillColor: { value: new Color() },
       uLightColor: { value: new Color() },
       uAmbientColor: { value: new Color() },
-      // The void is pure black and there is nothing to lose in it, so fog is off
-      // by default — the uniforms stay because the game modes will want them.
-      uFogColor: { value: new Color('#000000') },
+      // Fog is off by default and the uniforms stay because the game modes will
+      // want them. The colour is the sky's own haze rather than the black it was:
+      // the argument for black was that the void behind everything was black and
+      // there was nothing to lose in it, and the void is a sky now, so fog that
+      // faded toward black would darken distance in a scene lit to do the
+      // opposite.
+      uFogColor: { value: new Color(PALETTE.bg.skyLow) },
       uFogDensity: { value: 0.0 },
     };
 
     // Unmultiplied hue + separate intensity, so a retint never fights the
     // intensity sliders.
-    this.keyBase = new Color('#fff4e2');
-    this.fillBase = new Color('#7d90b4');
-    this.ambientBase = new Color('#59627a');
+    this.keyBase = new Color(PALETTE.light.sun);
+    this.fillBase = new Color(PALETTE.light.fill);
+    this.ambientBase = new Color(PALETTE.light.ambientSky);
     this.keyIntensity = 1.15;
     this.fillIntensity = 0.42;
     // Ambient adds no shape at all — it is the same everywhere on the object —
-    // so it is kept to the minimum that stops the unlit side going pure black
-    // against the void, and the fill carries the rest.
+    // so it is kept to the minimum that stops the unlit side going flat against
+    // the sky behind it, and the fill carries the rest.
     this.ambientIntensity = 0.28;
     this.applyLighting();
 
@@ -235,7 +240,7 @@ export class RetroMaterials {
   create(opts = {}) {
     const {
       map = null,
-      color = '#ffffff',
+      color = PALETTE.untinted,
       doubleSided = false,
       gloss = 1,
       snap = 1,

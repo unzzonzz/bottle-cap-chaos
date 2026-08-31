@@ -48,9 +48,100 @@ import { pullToPower } from './shot.js';
 
 const BOARD_PLANE = new Plane(new Vector3(0, 1, 0), 0);
 
+/**
+ * What the cards do to an aim: the twist, and the two multipliers.
+ *
+ * ── free function because the AI shoots without a pointer ───────────────────
+ * Everything in this file below is driven by a drag, and an AI has none — it
+ * arrives with a heading it computed and needs the same three things done to it
+ * that a human's heading gets. Left as private getters, the AI would have had to
+ * reproduce them, and the failure mode is silent and specific: 혼란 cast on the
+ * AI would deviate nothing, so the card would look broken against one opponent
+ * and fine against the other. 강타 would boost a human's shot and not the AI's.
+ *
+ * So the rule lives here once and has two callers. The getters below are now
+ * thin wrappers over it, and behave exactly as they did.
+ *
+ * ── the twist goes on the AIM, before the charge cone ──────────────────────
+ * Deliberately, and the long note on `_twisted` is the argument: everything
+ * downstream reads the direction off the shot record, so twisting at the source
+ * means the line, the preview, the impulse and the replay all agree without any
+ * of them knowing a card exists. `aimAfterSpread` then stacks the charge cone on
+ * top — two independent errors, as asked.
+ *
+ * ── `twist: false` is for CHOOSING, and it is not an optimisation ───────────
+ * Under 혼란 the deviation is `mix(seed, angleBucket)` — a pure function of where
+ * you aim, not a fresh draw — so anything that can evaluate many headings can
+ * simply keep the one whose twist points where it wanted to go. `AimOverlay`'s
+ * header is explicit that this is the failure the card has to be protected from:
+ *
+ *     Sweep the pull until the arrow points at the target and the card has been
+ *     undone by reading it off the screen. So `blind` removes everything that
+ *     points ANYWHERE: the arrow, the cone, the predicted path.
+ *
+ * A human is therefore shown nothing at all about where a confused shot will go.
+ * An AI that shaped every candidate before scoring it was computing exactly the
+ * thing the human is denied, forty-odd times, and picking the flattering one —
+ * so 혼란 cost it nothing. Reported from play as "혼란 당해도 정확해".
+ *
+ * So the search shapes with `twist: false`: it plans the heading it INTENDS,
+ * which is all a blinded player has, and the twist is applied once at commit.
+ * The multipliers are not gated — 강타 is a card this player chose to play and
+ * its effect on their own shot is not a secret.
+ *
+ * @param {import('./cards/CardEffects.js').CardEffects|null} cards
+ * @param {number} player
+ * @param {number} dirX  normalised travel direction, before the cards have a say
+ * @param {number} dirZ
+ * @param {{twist?: boolean}} [opts]  false to leave 혼란 out — see above
+ */
+export function shapeAim(cards, player, dirX, dirZ, { twist = true } = {}) {
+  if (!cards) return { dirX, dirZ, deviation: 0, impulseMul: 1, spreadMul: 1 };
+  if (!twist) {
+    return {
+      dirX,
+      dirZ,
+      deviation: 0,
+      impulseMul: cards.impulseMulFor(player),
+      spreadMul: cards.spreadMulFor(player),
+    };
+  }
+
+  const angle = Math.atan2(dirZ, dirX);
+  const deviation = cards.deviationFor(player, angle);
+  let x = dirX;
+  let z = dirZ;
+  if (deviation !== 0) {
+    const c = Math.cos(deviation);
+    const s = Math.sin(deviation);
+    // Same rotation `shot.rotateY` uses, inlined to keep the handedness argument
+    // in one place. See the note this replaced.
+    x = dirX * c + dirZ * s;
+    z = -dirX * s + dirZ * c;
+  }
+  return {
+    dirX: x,
+    dirZ: z,
+    deviation,
+    // The boost multiplies the CHARGE CONE only, never the chaos deviation —
+    // scaling that would make 강타 a partial cure for the opponent's 혼란 rather
+    // than a cost of its own. `deviation` above is already applied to the raw
+    // aim, so the two stack.
+    impulseMul: cards.impulseMulFor(player),
+    spreadMul: cards.spreadMulFor(player),
+  };
+}
+
 export class AimInput {
-  constructor({ canvas, camera, match, config }) {
+  /**
+   * @param {() => {left:number, top:number, width:number, height:number}} [boardRect]
+   *   Where the 3D board is drawn, in client coordinates. Defaults to the whole
+   *   canvas, which is what it was before the frame could be taller than the
+   *   board — see Viewport.boardClientRect.
+   */
+  constructor({ canvas, camera, match, config, boardRect }) {
     this.canvas = canvas;
+    this._boardRect = boardRect ?? (() => canvas.getBoundingClientRect());
     this.camera = camera;
     this.match = match;
     this.config = config;
@@ -101,17 +192,8 @@ export class AimInput {
    * independent errors, stacked, as asked.
    */
   get _twisted() {
-    const cards = this.match.cards;
-    if (!cards) return { x: this.dirX, z: this.dirZ, deviation: 0 };
-    const player = this.match.rules.currentPlayer;
-    const angle = Math.atan2(this.dirZ, this.dirX);
-    const deviation = cards.deviationFor(player, angle);
-    if (deviation === 0) return { x: this.dirX, z: this.dirZ, deviation: 0 };
-    const c = Math.cos(deviation);
-    const s = Math.sin(deviation);
-    // Same rotation `shot.rotateY` uses, inlined to avoid importing a helper for
-    // two lines and to keep the handedness argument in one place.
-    return { x: this.dirX * c + this.dirZ * s, z: -this.dirX * s + this.dirZ * c, deviation };
+    const s = shapeAim(this.match.cards, this.match.rules.currentPlayer, this.dirX, this.dirZ);
+    return { x: s.dirX, z: s.dirZ, deviation: s.deviation };
   }
 
   /**
@@ -129,10 +211,8 @@ export class AimInput {
    * stack — see `_twisted`, which runs first, on the raw aim.
    */
   get _mul() {
-    const cards = this.match.cards;
-    if (!cards) return { impulse: 1, spread: 1 };
-    const player = this.match.rules.currentPlayer;
-    return { impulse: cards.impulseMulFor(player), spread: cards.spreadMulFor(player) };
+    const s = shapeAim(this.match.cards, this.match.rules.currentPlayer, this.dirX, this.dirZ);
+    return { impulse: s.impulseMul, spread: s.spreadMul };
   }
 
   // ── derived quantities ───────────────────────────────────────────────────
@@ -166,12 +246,13 @@ export class AimInput {
   /**
    * Board-plane point under a client coordinate, or null if the ray misses.
    *
-   * From the canvas rect rather than the window: the canvas is letterboxed to
-   * 4:3 inside a window of any shape, and using window coordinates would put the
-   * aim off by the width of the black bars.
+   * From the BOARD's rect rather than the window or the canvas: the canvas is
+   * letterboxed inside a window of any shape, and in portrait the board is
+   * itself a band inside the canvas with the HUD above it and the cards below.
+   * Using either of the outer boxes would put the aim off by the bars.
    */
   pick(clientX, clientY) {
-    const r = this.canvas.getBoundingClientRect();
+    const r = this._boardRect();
     if (r.width < 1 || r.height < 1) return null;
     this._ndc.set(
       ((clientX - r.left) / r.width) * 2 - 1,

@@ -22,25 +22,47 @@ import { LocalStorageMarks } from './marks/MarkStorage.js';
 import { MarkTextures } from './marks/markTextures.js';
 import { ColliderView } from './render/ColliderView.js';
 import { OrbView } from './render/OrbView.js';
+import { DistanceMarks } from './render/DistanceMarks.js';
 import { AimOverlay } from './render/AimOverlay.js';
 import { GameCamera } from './render/GameCamera.js';
-import { HudLayer } from './ui/HudLayer.js';
+import { CamTracker } from './render/CamTracker.js';
+import { TrackPathView } from './render/TrackPathView.js';
+import { AiCandidateView } from './render/AiCandidateView.js';
+import { HudLayer, HUD_FRAME } from './ui/HudLayer.js';
 import { VictoryLayer } from './victory/VictoryLayer.js';
 import { WipeOut } from './victory/WipeOut.js';
 import { fadeIn, fadeOut } from './ui/pageFade.js';
-import { menuUrl } from './menu/menuRoutes.js';
+import { isAiOpponent, isOnlineOpponent, menuUrl } from './menu/menuRoutes.js';
+import { OnlineSession } from './net/OnlineSession.js';
+import { defaultServerUrl } from './net/Transport.js';
+import { LocalStorageNicknames, Profile } from './profile/NicknameStorage.js';
+import { OnlineMatch } from './net/OnlineMatch.js';
+import { OnlineController } from './net/OnlineController.js';
+import { MatchFoundLayer } from './net/MatchFoundLayer.js';
+import { ModalLayer } from './ui/ModalLayer.js';
+import { AiController, HumanController } from './game/ai/Controller.js';
 import { CardLayer, FRAME } from './render/CardLayer.js';
 import { CardFx } from './render/CardFx.js';
 import { CardFlight } from './render/CardFlight.js';
+import { setFieldAspect, updateFrame } from './core/frame.js';
 import { bootPhysicsDebug } from './debug/PhysicsDebug.js';
+import { MetricsOverlay, NO_METRICS } from './debug/MetricsOverlay.js';
+import { SafeArea } from './platform/safeArea.js';
+import { hardenWebView } from './platform/webview.js';
 import { bootViewer } from './viewer/bootViewer.js';
 import { bootMenu } from './menu/bootMenu.js';
 import { CapWipe } from './menu/CapWipe.js';
 import { MENU_CONFIG } from './menu/menuConfig.js';
 import { STAGE, Transition } from './menu/Transition.js';
 import { HANDOVER_FLAG, isHandover, isReturnFromGame } from './menu/menuRoutes.js';
+import { PALETTE } from './core/palette.js';
+import { applyCssPalette } from './ui/cssPalette.js';
+import { whenFontsReady } from './ui/fonts.js';
 import { aimedLaunchDirection, CAP_COLOR } from './menu/Bottle.js';
 import { capLogoTexture } from './menu/menuTextures.js';
+import { AudioSystem } from './audio/AudioSystem.js';
+import { AudioSettingsBook, LocalStorageAudioSettings } from './audio/AudioSettings.js';
+import { MatchAudio } from './audio/MatchAudio.js';
 
 /**
  * Wiring, and the one place the three layers are allowed to see each other.
@@ -93,11 +115,65 @@ if (routed) {
  * be too. Left as the default black it is a flash, which is the one thing the
  * covered window exists to prevent.
  */
+// The stylesheet names `var(--bcc-*)` and nothing else, so this has to run
+// before the letterbox, the page fade or either developer overlay is painted.
+// It is cheap — a dozen `setProperty` calls — and it is deliberately ahead of
+// the handover paint below, which sets inline styles that must win over it.
+applyCssPalette();
+
+/**
+ * Kick the webfont, and drop every baked text texture once it lands.
+ *
+ * Deliberately NOT awaited. The caches this empties are all re-filled on the
+ * next frame that asks for a plate, so the cost of being early is one frame of
+ * fallback type and the cost of awaiting would be a blank screen until a font
+ * request that may never succeed either resolves or times out.
+ */
+whenFontsReady();
+
 const handover = isHandover();
 if (handover) {
   document.documentElement.style.background = CAP_COLOR;
   document.body.style.background = CAP_COLOR;
 }
+
+/**
+ * Sound, built BEFORE the branch and shared by every destination.
+ *
+ * ── one construction site, like the marks store ─────────────────────────────
+ * `LocalStorageMarks` is deliberately named in exactly two places and says so;
+ * the same discipline applies here and this file can do better than two, because
+ * the three "pages" are three branches of one module rather than three
+ * documents. So the storage implementation is named once, right here, and both
+ * boots are handed the result.
+ *
+ * ── and BEFORE `await initRapier()`, which is the load-bearing part ─────────
+ * `install()` attaches the first-gesture listener. The game branch is async on
+ * the WASM and `PointerRouter` — which owns every pointer listener on that page
+ * — does not exist until it resolves, so an unlock hung off the router would
+ * miss every press made while the physics core was still loading. Registered at
+ * module scope it cannot be missed, which is the same argument the handover
+ * repaint above makes for running where it does.
+ *
+ * The listener is additive and passive. It does not go through the router or
+ * `bootMenu.onDown`, both of which return early in exactly the states where a
+ * press still has to unlock audio — during a transition, behind the cap wipe.
+ */
+const audioSettings = new AudioSettingsBook(new LocalStorageAudioSettings());
+const audio = new AudioSystem({ config: CONFIG.audio, settings: audioSettings }).install();
+
+/**
+ * The web view's own gestures, off — for all three destinations below.
+ *
+ * At module scope for the same reason `install()` above is: the guards are
+ * document-level and additive, and the game branch does not exist until the WASM
+ * resolves. A pinch made while the physics core is still loading would otherwise
+ * be handled by the browser, which zooms the page and leaves it zoomed.
+ *
+ * Most of the blocking is CSS and native config; this is only the handful with
+ * no declarative form. See src/platform/webview.js for what lives where.
+ */
+hardenWebView();
 
 /**
  * Three destinations, in the one order that works.
@@ -121,7 +197,7 @@ if (new URLSearchParams(location.search).get('view') === 'cap') {
     document.getElementById('app').appendChild(p);
   });
 } else {
-  bootMenu(canvas);
+  bootMenu(canvas, { audio, audioSettings });
   /**
    * The far side of a match's fade back to the menu.
    *
@@ -154,16 +230,41 @@ async function boot(canvas) {
   await initRapier();
 
   // ── render pipeline (phase 1, untouched) ─────────────────────────────────
-  const viewport = new Viewport({ canvas, mode: CONFIG.view.renderMode });
+  // `portrait: true` is what lets the canvas grow taller than the board's 4:3,
+  // putting the HUD and the card hand in bands above and below the play area
+  // instead of on top of it. It resolves to exactly the old 4:3 for any window
+  // at least that wide, so landscape and every desktop window are unchanged.
+  // The menu and the cap viewer leave it off — see src/core/frame.js.
+  // NOTE: `portrait: true` turns on the taller frame — the HUD and card hand in
+  // bands above and below the board instead of on top of it. Everything it needs
+  // is built and verified (shared frame, board sub-rect, re-based input, refitted
+  // ortho cameras), but there is one unresolved rendering artefact in the bottom
+  // band, so it ships OFF until that is chased down. Off, every number in the
+  // pipeline is what it was before core/frame.js existed.
+  const viewport = new Viewport({ canvas, mode: CONFIG.view.renderMode, portrait: true });
   const retroPass = new RetroPass({ resolution: viewport.resolution });
-  const retro = new RetroMaterials({ resolution: viewport.resolution });
+  /**
+   * The WORLD's materials snap to the BOARD's grid, not the whole target's.
+   *
+   * These two used to be the same number and are not any more. `uTargetRes`
+   * drives the vertex snap — `vec2 grid = uTargetRes * 0.5` — and the grid a
+   * vertex must land on is the one belonging to the VIEWPORT it is rasterised
+   * into, which for the world is the board's 4:3 band. Handing it the full
+   * frame's height would quantise vertical positions on a lattice two and a half
+   * times too coarse in portrait, which is a visible wobble on every cap.
+   *
+   * `retroPass` is the opposite case: it is a fullscreen quad over the whole
+   * target, so it wants the whole target's resolution, and it keys the dither
+   * lattice off it.
+   */
+  const retro = new RetroMaterials({ resolution: viewport.boardResolution });
 
   const scene = new Scene();
-  scene.background = new Color('#0a0c10');
+  scene.background = new Color(PALETTE.bg.skyTop);
 
   viewport.onResize(({ resolution }) => {
     retroPass.setResolution(resolution);
-    retro.setResolution(resolution);
+    retro.setResolution(viewport.boardResolution);
   });
 
   // ── the cap, measured once ───────────────────────────────────────────────
@@ -182,7 +283,102 @@ async function boot(canvas) {
   // A mode is a layout plus a rule set — the world's shape and what happens in
   // it. Everything either side of those two is shared, which is why switching
   // modes below is a rebuild and not a second copy of this function.
-  const match = new Match({ physics, capDims, config: CONFIG, mode: modeByKey(CONFIG.mode) });
+  /**
+   * A match pinned from the address bar: `?seed=12345`.
+   *
+   * The whole match comes out of this one number — every orb, every turn it
+   * appears on, every card it yields — so a seed is enough to hand somebody an
+   * exact match, which is what makes a bug report about "the orb on turn 3"
+   * something anybody else can look at.
+   *
+   * Only the OPENING match. Restarting from here draws a fresh one, because a
+   * URL that pinned every subsequent match too would be a game with one match in
+   * it wearing a query string — which is the thing this whole change is fixing.
+   * The panel's seed field is where a match is re-pinned deliberately.
+   *
+   * Base 10 or `0x`-prefixed hex, since that is how the panel shows it. Anything
+   * unparseable is ignored rather than becoming `NaN >>> 0` — seed 0 by typo.
+   */
+  const pinnedSeed = (() => {
+    const raw = new URLSearchParams(location.search).get('seed');
+    if (!raw) return undefined;
+    const n = Number(raw.trim());
+    return Number.isFinite(n) ? n >>> 0 : undefined;
+  })();
+
+  /**
+   * This player's name and preferred relay.
+   *
+   * Named here and in `bootMenu`, and nowhere else — the discipline
+   * `LocalStorageMarks` follows two lines below. The game document needs it for
+   * the server ADDRESS: the menu may have been pointed at a relay on another
+   * machine, and that choice has to survive the navigation.
+   */
+  const profile = new Profile(new LocalStorageNicknames());
+
+  const onlineStash = isOnlineOpponent() ? OnlineSession.recall() : null;
+  const online = onlineStash ? new OnlineSession({ config: CONFIG }) : null;
+  // Seat, seed and opponent are known from the stash alone, before any socket
+  // exists — which is what lets the controllers below be built once, correctly.
+  if (online) online.adopt(onlineStash);
+  /**
+   * Consumed immediately.
+   *
+   * Left in place it would re-attach this tab to a finished room the next time
+   * the page loaded — including when the player deliberately started a LOCAL
+   * game afterwards.
+   */
+  if (onlineStash) OnlineSession.clearStash();
+
+  /**
+   * Which seat the person at THIS screen occupies.
+   *
+   * Zero for local and AI play, as it has always been. Online it is whatever the
+   * server assigned, and that is not cosmetic: `match.rules.currentPlayer` and
+   * every cap index are seat numbers, so putting the local human anywhere other
+   * than their real seat would mean translating between two numbering schemes at
+   * every boundary — the aim input, the hand, the camera, the turn plate. One
+   * mistranslation is a player shooting the opponent's caps.
+   *
+   * Instead the seat is honoured and the two places that assumed "local means 0"
+   * ask this instead.
+   */
+  const localSeat = online ? online.mySeat : 0;
+  const remoteSeat = localSeat === 0 ? 1 : 0;
+
+  const match = new Match({
+    physics,
+    capDims,
+    config: CONFIG,
+    mode: modeByKey(CONFIG.mode),
+    seed: pinnedSeed,
+  });
+
+  /**
+   * The online match's per-frame work: applying what the opponent did, and
+   * reporting what this machine got.
+   *
+   * Null in local and AI play, and every use below is guarded — the game runs
+   * exactly the code it always did with one `?.` per frame.
+   */
+  const netMatch = online ? new OnlineMatch({ session: online, match }) : null;
+  /**
+   * The relay's coin toss, applied before anybody can move.
+   *
+   * Done here rather than inside `OnlineMatch` because it is a property of the
+   * MATCH's opening position, not of the connection — and it must happen before
+   * the first frame, while the opening snapshot is still the one being taken.
+   * Both clients receive the same `first` and run the same call, so the two
+   * worlds stay identical across it.
+   */
+  if (online) match.setFirstPlayer(online.match.first);
+
+  /** The opponent's name for the turn plate, when they have one. */
+  function onlineNameFor(player) {
+    if (!online) return '';
+    if (player === online.opponentSeat) return online.opponent?.nickname ?? '';
+    return online.nickname ?? '';
+  }
 
   /**
    * The marks each player chose in the menu.
@@ -230,8 +426,83 @@ async function boot(canvas) {
    * There is only one viewer there, and both caps are being shown TO them, so
    * "upright from your own seat" stops meaning anything. Everything faces front.
    */
-  const marks = new MarkTextures({ ...markOptions, rotations: [Math.PI, 0] });
-  const victoryMarks = new MarkTextures({ ...markOptions, rotations: [0, 0] });
+  /**
+   * Online, this player's mark is book entry 0 whatever seat they were given.
+   *
+   * The menu sends `wireMark(0)` — one person at this device, one chosen mark,
+   * entry 0. The server then seats them wherever it likes, and a player handed
+   * seat 1 was painting their own cap from entry 1: a slot they had never chosen
+   * anything for. Their opponent's mark showed (it is an override that arrives
+   * over the wire) and their own did not.
+   *
+   * Identity in local and AI play, where seat and entry really are the same
+   * thing — two people at one board, one entry each.
+   */
+  const bookSlotFor = online
+    ? (player) => (player === online.mySeat ? 0 : 1)
+    : null;
+
+  const marks = new MarkTextures({ ...markOptions, rotations: [Math.PI, 0], bookSlotFor });
+  const victoryMarks = new MarkTextures({ ...markOptions, rotations: [0, 0], bookSlotFor });
+
+  /**
+   * The opponent's cap art, when they are on another machine.
+   *
+   * Applied to BOTH texture sets, because the victory screen shows the same two
+   * caps and would otherwise put a clean cap next to the name of somebody whose
+   * mark was on the board a second earlier.
+   *
+   * Only the opponent's seat: this player's own mark comes out of their own book
+   * exactly as it always has, and overriding it with the copy that went over the
+   * wire would be a round trip for a picture we already have.
+   */
+  /**
+   * The opening sequence — the two players, before the board.
+   *
+   * ── every mode gets it, not only online ──────────────────────────────────
+   * It was built for 매칭 성립 and the placement is what makes it worth having
+   * everywhere: opponent top-left, you bottom-right, sliding into the corners
+   * the match itself keeps those two hands in. That reading is the same whether
+   * the other cap belongs to a stranger over a socket, to the computer, or to
+   * the person holding the other end of the table.
+   *
+   * ── it takes the FRONT-FACING bake, not the board's ──────────────────────
+   * `marks` is baked `[Math.PI, 0]` because on the table the two players sit
+   * across from each other and each mark has to read upright from ITS OWNER's
+   * seat — so 1P's is turned through half a circle. This sequence is not a
+   * table: both caps are held up to one viewer, exactly as the victory screen
+   * and the opponent-select screen do it, and both of those bake `[0, 0]` for
+   * that reason.
+   *
+   * Handed `marks`, 1P's mark came out upside down — which is the board's
+   * rotation being correct in the wrong place rather than anything being wrong
+   * with the bake. `victoryMarks` is the same artwork, including a mark that
+   * arrived over the wire (`setRemoteMark` below paints both sets), with the
+   * rotation this camera wants.
+   */
+  const matchFound = new MatchFoundLayer({
+    retro,
+    resolution: viewport.resolution,
+    config: CONFIG,
+    panelFor: (player) => victoryMarks.textureFor(player),
+  });
+  viewport.onResize(({ resolution }) => matchFound.setResolution(resolution));
+
+  /**
+   * The match's questions — leaving, a dropped opponent, a desync — as geometry.
+   *
+   * Modal by construction: it takes the pointer at the capture phase while it is
+   * open, so `PointerRouter` never sees a press aimed at a dialog and no branch
+   * anywhere else has to know one exists.
+   */
+  const modal = new ModalLayer({ canvas, resolution: viewport.resolution, config: CONFIG });
+  viewport.onResize(({ resolution }) => modal.setResolution(resolution));
+
+  if (online?.opponent?.mark) {
+    const seat = online.opponentSeat;
+    marks.setRemoteMark(seat, online.opponent.mark);
+    victoryMarks.setRemoteMark(seat, online.opponent.mark);
+  }
 
   const view = new ArenaView({
     retro,
@@ -245,7 +516,51 @@ async function boot(canvas) {
   // In the WORLD scene: an orb is an object on the board, so it takes the game
   // camera, the depth buffer and the retro pass exactly as a cap does.
   const orbView = new OrbView({ retro, config: CONFIG });
-  scene.add(view.root, overlay.root, colliderView.object, orbView.root);
+  /**
+   * Whatever the rules measured on the field, drawn where they measured it.
+   *
+   * In the WORLD scene and built unconditionally, exactly as the orb view is:
+   * it draws a list, the list comes from `RuleSet.distanceMarks`, and a mode
+   * that measures nothing hands it an empty one and it disappears. There is no
+   * mode branch here and there is not meant to be — see `DistanceMarks`.
+   */
+  const distanceMarks = new DistanceMarks();
+  /**
+   * The camera's own trails, for tuning the follow. Off unless the panel says.
+   *
+   * Unconditional in the scene for the same reason the two above are: it draws
+   * two arrays, an empty pair is nothing, and a mode that never tracks simply
+   * never fills them.
+   */
+  const trackPath = new TrackPathView();
+  /**
+   * What the AI considered, drawn where it considered it.
+   *
+   * In the world scene and unconditional, exactly as the three above are: it
+   * draws a list, an empty list is nothing, and a mode with no AI in it never
+   * fills one. Its objects are added lazily as ranks are needed, so a session
+   * that never switches the panel's toggle on builds nothing at all.
+   */
+  const aiCandidates = new AiCandidateView();
+  scene.add(
+    view.root,
+    overlay.root,
+    colliderView.object,
+    orbView.root,
+    distanceMarks.root,
+    aiCandidates.root,
+    ...trackPath.objects,
+  );
+
+  /**
+   * The frame has to know the field's shape before anything is laid out against
+   * it. `rebuildAll` repeats this on every mode change; this is the first one,
+   * and without it the opening match gets the 4:3 default region regardless of
+   * what it actually plays on.
+   */
+  setFieldAspect(match.arena.layout.extents.x / match.arena.layout.extents.z);
+  updateFrame(window.innerWidth, window.innerHeight);
+  viewport.refit();
 
   const gameCamera = new GameCamera({
     extents: match.arena.layout.extents,
@@ -275,7 +590,12 @@ async function boot(canvas) {
       const f = mode.camera?.[name];
       return f ? () => f(CONFIG) : null;
     };
-    return { minZoom: pick('minZoom'), maxZoom: pick('maxZoom'), turnZoom: pick('turnZoom') };
+    return {
+      minZoom: pick('minZoom'),
+      maxZoom: pick('maxZoom'),
+      turnZoom: pick('turnZoom'),
+      screenZoomMax: pick('screenZoomMax'),
+    };
   }
 
   /**
@@ -314,11 +634,37 @@ async function boot(canvas) {
    *   ONE-MORE. An extra turn keeps the zoom and pan the player set up, because
    *     it is another go at the same shot rather than a new turn. The bearing is
    *     already correct in that case, so the invariant has nothing to do.
+   *
+   * ── it is THE definition of the default framing, and has one more caller ──
+   * `CamTracker` calls it with `force` when a tracked turn ends without the seat
+   * changing — an AI or online opponent, or an extra-turn card — because there
+   * is then nothing else to put the view back. It calls THIS rather than
+   * reproducing what it does, so "the framing the camera returns to" and "the
+   * framing a turn change gives you" are the same sentence and cannot drift
+   * apart when the bearing rule or the opening zoom is next changed.
+   *
+   * @returns {boolean} did it reset the framing outright?
    */
   function faceCurrentPlayer(force = false) {
     const p = match.rules.currentPlayer;
-    const fn = match.mode.camera?.ownHalfBearing;
-    const bearing = fn ? fn(p) : null;
+    /**
+     * ── against an AI the bearing is PINNED to the person's own half ────────
+     * "AI 모드에는 플레이어 시점 전환이 없다. 턴이 바뀌어도 카메라 시점이 전환되지
+     * 않는다. P1 시점 고정."
+     *
+     * The rule this replaces exists because two people share one screen and each
+     * needs their own half at the bottom. With one person there is nobody to
+     * turn the board round FOR, and doing it anyway would mirror the board twice
+     * a turn under a player who never moved seats — they would spend the AI's go
+     * looking at their own half from behind.
+     *
+     * Only the bearing is pinned. The rest of the framing — the zoom back out,
+     * the pan to centre — still happens on a handover exactly as it does in
+     * local play, which is what keeps `faceCurrentPlayer` one function with one
+     * behaviour and what makes the reset button's target identical in both
+     * modes. See `GameCamera.defaultFraming`.
+     */
+    const bearing = turnBearing();
     const handover = match.rules.turn !== shownTurn && p !== shownPlayer;
     shownTurn = match.rules.turn;
     shownPlayer = p;
@@ -328,15 +674,122 @@ async function boot(canvas) {
     // played to get here.
     if (force || handover) {
       gameCamera.faceTo(bearing);
-      return;
+      return true;
     }
 
     // Otherwise: hold the bearing, and leave the zoom alone.
     if (!gameCamera.holdsOwnHalf(bearing)) gameCamera.faceTo(bearing, { zoom: false });
+    return false;
+  }
+
+  /**
+   * The camera's ride-along with the thrown cap.
+   *
+   * Built here and not inside `GameCamera` because it is a POLICY — which cap,
+   * for how long, and what a fall is worth — over a rig that deliberately knows
+   * none of those things. See its header, and `MODES.*.camera.track` for which
+   * modes it runs in.
+   */
+  const camTracker = new CamTracker({ config: CONFIG, camera: gameCamera });
+
+  /**
+   * Who is sitting in each seat.
+   *
+   * ── one array, and the game never looks inside it ────────────────────────
+   * `Match` has no idea these exist. An AI turn ends by `match.fire()` being
+   * called with a shot record and an AI card is played through
+   * `match.playCard()` — the identical calls the router makes for a person — so
+   * every rule, refusal and effect runs the same code path for both. See the
+   * header in `ai/Controller.js`.
+   *
+   * Seat 0 is always a person: this is one screen, and the brief adds an AI
+   * OPPONENT rather than a second AI. The far seat is whatever the menu handed
+   * over in the address, and `setOpponent` below lets the panel change its mind
+   * mid-match.
+   */
+  /**
+   * Can this mode be played against the computer at all?
+   *
+   * Only survival claims it — see `MODES.knockout.ai`. A hand-typed
+   * `/football?vs=ai` therefore opens local play rather than running the
+   * survival evaluator against a pitch, which would score goals as though they
+   * were caps falling off a board.
+   */
+  const aiAvailable = () => !!modeByKey(CONFIG.mode).ai;
+  /**
+   * The online session, if the menu handed one over.
+   *
+   * ── the flag alone is not enough, and that is deliberate ─────────────────
+   * `?vs=online` says this document was MEANT to be an online match; the stash
+   * says the matchmaker actually made one. A hand-typed URL has the first and
+   * not the second, and falls through to local play rather than to a broken
+   * screen waiting for an opponent who was never found.
+   */
+  const controllers = [];
+  controllers[localSeat] = new HumanController(localSeat);
+  controllers[remoteSeat] = online
+    ? new OnlineController(remoteSeat, online)
+    : isAiOpponent() && aiAvailable()
+      ? new AiController(remoteSeat, CONFIG)
+      : new HumanController(remoteSeat);
+
+  /**
+   * Change who is in the far seat, mid-match. The panel's override.
+   *
+   * Declared here and used far below, so the cancels it performs reach objects
+   * that exist by then — it is never called during this function's own body,
+   * where `input` and `router` are still in their temporal dead zone.
+   */
+  function setOpponent(kind) {
+    const want = kind === 'ai' && aiAvailable();
+    if (want === !!controllers[1]?.isAi) return;
+    controllers[1].cancel?.();
+    controllers[1] = want ? new AiController(1, CONFIG) : new HumanController(1);
+    // A seat that just changed hands must not inherit a half-drawn bow or a
+    // pointer gesture that was legal against the previous occupant.
+    input.cancel();
+    router.cancel();
+    // The hand pinning and the turn plate both change with this, and both are
+    // per-frame reads — but the FRAMING is not, so it is put right here.
+    faceCurrentPlayer(true);
+  }
+
+  /** The controller whose turn it is. Never null; falls back to seat 0. */
+  function active() {
+    return controllers[match.rules.currentPlayer] ?? controllers[0];
+  }
+
+  /** Is any seat a computer? Decides the pinned hand and the fixed viewpoint. */
+  function hasAi() {
+    return controllers.some((c) => c?.isAi);
+  }
+
+  /**
+   * The bearing the camera's default framing is measured against.
+   *
+   * Extracted because two callers need the same answer and they are far apart:
+   * `faceCurrentPlayer` builds the reset FROM it, and the HUD's reset button
+   * dims against `atDefaultFraming` OF it. A second copy of the pinning rule
+   * would let the button call the view "already default" at a bearing the turn
+   * change would not have chosen.
+   */
+  function turnBearing() {
+    const fn = match.mode.camera?.ownHalfBearing;
+    if (!fn) return null;
+    return fn(hasAi() ? localSeat : match.rules.currentPlayer);
   }
 
   // The bow. It owns no DOM events any more — see its header and the router's.
-  const input = new AimInput({ canvas, camera: gameCamera.camera, match, config: CONFIG });
+  const input = new AimInput({
+    canvas,
+    camera: gameCamera.camera,
+    match,
+    config: CONFIG,
+    // The board is a 4:3 band inside a canvas that may be taller than it. An
+    // aim ray normalised against the whole canvas would be out by the height of
+    // the HUD band above it. Identical to the canvas rect in landscape.
+    boardRect: () => viewport.boardClientRect(),
+  });
 
   // The hands. Their own scene and their own orthographic camera, drawn into the
   // same low-res target as the pitch so one dither and one quantiser cover both
@@ -357,6 +810,22 @@ async function boot(canvas) {
       player === match.rules.currentPlayer
         ? match.cards.usable(cardId, player)
         : { ok: true },
+    /**
+     * Whether 침묵 has this hand sealed.
+     *
+     * Asked for BOTH hands, unlike `usable` above, and that difference is the
+     * point. `usable` answers `ok` for whoever is not on turn because greying an
+     * opponent's parked hand for rules that will not apply until it is theirs
+     * would be noise. The seal is not that: it is a standing condition that was
+     * put there ON PURPOSE by the other player, and it has to be visible from
+     * the moment it lands — the effect's whole ending is a padlock being stamped
+     * onto that hand.
+     *
+     * It asks the player index and nothing else. Whether that player is a person
+     * or, later, an AI does not enter into it, which is what keeps the seal a
+     * rule rather than a property of the input path.
+     */
+    silenced: (player) => match.mode.cards !== false && match.cards.silencedOn(player),
     // A point that would grab one of your own caps belongs to the board, even
     // with a card drawn over it — see `CardLayer._reserved`. The same call the
     // router and the hover ring use, so all three agree about what a cap is.
@@ -365,6 +834,9 @@ async function boot(canvas) {
     // on the next sync — which is what opens the gap. See `CardHand._updateSort`.
     onReorder: (player, from, to) => match.hands.reorder(player, from, to),
     onCardUsed: (cardId, player) => {
+      // Before the local apply, for the reason `onFire` gives: `playCard` draws
+      // from the seeded counter and the opponent has to start from the same one.
+      netMatch?.localCard(cardId);
       match.playCard(cardId);
       window.dispatchEvent(new CustomEvent('cardused', { detail: { cardId, player } }));
     },
@@ -490,11 +962,61 @@ async function boot(canvas) {
     canvas,
     config: CONFIG,
     resolution: viewport.resolution,
-    onRestart: () => rebuildAll(),
+    // 재시작 is gone from the in-game HUD. It was the one control that could
+    // throw the match away mid-play, and online it could not be honoured at all
+    // — a client rebuilding its own world is a desync by definition, and the
+    // relay has no message for "start again". The victory screen still offers
+    // one, which is where starting over belongs: after a result, not during.
+    //
     // The same fade the menu's own return uses, so leaving a match looks the
     // same however you got here. No confirmation step: the brief rules one out
     // for now, and releasing off the button is the way back from a misplaced tap.
-    onExit: () => fadeOut(() => location.assign(menuUrl())),
+    //
+    // The sound is faded on the AUDIO clock rather than from the loop, because
+    // this document is thrown away 180 ms from now and a context torn down
+    // mid-voice clicks. Same 180 ms as `pageFade`, so they land together.
+    onExit: () => {
+      audio.play('ui_click');
+      /**
+       * Online, leaving is LOSING, so it asks first.
+       *
+       * "게임 중 나가기를 눌러도 몰수패다. 나가기 전에 확인 메시지를 띄워라."
+       * Local play is unchanged and still leaves immediately — there is nothing
+       * to lose and nobody waiting, and making a solo player confirm an exit
+       * would be a worse screen for the common case.
+       *
+       * `netHalted` means the match is already over by disconnect or desync;
+       * there is no longer anything to forfeit, so it leaves like a local one.
+       */
+      if (online && !netHalted) {
+        leaveOnline();
+        return;
+      }
+      audio.fadeOutForNavigation();
+      fadeOut(() => location.assign(menuUrl()));
+    },
+    /**
+     * The camera reset, and it is deliberately not a camera call.
+     *
+     * `faceCurrentPlayer(true)` is the SAME function the turn change runs —
+     * literally the one the per-frame invariant calls and the one `CamTracker`
+     * hands back through — so "기본 구도 = 턴 전환 때 잡히는 그 구도" is true by
+     * construction rather than by two places agreeing. There is no zoom, no
+     * bearing and no pan written here; the framing numbers live once, in
+     * `GameCamera.defaultFraming`, and `faceTo` eases to them over
+     * `view.turnViewSec`.
+     *
+     * `force` because the seat has not changed — that is the whole point of the
+     * button. Without it the invariant would find the bearing already correct
+     * and leave the zoom and pan exactly where the player put them.
+     */
+    onRecenter: () => {
+      audio.play('ui_click');
+      faceCurrentPlayer(true);
+    },
+    // Whether there is anything to put back, for the dimming only. Asked of the
+    // same bearing the reset would target — see `turnBearing`.
+    atDefaultView: () => gameCamera.atDefaultFraming(turnBearing()),
     // A point that would grab one of your own caps belongs to the board, even
     // with a button drawn over it — see `HudLayer._isReserved`. The same call
     // the cards and the hover ring use, so all three agree what a cap is.
@@ -537,7 +1059,23 @@ async function boot(canvas) {
     // The same MARKS the board's caps wear, but turned to face the camera —
     // both of them, whichever won. See the note on `victoryMarks`.
     teamTextures: [victoryMarks.textureFor(0), victoryMarks.textureFor(1)],
-    onRestart: () => restartFromVictory(),
+    /**
+     * The result, from the seat of whoever is watching.
+     *
+     * Only when there IS one seat to speak from. `hasAi()` is the existing test
+     * for "one person at this screen" — it is what already pins their hand to
+     * the bottom and stops the viewpoint flipping between turns — and it covers
+     * the online case too, because `OnlineController` reports `isAi` for exactly
+     * these presentation questions.
+     *
+     * Two people at one board get the seat numbers back, which is right: there
+     * is no "you" to address, and both of them are looking at it.
+     */
+    outcomeFor: (winner) => (hasAi() ? (winner === localSeat ? '승리' : '패배') : null),
+    onRestart: () => {
+      audio.play('ui_click');
+      restartFromVictory();
+    },
     /**
      * ── LEAVING is a page change, so it fades to black like every other one ──
      * Not the cap wipe. Restarting and leaving look like the same button from
@@ -557,10 +1095,56 @@ async function boot(canvas) {
     onExit: () => {
       if (victory.busy) return;
       victory.setBusy(true);
+      audio.play('ui_click');
+      audio.fadeOutForNavigation();
       fadeOut(() => location.assign(menuUrl()));
     },
   });
   viewport.onResize(({ resolution }) => victory.setResolution(resolution));
+
+  /**
+   * The notch and the home indicator, converted into this frame's own pixels.
+   *
+   * Registered LAST of the seven resize listeners, deliberately: `_fit` has
+   * already written `canvas.style.width/height` by the time any listener runs,
+   * but `getBoundingClientRect` reads the laid-out box, and putting this after
+   * the others keeps the read as far from the write as the fan-out allows.
+   *
+   * `measure()` returns true only when the frame-pixel answer actually moved, so
+   * the three `layout()` calls behind these setters fire on an orientation
+   * change and not on the dozen resizes a sliding URL bar produces. Every one of
+   * them is a no-op on identical insets in any case; this just avoids the work.
+   *
+   * The insets are zero on a desktop browser and — because the canvas is
+   * letterboxed to 4:3 and centred — zero in portrait on a phone as well. See
+   * src/platform/safeArea.js.
+   */
+  /**
+   * The camera's screen scale, so a cap is the same physical size on a phone.
+   *
+   * The framing is authored in world units, which makes a cap however many
+   * pixels the display gives that slice of board — 40 CSS px on a desktop
+   * canvas, 15 on a phone. `GameCamera.screenZoom` steps the default framing in
+   * by whatever the screen lost; this is the only thing that has to tell it how
+   * wide the board actually is. See the note on `REFERENCE_BOARD_CSS`.
+   */
+  const syncCameraScale = () => {
+    gameCamera.setBoardCssWidth(viewport.boardClientRect().width, FRAME.boardAspect);
+  };
+  syncCameraScale();
+  viewport.onResize(syncCameraScale);
+
+  const safeArea = new SafeArea(canvas, HUD_FRAME);
+  const applySafeArea = () => {
+    const insets = safeArea.frameInsets;
+    hud.setSafeInsets(insets);
+    cards.setSafeInsets(insets);
+    victory.setSafeInsets(insets);
+  };
+  applySafeArea();
+  viewport.onResize(() => {
+    if (safeArea.measure()) applySafeArea();
+  });
 
   /**
    * Restart, through the menu's own cap wipe.
@@ -611,6 +1195,10 @@ async function boot(canvas) {
     cards,
     hud,
     victory,
+    // The camera gestures — pan gain and turntable pivot — are measured against
+    // the board, not the canvas. The overlay hit tests are not: their ortho
+    // frames cover the whole canvas. See PointerRouter._boardRect.
+    boardRect: () => viewport.boardClientRect(),
     /**
      * Nothing is pressable while the cap is covering the screen.
      *
@@ -620,11 +1208,61 @@ async function boot(canvas) {
      * on one of the freshly built caps fired a real shot into a match the player
      * could not yet see. See `PointerRouter._blocked`.
      */
-    blocked: () => !!wipeOut?.running,
+    // The opening sequence has the screen while it runs, so a press during it
+    // must not start an aim on the board underneath — the same reason the
+    // victory wipe blocks. A press still SKIPS the sequence; that listener is
+    // `playMatchFound`'s and is unaffected by this.
+    blocked: () => !!wipeOut?.running || !!matchFound?.active,
+    /**
+     * Whether the seat on turn is a person who may act.
+     *
+     * The whole of "발사·카드 조작: 차단. 카메라 조작: 허용" — the router gates
+     * exactly the aim and the cards on this and leaves the camera and the HUD
+     * alone. Nothing had to be added for the camera: it was already ungated by
+     * match state, and the note on `MATCH_STATE.GOAL_HOLD` explains why.
+     */
+    accepts: () => active().acceptsInput,
+    /**
+     * A tap on the board that was not a drag. The AI's presentation skip.
+     *
+     * "연출 스킵: 클릭하면 즉시 다음 단계로 점프." A no-op for a human turn,
+     * because a human controller has nothing to skip.
+     */
+    onTap: () => active().skip?.(),
     onFire: (shot) => {
+      /**
+       * Sent BEFORE it is applied, and that ordering is the seed discipline.
+       *
+       * `OnlineMatch.localShot` reads the global seed counter as it stands right
+       * now and puts it on the wire; the receiving client restores it before
+       * applying. A send placed after `match.fire` would read a counter the shot
+       * had already moved, and the two machines would disagree about every card
+       * played afterwards. See `OnlineMatch.localShot`.
+       */
+      netMatch?.localShot(shot);
       match.fire(shot);
       preview.clear();
     },
+  });
+
+  /**
+   * The match's ears.
+   *
+   * After the router, because it reads `router.mode` to tell a hover from a
+   * press that has slid off its control. It only ever READS — every field it
+   * touches is one the renderer already reads, its randomness is its own
+   * stream, and the only physics calls it makes are queries. A match played
+   * with the sound on and one played with it off produce the same hashes.
+   */
+  const matchAudio = new MatchAudio({
+    audio,
+    config: CONFIG,
+    match,
+    input,
+    router,
+    cards,
+    hud,
+    victory,
   });
 
   /**
@@ -643,9 +1281,19 @@ async function boot(canvas) {
    * only thing that clears the bearing is moving to a mode that cannot turn,
    * which `setRotatable` does and explains.
    */
-  function rebuildAll(nextMode = null) {
-    if (nextMode && nextMode !== match.mode) match.setMode(nextMode);
-    else match.start();
+  /**
+   * @param {number} [seed]
+   *   the new match's root seed. Omitted means "draw a fresh one", which is what
+   *   every way a PLAYER starts a match wants: 재시작, 새 매치, a mode switch.
+   *
+   *   Passed means "the same luck again". Two callers want that and they are
+   *   both tuning tools rather than play: the panel's structural sliders, which
+   *   rebuild the world on every drag and must not reroll the orbs out from
+   *   under the thing being judged, and its explicit 같은 시드로 재시작.
+   */
+  function rebuildAll(nextMode = null, seed) {
+    if (nextMode && nextMode !== match.mode) match.setMode(nextMode, seed);
+    else match.start(seed);
 
     // Whatever brought us here — the victory screen's own 재시작, the panel's
     // 새 매치, a mode switch, a slider that changed what a cap IS — the match
@@ -657,19 +1305,70 @@ async function boot(canvas) {
     cardFx.setArena(match.arena);
     gameCamera.setFixedPitch(pitchFor(match.mode));
     gameCamera.setRotatable(!!match.mode.camera?.rotatable);
-    gameCamera.setExtents(match.arena.layout.extents);
+    /**
+     * The play area takes the FIELD's shape, so the frame has to be told what
+     * that is — a square knockout board and a long curling lane want very
+     * different regions, and giving both the screen's shape wastes half of it
+     * on one and crops the other. Before `setExtents`, so the camera's own
+     * re-fit below already sees the region it will be drawn into.
+     */
+    const ext = match.arena.layout.extents;
+    if (setFieldAspect(ext.x / ext.z)) {
+      updateFrame(window.innerWidth, window.innerHeight);
+      viewport.refit();
+    }
+    gameCamera.setExtents(ext);
     // After the extents, because the range is re-clamped against the new fit and
     // clamping against the old one would put the zoom somewhere neither mode
     // allows for a frame.
     const range = zoomRangeFor(match.mode);
-    gameCamera.setZoomRange({ min: range.minZoom, max: range.maxZoom, turn: range.turnZoom });
+    gameCamera.setZoomRange({
+      min: range.minZoom,
+      max: range.maxZoom,
+      turn: range.turnZoom,
+      screenMax: range.screenZoomMax,
+    });
     // The score hangs off the opponent's parked hand, and a mode with the card
     // system off has none — see `HudLayer.setHandParked`. Here rather than in
     // the per-frame update because the layout is fixed and this is the one event
     // that can change it.
     hud.setHandParked(match.mode.cards !== false);
+    /**
+     * And the sound's memory of the match that no longer exists.
+     *
+     * Every audio observation is a comparison against the previous frame, and
+     * this is the one event that makes the previous frame describe a DIFFERENT
+     * match — new rules, new bodies, the score back to zero. Without it a
+     * restarted football match announces a goal on its first turn, because the
+     * observer still remembers the score the last one finished on.
+     *
+     * Alongside `view.rebuild` and `cardFx.setArena` for the reason this whole
+     * function exists: giving each of these its own path is how one of them ends
+     * up forgetting.
+     */
+    matchAudio.reset();
+    /**
+     * And the camera's memory of a throw that no longer exists.
+     *
+     * Same reason again, and it has one of its own: the tracker holds cap
+     * INDICES and a list of which caps were in the pit, and the world those
+     * describe has just been thrown away. Without this a rebuild taken mid-turn
+     * — a structural slider, a mode switch — leaves it following an index into a
+     * different arena, and every cap in the new one reads as having just fallen.
+     */
+    camTracker.reset();
     preview.clear();
     router.cancel();
+    /**
+     * And whatever the opponent was in the middle of deciding.
+     *
+     * Same reason as `camTracker.reset` above and stated the same way: the
+     * controller holds cap INDICES, a plan built against a world that has just
+     * been thrown away, and a snapshot of it. Left alone, a rebuild taken during
+     * an AI turn — a structural slider, a mode switch, 재시작 — would fire a
+     * planned shot into a completely different arena.
+     */
+    for (const c of controllers) c?.cancel?.();
     // No deal. Hands are the match's now and `match.start()` has just emptied
     // them; the per-frame sync in `tick` puts the (empty) fans on screen.
     // A new match opens on the first player's own half at the widest zoom, the
@@ -678,6 +1377,38 @@ async function boot(canvas) {
     faceCurrentPlayer(true);
   }
 
+
+  /**
+   * The measurement panel. NOT behind `?debug=1`, and that is the whole point.
+   *
+   * `?debug=1` is a query on the launch URL, and a packaged app has no address
+   * bar to put one in — so every existing readout in this project is unreachable
+   * on the device it most needs to be read on. This one is gated on a tap
+   * instead, and remembers where it was left.
+   *
+   * `performance.now()` here is milliseconds since navigation start, so it is
+   * the honest boot cost of this document: the module graph, the Rapier WASM
+   * compile, every texture generated at startup, and the first world build. It
+   * is taken at the end of `boot()`'s body rather than at the first frame
+   * because the first frame is the thing it is timing the run-up to.
+   */
+  const debugRequested = new URLSearchParams(location.search).get('debug') === '1';
+
+  /**
+   * Off unless asked for. The stub keeps the loop's two calls honest.
+   *
+   * It was unconditional, because the whole point of it was to be readable on a
+   * phone where `?debug=1` cannot be typed. That was right while the question
+   * was "does this run at all on the device"; it is wrong as a thing sitting in
+   * the corner of a game nobody is measuring. The instrument stays — every
+   * sampling call site and the whole readout are intact — it simply does not
+   * mount itself unless the flag is on.
+   *
+   * To read numbers on a DEVICE, where there is no address bar to put the flag
+   * in: change this one expression to `true`, rebuild, and change it back. That
+   * is what was done for every measurement in docs/ios.md.
+   */
+  const metrics = debugRequested ? new MetricsOverlay({ bootMs: performance.now() }) : NO_METRICS;
 
   /**
    * The tuning panel, behind `?debug=1`.
@@ -691,12 +1422,12 @@ async function boot(canvas) {
    * changes when it is absent — the numbers are the same numbers, there is just
    * nothing on screen to drag them with.
    */
-  const debugRequested = new URLSearchParams(location.search).get('debug') === '1';
   const debug = debugRequested
     ? bootPhysicsDebug({
         match,
         view,
         camera: gameCamera,
+        tracker: camTracker,
         router,
         retro,
         retroPass,
@@ -707,10 +1438,240 @@ async function boot(canvas) {
         cardFx,
         hud,
         victory,
-        onRebuild: () => rebuildAll(),
+        audio,
+        audioSettings,
+        // Structural sliders keep the seed: dragging 뚜껑 크기 rebuilds the world
+        // on every step, and rerolling the orbs each time would change the thing
+        // being judged along with the thing being dragged.
+        onRebuild: () => rebuildAll(null, match.seed),
         onModeChange: () => rebuildAll(modeByKey(CONFIG.mode)),
+        // ...and these two are explicit about which they want.
+        onNewMatch: () => rebuildAll(),
+        onReplaySeed: (seed) => rebuildAll(null, seed),
+        // The seats, so the panel can force one either way mid-match, and the
+        // SAME reset the HUD button and the turn change both go through.
+        controllers,
+        setOpponent,
+        onRecenter: () => faceCurrentPlayer(true),
+        // Null in local and AI play, which is what makes the panel leave the
+        // online folder out entirely rather than showing one full of dashes.
+        online,
+        profile,
+        onReplayIntro: () => playMatchFound(),
+        onForceDesync: () => {
+          if (netMatch) netMatch.forceDesync = true;
+        },
+        onDumpLog: () => console.log(netMatch?.log?.serialize() ?? '(no log)'),
+        onExportLog: () => exportInputLog(),
       })
     : { refresh() {}, refreshCamera() {} };
+
+  // ── online lifecycle ──────────────────────────────────────────────────────
+
+  /**
+   * True once the match has been stopped by the network rather than by the game.
+   *
+   * A forfeit, a dropped opponent or a desync all end the match from OUTSIDE the
+   * rules, so `match.winner` is not set and the victory sequence will not fire.
+   * This is what the exit path and the input gate read instead.
+   */
+  let netHalted = false;
+
+  async function startOnline() {
+    if (!online) return;
+    online.on('desync', () => {
+      // Loud, and the match stops. "조용히 넘어가지 마라. 서로 다른 게임을 하게
+      // 되는 게 최악이다." The dump is on the session for the debug panel.
+      console.error('[online] DESYNC', online.desync);
+    });
+
+    online.on('over', (m) => {
+      if (netHalted) return;
+      netHalted = true;
+      const won = m.winner === online.mySeat;
+      /**
+       * Three endings, three messages, and they are deliberately not the same
+       * screen as a normal win. A forfeit win is an ANNOUNCEMENT, not a
+       * celebration — "통쾌함이 아니라 안내다".
+       */
+      const text =
+        m.reason === 'desync'
+          ? { title: '게임 중단', body: '두 기기의 시뮬레이션이 어긋나 게임을 중단했습니다.' }
+          : m.reason === 'disconnect'
+            ? { title: '상대 연결 끊김', body: m.message ?? '상대방의 연결이 끊어졌습니다. 부전승으로 처리됩니다.' }
+            : m.reason === 'forfeit'
+              ? { title: '상대 기권', body: m.message ?? '상대방이 게임을 나갔습니다. 부전승으로 처리됩니다.' }
+              : { title: won ? '승리' : '패배', body: '' };
+      if (m.reason === 'played') return; // the ordinary victory sequence owns this
+      modal.tell({ ...text }).then(() => {
+        audio.fadeOutForNavigation();
+        fadeOut(() => location.assign(menuUrl()));
+      });
+    });
+
+    const url = profile.server || defaultServerUrl();
+    try {
+      await online.connect(url);
+    } catch {
+      await modal.tell({
+        title: '연결 실패',
+        body: '서버에 연결할 수 없습니다. 메뉴로 돌아갑니다.',
+      });
+      location.assign(menuUrl());
+      return;
+    }
+    online.resume();
+
+    /**
+     * The sequence runs BEFORE `ready`, and that ordering is the fairness rule.
+     *
+     * The server starts no clock until both clients have reported ready, so the
+     * two-and-a-half seconds spent watching this come out of nobody's fifteen.
+     * "연출 때문에 시간을 잃으면 부당하다" — the cheapest way to honour that is
+     * for the clock not to exist yet, rather than for it to be paused and
+     * resumed and to hope the two clients pause for the same length of time.
+     */
+    await playMatchFound();
+    online.ready();
+  }
+
+  /**
+   * Play the match-found sequence to its end, or until somebody skips it.
+   *
+   * Resolves rather than blocking: the render loop is already running and is
+   * what advances it — this only waits. A sequence driven from here with its own
+   * timer would run on a different clock from the one drawing it.
+   */
+  /**
+   * What the two caps are called, whoever they belong to.
+   *
+   * Online it is the two nicknames. Against the computer the far seat is 'AI',
+   * which is what the turn plate has always called it. Two people at one screen
+   * get PLAYER 1 and PLAYER 2, because that is who they are — the local player
+   * may have a nickname set for online play, and using it here would label one
+   * seat with a name and the other with a number.
+   */
+  function introNames() {
+    if (online) {
+      return {
+        selfSeat: online.mySeat,
+        selfName: online.nickname || '나',
+        opponentName: online.opponent?.nickname || '상대',
+      };
+    }
+    const vsComputer = !!controllers[remoteSeat]?.planner;
+    return {
+      selfSeat: localSeat,
+      selfName: vsComputer && profile.named ? profile.nickname : `PLAYER ${localSeat + 1}`,
+      opponentName: vsComputer ? 'AI' : `PLAYER ${remoteSeat + 1}`,
+    };
+  }
+
+  function playMatchFound() {
+    if (!matchFound) return Promise.resolve();
+    if (CONFIG.intro?.enabled === false) return Promise.resolve();
+
+    matchFound.begin(introNames());
+
+    return new Promise((resolve) => {
+      /**
+       * ── it is NOT skippable ──────────────────────────────────────────────
+       * A press used to cut it to the end. Removed on instruction: the sequence
+       * runs once at the top of a match, it is under three seconds, and online
+       * it is also the window in which neither player's clock has started — so
+       * one player skipping ahead buys them nothing and leaves them staring at a
+       * board that is waiting for somebody else's animation to finish.
+       *
+       * The board underneath is already refusing input while this runs
+       * (`blocked` on the router), so a press during it now does nothing at all
+       * rather than doing something surprising.
+       */
+
+      /**
+       * A wall-clock deadline on top of the sequence's own progress.
+       *
+       * ── found by backgrounding a tab, and it forfeited the match ──────────
+       * The sequence is advanced from `tick`, which is driven by
+       * `requestAnimationFrame` — and a browser stops calling rAF entirely in a
+       * background tab. So a player who switched away during the intro never
+       * finished it, never sent `ready`, and the room sat in HANDOFF until the
+       * server timed it out and awarded the game to the other side. Losing a
+       * match for looking at another tab during a two-second animation is not a
+       * rule anybody agreed to.
+       *
+       * `setInterval` keeps running when throttled — at about 1 Hz, but running
+       * — so a deadline measured against `Date.now()` survives exactly the case
+       * that breaks the rAF clock. Generous, because it must never cut short a
+       * sequence that is merely playing on a slow machine.
+       */
+      const deadline = Date.now() + (matchFound.duration + 3) * 1000;
+      const poll = setInterval(() => {
+        const stalled = Date.now() > deadline;
+        if (matchFound.active && !stalled) return;
+        // Not a skip: the sequence is unskippable by the PLAYER. This is the
+        // safety net for a frame clock that has stopped — see the note above.
+        if (stalled) matchFound.skip();
+        clearInterval(poll);
+        resolve();
+      }, 50);
+    });
+  }
+  startOnline().catch((err) => console.error('[online] start failed', err));
+
+  /**
+   * Local and AI matches open on the same sequence.
+   *
+   * Not called for an online match: `startOnline` plays it there, and it has to
+   * happen at a specific point in that sequence — after the socket is attached
+   * and BEFORE `ready`, so the server's clock cannot start while it runs.
+   * Kicking off a second one here would play it twice.
+   */
+  if (!online) playMatchFound().catch((err) => console.error('[intro] failed', err));
+
+  /**
+   * Write the match's input log out as a file.
+   *
+   * The same format `tools/determinism` replays, so a match that desynced can be
+   * re-run offline under two engines rather than described from memory. That is
+   * the whole reason the log exists in the online path at all.
+   */
+  function exportInputLog() {
+    const log = netMatch?.log;
+    if (!log) return;
+    const blob = new Blob([log.serialize()], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `bcc-${log.mode}-${online?.match?.roomId ?? 'log'}.json`;
+    a.click();
+    // Revoked on the next tick: revoking synchronously can beat the download
+    // starting, and the object is a few kilobytes held for one frame.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  /**
+   * Leave an online match on purpose.
+   *
+   * The concession is sent BEFORE the navigation and the fade, because the
+   * document is about to be destroyed and with it the socket: a forfeit posted
+   * after `location.assign` may never leave the machine, and the opponent would
+   * then sit through the heartbeat timeout instead of being told immediately.
+   * Reported as a forfeit rather than a disconnect so they get the right message.
+   */
+  async function leaveOnline() {
+    const go = await modal.confirm({
+      title: '게임 나가기',
+      body: '지금 나가면 몰수패로 처리되고 상대가 승리합니다. 나가시겠습니까?',
+      confirmLabel: '나가기',
+      cancelLabel: '계속하기',
+      danger: true,
+    });
+    if (!go) return;
+    netHalted = true;
+    netMatch?.forfeit();
+    audio.fadeOutForNavigation();
+    fadeOut(() => location.assign(menuUrl()));
+  }
 
   // ── loop ─────────────────────────────────────────────────────────────────
   let raf = 0;
@@ -731,6 +1692,19 @@ async function boot(canvas) {
    * runs the identical code path the display does.
    */
   function tick(dt) {
+    const tickT0 = performance.now();
+    /**
+     * The network's frame, first.
+     *
+     * Before anything else in the tick, because what it does is APPLY the
+     * opponent's move — and a move applied after the match has already stepped
+     * this frame lands one step late on this machine and on time on the other,
+     * which is a divergence for free. It is also where the turn report goes out,
+     * and that has to see the state the previous frame ended in.
+     */
+    netMatch?.update();
+    matchFound?.update(dt);
+
     /**
      * The bow is drawn only while the router says a shot is being drawn.
      *
@@ -749,7 +1723,60 @@ async function boot(canvas) {
 
     // No input.update(dt). The bow has no time term at all — power is a pull
     // distance, so there is nothing for a frame time to advance.
+    //
+    // Bracketed rather than instrumented from inside: `Match.update` owns the
+    // accumulator and `PhysicsWorld.step` is the hot call, and neither is a
+    // place to put a timer. Everything the panel reports about physics is read
+    // from OUTSIDE — the wall time of this call, the step counter's delta, and
+    // the accumulator's leftover — so nothing in the sim knows it is measured
+    // and the numbers are the same whether the panel is up or not.
+    const physT0 = performance.now();
+    const stepsBefore = physics.steps;
     match.update(dt);
+    const physicsMs = performance.now() - physT0;
+    const steps = physics.steps - stepsBefore;
+
+    /**
+     * The seat on turn gets a frame.
+     *
+     * ── the turn is OPENED here, off the state rather than an event ─────────
+     * The same reasoning `faceCurrentPlayer` gives at length for being an
+     * invariant: every event-driven version of "the AI's turn has begun" has a
+     * path that does not fire. There are five of them here — a fresh match, a
+     * settled turn, the far side of a card effect, a 원모어 extra turn, and a
+     * rebuild from the panel — and `_beginAim` is reached differently by each.
+     * Asking `is it an idle AI's go and is a shot legal` covers all five and
+     * cannot miss a sixth.
+     *
+     * `phase === 'idle'` is what keeps it from re-arming: the controller is
+     * mid-sequence for the whole of its turn, including the stretch where the
+     * match sits back in AIM after its card effect has played.
+     *
+     * A human controller's `begin` and `update` are empty, so local play runs
+     * exactly the code it always did plus two calls that do nothing.
+     */
+    const controller = active();
+    if (
+      controller.isAi &&
+      controller.phase === 'idle' &&
+      match.state === MATCH_STATE.AIM &&
+      !victory.active &&
+      // ...and not while the opening sequence is on screen. The AI would
+      // otherwise think, choose and fire behind it, and the sequence would hand
+      // over to a board where a turn had already been taken.
+      !matchFound?.active
+    ) {
+      controller.begin({ match });
+    }
+    // The AI's search is sliced across frames and is by far the largest single
+    // cost in the app — up to ~100 rollouts of ~95 solver steps each, three
+    // times over on a turn that plays two cards. Timed separately from the
+    // physics above because it steps a DIFFERENT world (a snapshot restored into
+    // its own `RAPIER.World`), so it never shows up in `physics.steps`.
+    const aiT0 = performance.now();
+    controller.update(dt, { match });
+    const aiMs = performance.now() - aiT0;
+    const aiThinking = !!controller.isAi && controller.phase !== 'idle';
 
     /**
      * The winning sequence, armed on the EDGE into `OVER`.
@@ -802,7 +1829,11 @@ async function boot(canvas) {
 
     // Before the camera's own update, so the turn-over it may have just asked
     // for is eased on this frame rather than on the next one.
-    faceCurrentPlayer();
+    //
+    // The answer is kept because the tracker needs it: it tells the difference
+    // between a turn that has just been reframed for the next player and one
+    // that nobody is going to reframe at all. See `CamTracker._release`.
+    const reframed = faceCurrentPlayer();
 
     /**
      * Ride with the ball while the turn is being played out.
@@ -819,6 +1850,32 @@ async function boot(canvas) {
       gameCamera.stopFollow();
     }
 
+    /**
+     * And ride with the CAP in the two modes that are watched that way.
+     *
+     * Beside the ball follow rather than folded into it, because they are two
+     * different behaviours that happen to end at the same method: that one is a
+     * bare pan target on a ball and exists only in football; this one is a
+     * spring, a fall cut and a hand-back, and exists only where a mode says
+     * `camera.track`. Football names no such flag, so the two can never both be
+     * live — `hasBall` is football-only and `track` is the other two — and the
+     * football camera is exactly the camera it was.
+     *
+     * Everything it needs is handed in, so it imports nothing from `game/`:
+     * `match.shooter` is the cap the shot was fired with (`_liveShooter` while
+     * the turn plays out), and the line to keep on screen is the mode's.
+     */
+    camTracker.update({
+      dt,
+      live: match.state === MATCH_STATE.LIVE,
+      arena: match.arena,
+      shooter: match.shooter,
+      enabled: !!match.mode.camera?.track,
+      keepZ: match.mode.camera?.keepLineZ?.(match.arena) ?? null,
+      reframed,
+      onReturn: () => faceCurrentPlayer(true),
+    });
+
     // The camera does have one: rotation inertia and the pan glide run on WALL
     // CLOCK, deliberately outside the fixed-step loop. Neither is in the state
     // hash, and a field that happened to be spinning must not change how many
@@ -831,6 +1888,26 @@ async function boot(canvas) {
     // rather than on the last one's.
     cardFx.update({ dt, match, camera: gameCamera.camera });
     view.update(match.alpha, match.rules.alive, cardFx);
+    // After the view, so a mark and the cap it is measured from are drawn off
+    // the same frame's transforms rather than a frame apart — which on a
+    // measurement drawn to a hundredth of a unit would be visible.
+    distanceMarks.update(match.rules.distanceMarks?.(), match.arena.desc.radius);
+    trackPath.update(camTracker.targetPath, camTracker.lookPath, CONFIG.view.trackPath);
+    /**
+     * The AI's runners-up, while it still has some.
+     *
+     * `scored` survives the search and is only replaced on the next `begin`, so
+     * the lines stay up for the whole of the turn they explain — including while
+     * the shot is actually being played out, which is when comparing the
+     * prediction against what happens is most useful. The label's world size is
+     * derived from the board so it reads the same at any zoom.
+     */
+    aiCandidates.update(
+      controllers.find((c) => c?.isAi)?.planner?.scored ?? null,
+      CONFIG.ai.showCandidates,
+      Math.max(0, Math.round(CONFIG.ai.candidateCount)),
+      match.arena.desc.radius * 0.09,
+    );
     colliderView.update(physics.world, CONFIG.view.colliders);
     /**
      * ── everything that is not the board gets out of the way to aim ────────
@@ -865,7 +1942,31 @@ async function boot(canvas) {
      * — see the visibility pass at the end of it — so there is nothing to add.
      * Input is not relying on this: the router stops at the victory screen.
      */
-    hud.update({ dt, match, gameCamera, fade: victory.active ? 0 : uiFade });
+    hud.update({
+      dt,
+      match,
+      gameCamera,
+      fade: victory.active ? 0 : uiFade,
+      // "PLAYER 2 (AI)". A function of the seat, so the HUD never learns what an
+      // AI is — see the note on `HudLayer.update`.
+      labelFor: (player) => controllers[player]?.label ?? '',
+      // A seat with a real name says it instead of "PLAYER n" — see
+      // `HudLayer._updateTurn`. Local and AI seats have none and are unchanged.
+      nameFor: (player) => onlineNameFor(player),
+      // The same answer the victory screen gives — see its `outcomeFor`.
+      outcomeFor: (winner) => (hasAi() ? (winner === localSeat ? '승리' : '패배') : null),
+      /**
+       * The server's clock, for display only.
+       *
+       * The HUD counts nothing: `remaining` is derived from the deadline the
+       * relay last sent, rebuilt against THIS machine's clock so two devices
+       * whose system time differs do not show different countdowns. Null in
+       * local and AI play, where there is no clock and no bar.
+       */
+      turnClock: online
+        ? { remaining: online.remaining, total: online.turnMs / 1000 }
+        : null,
+    });
     // After the HUD, and that order matters: a texture-scale change empties the
     // shared plate cache from inside `hud.update`, and this re-asks for its own
     // plates every frame — so it must run on the far side of the clear rather
@@ -888,6 +1989,10 @@ async function boot(canvas) {
      */
     orbView.update(dt, match.orbs, gameCamera.camera);
     const picked = match.orbs.drainEvents();
+    // Handed on rather than drained a second time: `drainEvents` is destructive
+    // and this is the one call to it, so the audio layer is given the same array
+    // the burst and the flight are built from.
+    matchAudio.notePickups(picked);
     if (picked) {
       for (const ev of picked) {
         // A refusal has no card and no flight — the orb stays where it is and
@@ -909,7 +2014,26 @@ async function boot(canvas) {
     cards.update({
       dt,
       currentPlayer: match.rules.currentPlayer,
-      enabled: match.state === MATCH_STATE.AIM,
+      /**
+       * Cards are usable only while a shot is — and only while the shot would be
+       * the PLAYER's.
+       *
+       * The second half is new and it is load-bearing. `Match.playCard` plays for
+       * `rules.currentPlayer`, so a hand left live during the AI's go would let a
+       * player drag one of their own cards and have it spent as the AI's. The
+       * router already refuses the press, and this is the other half of the same
+       * refusal: the fans grey out, which is the picture that says whose turn it
+       * is, and there is nothing to drag in the first place.
+       */
+      enabled: match.state === MATCH_STATE.AIM && active().acceptsInput,
+      /**
+       * Against an AI the seats do not swap. See `CardLayer.update` — the swap
+       * exists so two people can each have their own hand in front of them, and
+       * with one person there is nobody to swap for.
+       */
+      pinnedBottom: hasAi() ? localSeat : null,
+      // The AI's card, being drawn out of its face-down fan and turned over.
+      reveal: aiReveal(),
       /**
        * A mode may not have cards at all, in which case there is no hand to
        * draw — "손패 UI를 표시하지 마라". Distinct from `enabled`, which greys the
@@ -929,11 +2053,60 @@ async function boot(canvas) {
     wipeOut?.update(dt);
     wipeIn?.update(dt);
 
+    /**
+     * And the sound, last of all.
+     *
+     * Every layer above has written this frame's state, so a poll-and-diff
+     * observer sees a settled frame rather than half of one. Strictly after
+     * `match.update(dt)`, which is the only place physics steps — the same rule
+     * the orb drain above states, for the same reason.
+     */
+    matchAudio.update(dt);
+    audio.update(dt);
+
     render();
+
+    /**
+     * What this frame cost, handed to the panel in one call.
+     *
+     * At the very end so `render()` is inside `tickMs` — the GPU submission is
+     * part of what a frame costs, and leaving it out would report a loop that
+     * looks comfortable while the frame rate says otherwise.
+     *
+     * `_acc` is the accumulator's leftover, read rather than exported: it is the
+     * one number that says whether the sim is keeping up, and there is no getter
+     * for it. `steps >= MAX_STEPS_PER_FRAME` (20, Match.js) is a saturated
+     * drain, which the main loop's own 0.05 s clamp should make unreachable —
+     * that clamp allows 6 steps — so anything but zero here means something
+     * other than `frame` is driving the accumulator.
+     */
+    metrics.endFrame({
+      tickMs: performance.now() - tickT0,
+      physicsMs,
+      steps,
+      backlogSec: match._acc ?? 0,
+      saturated: steps >= 20,
+      aiMs,
+      aiThinking,
+      label: `${match.mode?.key ?? '?'} vs ${controllers[remoteSeat]?.isAi ? 'ai' : online ? 'online' : 'local'}`,
+      // The render chain and what the device has taken out of it. On a phone
+      // this is the only way to read the safe-area answer without a debugger
+      // attached — and the answer is orientation-dependent, so it has to be
+      // legible while the phone is being turned over.
+      note:
+        `${viewport.resolution.x}x${viewport.resolution.y} → ${viewport.displaySize.x}x${viewport.displaySize.y}\n` +
+        `safe  T${safeArea.frameInsets.top} R${safeArea.frameInsets.right} ` +
+        `B${safeArea.frameInsets.bottom} L${safeArea.frameInsets.left} (frame px)`,
+    });
   }
 
   function frame(now) {
     raf = requestAnimationFrame(frame);
+
+    // The RAW interval, before the clamp below sees it. The clamped value is
+    // what the simulation gets; this is what actually happened, and the gap
+    // between the two is exactly the time the game is losing.
+    metrics.beginFrame(now);
 
     // Clamped at both ends, same as the viewer's: a hidden tab that comes back
     // hands you a multi-second jump, and feeding that to the accumulator would
@@ -944,7 +2117,22 @@ async function boot(canvas) {
   }
 
   function updateAim() {
-    const p = input.preview;
+    /**
+     * The bow, from whichever hand is drawing it.
+     *
+     * ── the AI's aim goes through the SAME overlay ─────────────────────────
+     * `AiController.aim` has the identical shape `AimInput.preview` has, so
+     * everything below — the pull line, the clamp bar, the error cone, the
+     * trajectory line, the 강타 recolouring, the chaos blinding — draws for the
+     * AI without a single branch. That is not a convenience: the brief asks the
+     * player to be able to read what the opponent is doing, and the only drawing
+     * they already know how to read is their own.
+     *
+     * Null for a human controller, so `input.preview` wins whenever a person is
+     * actually dragging. The two can never both be set — the router refuses to
+     * start an aim while the AI holds the seat.
+     */
+    const p = input.preview ?? active().aim ?? null;
 
     // Re-asked every frame rather than only when the pointer moves. Firing a
     // shot changes what is under a stationary cursor — the cap leaves, the turn
@@ -960,10 +2148,28 @@ async function boot(canvas) {
     // been fired all the way across the board.
     //
     // Suppressed during a pull too, when the deadzone ring is already on that cap.
-    const canGrab = match.state === MATCH_STATE.AIM && !p;
+    //
+    // ── and during the opening sequence, for the reason stated above ────────
+    // The match is already sitting in AIM behind the intro — the world is built
+    // and waiting — so the state test alone said "a press would grab this" while
+    // the router was refusing every press. The ring promised something that
+    // could not happen, on a cap the player could not even see properly.
+    const canGrab = match.state === MATCH_STATE.AIM && !p && !matchFound?.active;
     const hovered = canGrab && router.hoverCap >= 0 ? router.hoverCap : -1;
+    /**
+     * ── and the AI's own "this is the one I am about to hit" ────────────────
+     * "조준할 뚜껑이 짧게 강조된다." The same ring, on the same call: it is
+     * already the drawing that means "a press would grab this cap", which is
+     * near enough to "this cap is about to be used" that giving the AI a second
+     * highlight of its own would be inventing a symbol the player has to learn.
+     *
+     * It takes priority over the hover, and cannot collide with one: the router
+     * stops reporting a hovered cap the moment the AI takes the seat.
+     */
+    const marked = active().highlight ?? -1;
+    const ring = marked >= 0 ? marked : hovered;
     overlay.setHover(
-      hovered >= 0 ? match.arena.capCom(hovered) : null,
+      ring >= 0 ? match.arena.capCom(ring) : null,
       match.arena.desc.radius * Math.max(1, CONFIG.view.grabRadius),
     );
 
@@ -1034,6 +2240,9 @@ async function boot(canvas) {
       // it. Both read off the preview, so they are the shot that will fire.
       smash: !!p.smash,
       spreadMul: p.spreadMul,
+      // The cone follows the delivered impulse now, so the boost has to reach
+      // the drawing as well as the draw. See `shotSpread`.
+      impulseMul: p.impulseMul,
     });
   }
 
@@ -1082,6 +2291,22 @@ async function boot(canvas) {
     return { x: (_flightPoint.x * FRAME.width) / 2, y: (_flightPoint.y * FRAME.height) / 2 };
   }
 
+  /**
+   * The AI's card reveal, tagged with whose hand it is coming out of.
+   *
+   * The controller knows the card and how far through the animation it is; it
+   * does not know which fan that is, because it has never heard of a fan. The
+   * seat is added here, which is the same seam every other hand-off in this file
+   * uses — `game/` says what happened and `render/` decides what to do about it.
+   */
+  function aiReveal() {
+    for (const c of controllers) {
+      const r = c?.cardReveal;
+      if (r) return { ...r, player: c.player };
+    }
+    return null;
+  }
+
   /** Where a flight lands: the middle of that player's fan. */
   function handAnchor(player) {
     const hand = cards.hands[player];
@@ -1102,8 +2327,34 @@ async function boot(canvas) {
 
     if (CONFIG.view.ps1) {
       retro.shared.uSnapAmount.value = CONFIG.view.vertexSnap;
-      viewport.bind();
+      /**
+       * The whole frame is cleared FIRST, and that is not redundant.
+       *
+       * `renderer.render` clears for itself, but a clear obeys the scissor box —
+       * so once the board is scissored to its own band, its clear only covers
+       * that band and the bands above and below are never written at all. They
+       * then show whatever was in the target: uninitialised memory, or the
+       * previous frame smeared. That is exactly what it looked like — a giant
+       * stretched cap under the board — and it is why this clear exists.
+       *
+       * Costs one full-target clear a frame, which is the cheapest operation in
+       * the pass, and it is a no-op in landscape where the board IS the frame.
+       */
+      viewport.bindFull();
+      viewport.renderer.clear();
+
+      // The board draws into its own 4:3 band; everything laid out in frame
+      // pixels then draws over the whole frame. Both are the whole target when
+      // there are no bands, so this is the normal path, not a portrait branch.
+      viewport.bindBoard();
+      // `autoClear` off so the scene does not clear again inside the board rect
+      // — it would be harmless, but it would also undo nothing and cost a second
+      // clear. The clear above is the one that counts.
+      viewport.renderer.autoClear = false;
       viewport.renderer.render(scene, camera);
+      viewport.renderer.autoClear = true;
+
+      viewport.bindFull();
       renderOverlays();
       /**
        * The victory screen, over the finished frame and INSIDE the bound target.
@@ -1122,6 +2373,16 @@ async function boot(canvas) {
        * look like a rendering fault.
        */
       victory.render(viewport.renderer);
+      /**
+       * The match-found sequence, over everything and inside the target.
+       *
+       * Call order IS the stacking here, and this goes last of the overlays
+       * because while it runs it has the screen — the board behind it is the
+       * board it is about to hand over to, not something it is competing with.
+       */
+      matchFound?.render(viewport.renderer);
+      // Over the sequence as well: a question is the last thing on screen.
+      modal.render(viewport.renderer);
       // Inside the bound target, so the arriving cap gets the same dither
       // lattice and the same five bits a channel as the pitch it is uncovering.
       wipeOut?.render(viewport.renderer);
@@ -1158,6 +2419,10 @@ async function boot(canvas) {
   function start() {
     if (raf) return;
     last = performance.now();
+    // The interval chain restarts here too. Without this the first frame back
+    // from a background stay reports the length of the stay as one frame time,
+    // and one 40-second outlier poisons every percentile in the window.
+    metrics.resume();
     raf = requestAnimationFrame(frame);
   }
 
@@ -1181,8 +2446,21 @@ async function boot(canvas) {
   // driving frames by hand when verifying.
   window.__cap = {
     match, physics, view, colliderView, overlay, input, router, preview, CONFIG,
-    gameCamera, viewport, tick, rebuildAll, modeByKey, cards, cardFx, wipeIn, hud,
-    victory, retro,
+    gameCamera, camTracker, viewport, tick, rebuildAll, modeByKey, cards, cardFx,
+    // The seats, and the switch between them. `tick` can be driven by hand
+    // alongside these, which is the only way to step through an AI turn's
+    // phases — several of them are shorter than a frame at 0.2x.
+    controllers, setOpponent, faceCurrentPlayer, turnBearing,
+    wipeIn, hud, victory, retro, audio, audioSettings, matchAudio, distanceMarks,
+    // The panel itself, so its per-frame readouts — and the rows the flight
+    // greys out — can be driven by hand alongside `tick`. It is the stub when
+    // the panel is off, so this is always safe to call.
+    debug,
+    // The measurement panel and the notch arithmetic. `metrics.snapshot()` is
+    // the one call to make from Safari's Web Inspector while the app is on a
+    // phone — it returns every number the report wants as plain data, so the
+    // figures can be copied out rather than read off a screenshot.
+    metrics, safeArea,
     // A getter, unlike `wipeIn`: this one is built on first use, so a captured
     // value would be `null` for the whole session.
     get wipeOut() {

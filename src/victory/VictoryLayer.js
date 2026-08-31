@@ -1,19 +1,17 @@
+import { Color, Group, Mesh, PlaneGeometry, Raycaster, Scene, Vector2 } from 'three';
 import {
-  Color,
-  Group,
-  Mesh,
-  OrthographicCamera,
-  PlaneGeometry,
-  Raycaster,
-  Scene,
-  Vector2,
-} from 'three';
+  FRAME as SHARED_FRAME,
+  frameCamera,
+  halfDiagonal,
+  refitFrameCamera,
+} from '../core/frame.js';
 import { CAP_GROUP } from '../cap/capGeometry.js';
 import { FxMaterials } from '../render/FxMaterial.js';
 import { ringTexture, trailTexture } from '../render/fxTextures.js';
 import { HudMaterials } from '../ui/HudMaterial.js';
 import { buttonTexture, notePlateTexture, victoryPlateTexture } from '../ui/hudTextures.js';
 import { VICTORY_STAGE, VictoryClock } from './VictoryClock.js';
+import { PALETTE } from '../core/palette.js';
 
 /**
  * Who won, as a thing that happens on screen.
@@ -56,10 +54,12 @@ import { VICTORY_STAGE, VictoryClock } from './VictoryClock.js';
  * screen because it has been dimmed would be a press with no meaning.
  */
 
-/** The layout box, in frame pixels. 4:3, matching the HUD's and the cards'. */
-export const VICTORY_FRAME = { width: 640, height: 480 };
+/** The layout box, in frame pixels. The shared, live one — see core/frame.js. */
+export const VICTORY_FRAME = SHARED_FRAME;
 
-const HALF_DIAGONAL = Math.hypot(VICTORY_FRAME.width, VICTORY_FRAME.height) / 2;
+// HALF_DIAGONAL is now `halfDiagonal()` from core/frame.js — a function,
+// because a frame that can get taller has a diagonal that can get longer.
+// Held as a constant, the losing cap vanished while still on screen.
 
 /**
  * How much the full-frame quads overhang the frame, in frame pixels.
@@ -237,12 +237,15 @@ export class VictoryLayer {
     panelTexture,
     teamTextures = [],
     onRestart,
+    outcomeFor = null,
     onExit,
   }) {
     this.canvas = canvas;
     this.config = config;
     this.teamColors = teamColors;
     this.onRestart = onRestart ?? (() => {});
+    /** @type {((winner: number) => string|null)|null} */
+    this.outcomeFor = outcomeFor;
     this.onExit = onExit ?? (() => {});
 
     this.clock = new VictoryClock({ tuning: config.victory });
@@ -259,15 +262,7 @@ export class VictoryLayer {
      * shader is a real point: at the origin the view vector through a cap
      * sitting on z = 0 is degenerate and the gloss term goes to noise.
      */
-    this.camera = new OrthographicCamera(
-      -VICTORY_FRAME.width / 2,
-      VICTORY_FRAME.width / 2,
-      VICTORY_FRAME.height / 2,
-      -VICTORY_FRAME.height / 2,
-      -3000,
-      3000,
-    );
-    this.camera.position.z = 1000;
+    this.camera = frameCamera({ near: -3000, far: 3000, z: 1000 });
 
     this.uiMaterials = new HudMaterials({ resolution });
     this.fxMaterials = new FxMaterials({ resolution });
@@ -410,6 +405,9 @@ export class VictoryLayer {
      */
     this._busy = false;
 
+    /** Frame pixels of the bottom edge the device owns. See `setSafeInsets`. */
+    this._safeBottom = 0;
+
     /** -1 is a draw. Undefined until `begin`. */
     this.winnerIndex = -1;
     this._draw = false;
@@ -454,7 +452,7 @@ export class VictoryLayer {
     this._panelTexture = panelTexture;
     // Shared by both, and not tinted with the cap: a real liner is not painted
     // with the shell. The same value and the same reasoning as `ArenaView`.
-    this._linerMaterial = this._sortable(retro.create({ color: '#ddd6c2', gloss: 0.35 }));
+    this._linerMaterial = this._sortable(retro.create({ color: PALETTE.metal.liner, gloss: 0.35 }));
 
     return this.teamColors.map((color, i) => {
       const set = [];
@@ -514,7 +512,7 @@ export class VictoryLayer {
   _applyTeamTexture(set, team, texture) {
     const panel = set[CAP_GROUP.PANEL];
     panel.uniforms.uMap.value = texture ?? this._panelTexture;
-    panel.uniforms.uColor.value.set(texture ? '#ffffff' : this.teamColors[team]);
+    panel.uniforms.uColor.value.set(texture ? PALETTE.untinted : this.teamColors[team]);
   }
 
   /** Live, for when the customiser lands. Null puts the placeholder back. */
@@ -527,6 +525,29 @@ export class VictoryLayer {
   setResolution(resolution) {
     this.uiMaterials.setResolution(resolution);
     this.fxMaterials.setResolution(resolution);
+    // Same as the HUD: a frame that changed shape needs the ortho box refitted
+    // and everything anchored to an edge placed again.
+    if (refitFrameCamera(this.camera)) this.layout();
+  }
+
+  /**
+   * Lift the button row clear of a home indicator.
+   *
+   * The row is the only thing in this layer near an edge — the winner plate sits
+   * at y = -110, well inside — and it had 30 frame pixels of clearance, which is
+   * not quite enough: a landscape iPhone's indicator strip is about 26 of them,
+   * so the hit quads finished 4 pixels above a region the OS treats as its own.
+   * `max` rather than `+` because the existing clearance already covers most of
+   * the inset; adding would push 재시작 and 나가기 visibly up the screen on a
+   * phone for no reason a player could see.
+   *
+   * @param {{top:number,right:number,bottom:number,left:number}} insets frame px
+   */
+  setSafeInsets(insets) {
+    const bottom = Math.max(0, insets?.bottom ?? 0);
+    if (bottom === this._safeBottom) return;
+    this._safeBottom = bottom;
+    this.layout();
   }
 
   /**
@@ -542,15 +563,26 @@ export class VictoryLayer {
     this.plate.scale.set(PLATE.width, PLATE.height, 1);
     this.plate.position.set(0, c.textY, 0);
 
+    const pad = Math.max(0, c.hitMargin);
+    /**
+     * The row's floor: the lowest the HIT quad may reach, not the plate.
+     *
+     * The quad is what the OS competes with, and it hangs `hitMargin` below the
+     * plate — so the constraint is written against the quad and the plate's
+     * position is derived back from it. See `setSafeInsets`.
+     */
+    const floor = -VICTORY_FRAME.height / 2 + (this._safeBottom ?? 0);
+    const tallest = this._buttons.reduce((m, b) => Math.max(m, b.height), 0);
+    const buttonY = Math.max(c.buttonY, floor + pad + tallest / 2);
+
     const total =
       this._buttons.reduce((sum, b) => sum + b.width, 0) + BUTTON_GAP * (this._buttons.length - 1);
     let x = -total / 2;
     for (const b of this._buttons) {
       b.plate.scale.set(b.width, b.height, 1);
-      b.plate.position.set(x + b.width / 2, c.buttonY, 0);
+      b.plate.position.set(x + b.width / 2, buttonY, 0);
       x += b.width + BUTTON_GAP;
 
-      const pad = Math.max(0, c.hitMargin);
       b.hit.scale.set(b.width + pad * 2, b.height + pad * 2, 1);
       b.hit.position.copy(b.plate.position);
     }
@@ -632,7 +664,7 @@ export class VictoryLayer {
       this.loser.mesh.material = this._capMaterials[1 - this.winnerIndex];
       this._palette = this._buildPalette(this.teamColors[this.winnerIndex]);
     } else {
-      this._palette = this._buildPalette('#888888');
+      this._palette = this._buildPalette(PALETTE.neutral);
     }
 
     const c = this.config.victory;
@@ -900,7 +932,7 @@ export class VictoryLayer {
        * being dragged to nothing: by the time the buttons are coming up the
        * loser is out of the story whatever the number says.
        */
-      const reach = HALF_DIAGONAL + c.capScale * 1.7;
+      const reach = halfDiagonal() + c.capScale * 1.7;
       const dist = Math.hypot(this.loser.holder.position.x, this.loser.holder.position.y);
       this.loser.holder.visible = dist < reach && !this.clock.atOrPast(VICTORY_STAGE.UI);
     }
@@ -1132,8 +1164,23 @@ export class VictoryLayer {
   _refreshTextures() {
     const scale = this.config.ui.textureScale;
     const draw = this._draw;
-    const color = draw ? '#888888' : this.teamColors[this.winnerIndex];
-    const text = draw ? '무승부' : `${this.winnerIndex + 1}P 승리`;
+    const color = draw ? PALETTE.neutral : this.teamColors[this.winnerIndex];
+    /**
+     * "2P 승리" is the right line for two people at one board and the wrong one
+     * everywhere else.
+     *
+     * Against the computer, or online, there is one person at this screen — and
+     * telling them their opponent won, in the third person, by seat number, is a
+     * scoreboard rather than a result. `outcomeFor` is handed in by `main.js`,
+     * which is the only layer that knows which seat the person watching
+     * occupies; absent, this is character for character what it always was.
+     *
+     * The colour is deliberately still the WINNER's. The line arrives with the
+     * winning cap and is part of that arrival, so recolouring it would detach
+     * the two — a 패배 in your own colour would read as your cap having done
+     * something.
+     */
+    const text = draw ? '무승부' : (this.outcomeFor?.(this.winnerIndex) ?? `${this.winnerIndex + 1}P 승리`);
 
     this.plate.material.uniforms.uMap.value = victoryPlateTexture(text, color, {
       ...PLATE,

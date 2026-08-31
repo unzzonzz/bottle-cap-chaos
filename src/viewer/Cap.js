@@ -1,6 +1,7 @@
 import { Group, Mesh } from 'three';
 import { buildCapGeometry, CAP_DEFAULTS, CAP_GROUP } from '../cap/capGeometry.js';
 import { makeCapTopTexture } from '../cap/capTexture.js';
+import { PALETTE } from '../core/palette.js';
 
 /**
  * One cap in the scene: the mesh, its materials, and the ability to throw the
@@ -21,10 +22,10 @@ import { makeCapTopTexture } from '../cap/capTexture.js';
  */
 
 /** Bottle-cap red. The debug panel starts its colour picker here too. */
-export const CAP_COLOR = '#c8342f';
+export const CAP_COLOR = PALETTE.player[0];
 
 /** Off-white PVC, the usual liner stock. */
-const LINER_COLOR = '#ddd6c2';
+const LINER_COLOR = PALETTE.metal.liner;
 
 export class Cap {
   /** @param {import('../core/RetroMaterial.js').RetroMaterials} retro */

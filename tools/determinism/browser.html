@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>결정론 교차 검증 — Bottle Cap Chaos</title>
+    <style>
+      body {
+        background: #12141a;
+        color: #d8dce6;
+        font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+        margin: 0;
+        padding: 24px;
+      }
+      h1 { font-size: 15px; letter-spacing: 0.08em; color: #f0e8c8; margin: 0 0 4px; }
+      p.sub { color: #6b7280; margin: 0 0 20px; }
+      #out { white-space: pre-wrap; word-break: break-all; }
+      .ok { color: #7ee787; }
+      .bad { color: #ff7b72; }
+      .mode { color: #79c0ff; }
+      #digests { font-size: 20px; line-height: 1.8; margin: 16px 0; }
+      #digests b { color: #f0e8c8; }
+      details { margin-top: 20px; }
+      summary { cursor: pointer; color: #6b7280; }
+    </style>
+  </head>
+  <body>
+    <h1>결정론 교차 검증</h1>
+    <p class="sub">
+      같은 입력 로그를 이 브라우저에서 재생합니다. 다른 기기·브라우저에서 연 결과와
+      digest 가 일치해야 합니다.
+    </p>
+    <div id="digests">실행 중…</div>
+    <details>
+      <summary>전체 덤프 (뚜껑 최종 위치·회전, 턴별 해시)</summary>
+      <div id="out"></div>
+    </details>
+    <script type="module" src="./browser-entry.js"></script>
+  </body>
+</html>

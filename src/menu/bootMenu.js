@@ -2,15 +2,23 @@ import { Color, Group, Mesh, PerspectiveCamera, PlaneGeometry, Scene, Vector3 } 
 import { RetroMaterials } from '../core/RetroMaterial.js';
 import { RetroPass } from '../core/RetroPass.js';
 import { DISPLAY_ASPECT, Viewport } from '../core/Viewport.js';
-import { Bottle, CAP_COLOR } from './Bottle.js';
+import { BOARD_ASPECT, FRAME } from '../core/frame.js';
+import { aimedLaunchDirection, Bottle, CAP_COLOR } from './Bottle.js';
+import { PALETTE, withAlpha } from '../core/palette.js';
+import { whenFontsReady } from '../ui/fonts.js';
 import { CapWipe, WIPE_FRAME } from './CapWipe.js';
 import { MenuItems } from './MenuItems.js';
 import { SettingsScene } from './SettingsScene.js';
+import { OpponentScene } from './OpponentScene.js';
 import { MarksScreen } from '../marks/MarksScreen.js';
-import { BRUSH_SIZES, MarkEditor, PALETTE } from '../marks/MarkEditor.js';
+import { BRUSH_SIZES, MarkEditor, MARK_SWATCHES } from '../marks/MarkEditor.js';
 import { ConfirmDialog } from '../marks/ConfirmDialog.js';
 import { MarkBook } from '../marks/MarkBook.js';
 import { LocalStorageMarks } from '../marks/MarkStorage.js';
+import { LocalStorageNicknames, Profile } from '../profile/NicknameStorage.js';
+import { OnlineScene } from './OnlineScene.js';
+import { ModalLayer } from '../ui/ModalLayer.js';
+import { DEFAULT_MARK } from '../marks/MarkStorage.js';
 import { STAGE, Transition } from './Transition.js';
 import { MENU_CONFIG } from './menuConfig.js';
 import { capLogoTexture, floorPoolTexture } from './menuTextures.js';
@@ -18,8 +26,12 @@ import { createSpriteMaterial } from './menuMaterials.js';
 import { destinationUrl, prefetch } from './menuRoutes.js';
 // What counts as a mode, from the one place that decides it. See `swapTo`.
 import { MODES } from '../game/modes.js';
+// The audio mix lives with every other tunable, in the one CONFIG the panel
+// edits. `MENU_CONFIG` is this page's own layout numbers and nothing else.
+import { CONFIG } from '../game/config.js';
 import { fadeThrough } from '../ui/pageFade.js';
 import { bootMenuDebug } from './MenuDebug.js';
+import { MenuAudio } from '../audio/MenuAudio.js';
 
 /**
  * The main menu, on the same pipeline as everything else.
@@ -52,7 +64,15 @@ import { bootMenuDebug } from './MenuDebug.js';
  * up on the other side out of its own overlay. See `menuRoutes`.
  */
 
-export function bootMenu(canvas) {
+/**
+ * @param {HTMLCanvasElement} canvas
+ * @param {{audio?: import('../audio/AudioSystem.js').AudioSystem,
+ *          audioSettings?: import('../audio/AudioSettings.js').AudioSettingsBook}} [deps]
+ *   Both are built once in `main.js`, before the branch that chose this page —
+ *   see the note there. Absent, every call below is optional-chained and the
+ *   menu is exactly what it was.
+ */
+export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
   const cfg = MENU_CONFIG;
 
   /**
@@ -67,7 +87,10 @@ export function bootMenu(canvas) {
   canvas.classList.add('is-menu');
 
   // ── pipeline ─────────────────────────────────────────────────────────────
-  const viewport = new Viewport({ canvas, mode: cfg.view.renderMode });
+  // Portrait, like the match page. The menu has no board to keep square, so it
+  // simply takes the window's shape and the arrangement below stacks instead of
+  // sitting side by side. See src/core/frame.js.
+  const viewport = new Viewport({ canvas, mode: cfg.view.renderMode, portrait: true });
   const retroPass = new RetroPass({ resolution: viewport.resolution });
   const retro = new RetroMaterials({ resolution: viewport.resolution });
 
@@ -76,10 +99,78 @@ export function bootMenu(canvas) {
     retro.setResolution(resolution);
   });
 
+  // Same fire-and-forget as `main.js`: the menu bakes its plates into cached
+  // canvas textures too, and this is what stops them being baked in the
+  // fallback face and kept.
+  whenFontsReady();
+
   const scene = new Scene();
-  scene.background = new Color('#05060a');
+  scene.background = new Color(PALETTE.bg.skyTop);
 
   const camera = new PerspectiveCamera(cfg.camera.fov, DISPLAY_ASPECT, 1, 400);
+
+  /**
+   * The authored arrangement, kept so the portrait one can be undone.
+   *
+   * `placeCamera` rewrites these four on every resize, and a resize back to a
+   * wide window has to restore what the config actually says rather than
+   * whatever the last narrow window left behind.
+   */
+  /**
+   * How far the camera has been pulled back to hold the visible WIDTH.
+   *
+   * Written by `placeCamera`, read by the per-frame shake and by
+   * `unitsPerPixel`. It has to be shared: the shake sets `camera.position`
+   * every frame from `cfg.camera.distance`, so a pull-back applied only in
+   * `placeCamera` is undone before the first frame is drawn — which is exactly
+   * why the bottle stayed enormous after the aspect was fixed.
+   */
+  let camWiden = 1;
+
+  const LANDSCAPE_POSE = {
+    originX: cfg.bottle.originX,
+    originY: cfg.bottle.originY,
+    floorY: cfg.bottle.floorY,
+    columnX: cfg.items.columnX,
+    columnY: cfg.items.columnY,
+  };
+
+  /**
+   * Bottle above, menu below — but only when the frame is actually tall.
+   *
+   * The authored layout puts the bottle left of centre and the item column
+   * right of it, which is the right answer in a 4:3 box and the wrong one in a
+   * portrait phone, where it leaves both squeezed into a narrow half. Stacking
+   * them is the same design in the other axis: the bottle is still the thing you
+   * look at first and the column is still a column.
+   *
+   * Everything is expressed against the frame so it holds at any scale. The
+   * bottle keeps its distance from its own floor pool — shifting one without the
+   * other would leave it hovering over a light that stayed behind.
+   */
+  function applyArrangement(u) {
+    const tall = FRAME.tall;
+    if (!tall) {
+      Object.assign(cfg.bottle, {
+        originX: LANDSCAPE_POSE.originX,
+        originY: LANDSCAPE_POSE.originY,
+        floorY: LANDSCAPE_POSE.floorY,
+      });
+      cfg.items.columnX = LANDSCAPE_POSE.columnX;
+      cfg.items.columnY = LANDSCAPE_POSE.columnY;
+      return;
+    }
+    // Both centred horizontally; the bottle in the upper third, the column under
+    // it. The fractions are of the frame, so a taller phone spreads them further
+    // apart rather than changing their relationship to each other.
+    const riseFramePx = FRAME.height * 0.26;
+    const drop = LANDSCAPE_POSE.originY - LANDSCAPE_POSE.floorY;
+    cfg.bottle.originX = 0;
+    cfg.bottle.originY = LANDSCAPE_POSE.originY + riseFramePx * u;
+    cfg.bottle.floorY = cfg.bottle.originY - drop;
+    cfg.items.columnX = 0;
+    cfg.items.columnY = -Math.round(FRAME.height * 0.19);
+  }
 
   // ── contents ─────────────────────────────────────────────────────────────
   const bottle = new Bottle({ retro, tuning: cfg.bottle });
@@ -113,9 +204,53 @@ export function bootMenu(canvas) {
    * storage implementation — everything downstream takes a `MarkStorage`.
    */
   const markBook = new MarkBook(new LocalStorageMarks());
+  /**
+   * This player's name and preferred relay.
+   *
+   * Constructed here and in `main.js`, and nowhere else — the same discipline
+   * `LocalStorageMarks` follows one line up. Everything downstream takes a
+   * `Profile`, which is the seam an account system replaces.
+   */
+  const profile = new Profile(new LocalStorageNicknames());
+
+  /**
+   * Every typed-in or asked question on this document, drawn as geometry.
+   *
+   * Handed to the screens rather than reached for by them: a scene that
+   * imported its own dialog would be a second one to keep in step, and this one
+   * has to be RENDERED — which only this file can arrange, because only this
+   * file owns the pass order.
+   */
+  const modal = new ModalLayer({ canvas, resolution: viewport.resolution, config: CONFIG });
+  viewport.onResize(({ resolution }) => modal.setResolution(resolution));
+
+  /**
+   * The menu's ears.
+   *
+   * Told rather than polled, unlike the game page's, because the interesting
+   * moment on this page is the CALL — `pick` then `activate` — and two of the
+   * four screens leave no edge behind to poll. It is given the book so a badge
+   * press can be read BEFORE the assignment changes; putting a mark on and
+   * taking one off must not sound the same.
+   */
+  const menuAudio = audio
+    ? new MenuAudio({ audio, audioConfig: CONFIG.audio, book: markBook, settings: audioSettings })
+    : null;
+
   let marks = null;
   let editor = null;
   let confirm = null;
+  /** 상대 선택. Rebuilt on every entry so the choice cannot persist. */
+  let opponent = null;
+  /**
+   * The matchmaking screen, and the socket it holds.
+   *
+   * Rebuilt on every entry like `opponent`, and for a stronger reason: it owns a
+   * live connection. A cached instance would keep a socket open behind whatever
+   * screen you wandered off to, and the relay would go on believing that player
+   * was sitting in a queue.
+   */
+  let online = null;
   /** Which scene root is live. Swapped under the cap at the covered frame. */
   let current = 'menu';
   /** True while the black fade back from settings is running. Blocks input. */
@@ -149,8 +284,20 @@ export function bootMenu(canvas) {
    * re-lays them out when the panel changes it.
    */
   function unitsPerPixel() {
-    const visibleHeight = 2 * cfg.camera.distance * Math.tan((cfg.camera.fov * Math.PI) / 360);
-    return visibleHeight / viewport.resolution.y;
+    const visibleHeight =
+      2 * cfg.camera.distance * camWiden * Math.tan((cfg.camera.fov * Math.PI) / 360);
+    /**
+     * World units per FRAME pixel, not per target pixel.
+     *
+     * It was `resolution.y`, which is the same number whenever the frame and the
+     * render target move together — true at the 640x480 default, which is why
+     * this is a no-op on a desktop. It stops being the same the moment the frame
+     * carries the UI scale: dividing by the target would keep the plates the
+     * same fraction of a screen that just got narrower, i.e. would undo exactly
+     * the scaling the frame exists to provide. Dividing by the frame makes the
+     * menu's plates grow on a phone in step with the game's buttons.
+     */
+    return visibleHeight / FRAME.height;
   }
 
   /**
@@ -167,12 +314,43 @@ export function bootMenu(canvas) {
    */
   function placeCamera() {
     camera.fov = cfg.camera.fov;
-    camera.position.set(0, cfg.camera.height, cfg.camera.distance);
-    camera.lookAt(0, cfg.camera.lookAtY, 0);
+    /**
+     * The canvas's aspect, not the 4:3 constant.
+     *
+     * This is the whole of the camera fix, and it covers all seven menu pick
+     * sites at once: every one of them raycasts THIS camera from the full canvas
+     * rect, so a projection that disagreed with the canvas would put every press
+     * in the wrong place — not just draw the room stretched.
+     */
+    camera.aspect = FRAME.width / FRAME.height;
+    /**
+     * Pull back far enough that the WIDTH the camera sees does not change.
+     *
+     * `fov` is vertical. Narrowing the aspect while holding it therefore narrows
+     * the visible width in proportion — at a phone's 0.46 the camera sees a
+     * third of the world it saw at 4:3, and the bottle, which had been a seventh
+     * of the width, becomes half of it. That is what "the bottle is enormous"
+     * actually was: not a scale bug, a field-of-view one.
+     *
+     * Backing off by the same ratio restores the visible width exactly, so the
+     * bottle keeps the size it was designed at and the extra room a tall screen
+     * buys is spent on HEIGHT — which is where the menu column now lives.
+     *
+     * 1 at 4:3 and wider, so no landscape window moves.
+     */
+    camWiden = Math.max(1, BOARD_ASPECT / camera.aspect);
+    camera.position.set(0, cfg.camera.height * camWiden, cfg.camera.distance * camWiden);
+    camera.lookAt(0, cfg.camera.lookAtY * camWiden, 0);
     camera.updateProjectionMatrix();
-    items.layout(unitsPerPixel());
+    const u = unitsPerPixel();
+    applyArrangement(u);
+    items.layout(u);
     // The pool goes under the BOTTLE, not under the middle of the frame. It is
     // the one light in the room and the bottle is what it is lighting.
+    // The pool is a fixed-size quad in world units. Pulling the camera back
+    // makes it a smaller fraction of the view, so it grows by the same factor
+    // and keeps lighting the same amount of floor around the bottle.
+    floor.scale.set(30 * camWiden, 30 * camWiden, 1);
     floor.position.set(cfg.bottle.originX, cfg.bottle.floorY, 0);
   }
   placeCamera();
@@ -265,6 +443,18 @@ export function bootMenu(canvas) {
       setCursor(intentOf(hit));
       return;
     }
+    if (current === 'opponent') {
+      const hit = opponent?.pick(canvas, camera, pointer.x, pointer.y);
+      opponent?.setHover(hit);
+      setCursor(intentOf(hit));
+      return;
+    }
+    if (current === 'online') {
+      const hit = online?.pick(canvas, camera, pointer.x, pointer.y);
+      online?.setHover(hit);
+      setCursor(intentOf(hit));
+      return;
+    }
     if (current === 'marks') {
       const hit = marks?.pick(canvas, camera, pointer.x, pointer.y);
       marks?.setHover(hit);
@@ -311,6 +501,20 @@ export function bootMenu(canvas) {
     if (current === 'settings') {
       const hit = settings?.pick(canvas, camera, e.clientX, e.clientY);
       if (!hit) return;
+      /**
+       * The screen acts FIRST here, unlike every other branch.
+       *
+       * Nothing on this screen needs pre-press state — and one control needs
+       * the opposite. 음소거 is a toggle, and a click played before it runs is a
+       * click played while the mute it is about to LIFT is still in force, so
+       * turning the sound back on was the one press in the game that made no
+       * sound. Acting first means the press is heard in the state it produced.
+       */
+      const consumed = settings.activate(hit);
+      menuAudio?.press('settings', hit);
+      // The sound rows are the screen's own; navigation is this file's, because
+      // this file owns every screen change.
+      if (consumed) return;
       if (hit.id === 'back') returnToMenu();
       // Sideways between two sub-screens, so it takes the short fade rather
       // than the cap: the cap wipe is the menu's way of ENTERING something, and
@@ -318,19 +522,60 @@ export function bootMenu(canvas) {
       else if (hit.id === 'marks') fadeTo('marks');
       return;
     }
+    if (current === 'opponent') {
+      const hit = opponent?.pick(canvas, camera, e.clientX, e.clientY);
+      if (!hit) return;
+      // The screen takes the two choice rows; navigation is this file's, for the
+      // reason every other branch here gives — one place owns screen changes.
+      const consumed = opponent.activate(hit);
+      menuAudio?.press('menu', hit);
+      if (consumed) return;
+      /**
+       * 시작 gets the cap wipe; 뒤로 gets the short fade.
+       *
+       * The same division the rest of the menu already makes and states: the cap
+       * is what you get for STARTING something, and coming back is not an event.
+       * Entering this screen was a wipe, leaving it for the match is a wipe, and
+       * backing out to the menu is the same 180 ms fade that leaves a match.
+       */
+      if (hit.id === 'start') launch();
+      else if (hit.id === 'back') returnToMenu();
+      return;
+    }
+    if (current === 'online') {
+      const hit = online?.pick(canvas, camera, e.clientX, e.clientY);
+      if (!hit) return;
+      // The screen owns creating, joining, queueing and cancelling; the only
+      // thing it hands back is 뒤로, because this file owns every screen change.
+      const consumed = online.activate(hit);
+      menuAudio?.press('menu', hit);
+      if (consumed) return;
+      if (hit.id === 'back') fadeTo('opponent');
+      return;
+    }
     if (current === 'marks') {
       const hit = marks?.pick(canvas, camera, e.clientX, e.clientY);
+      // BEFORE `activate`, which is the whole reason it is a separate call: a
+      // badge press has to be read while it is still known which way it goes.
+      menuAudio?.press('marks', hit);
       marks?.activate(hit);
       return;
     }
     if (current === 'editor') {
       const hit = editor?.pick(canvas, camera, e.clientX, e.clientY);
+      // Also before: undo and redo report nothing about whether they did
+      // anything, so the only way to tell a real one from a no-op is to ask the
+      // history the same question the toolbar asks when it greys the icon.
+      menuAudio?.press('editor', hit, { editor });
       editor?.press(hit, e.clientX, e.clientY);
       return;
     }
 
     const hit = items.pick(canvas, camera, e.clientX, e.clientY);
-    if (hit && !hit.disabled) run(hit.id, { held: true });
+    if (hit && !hit.disabled) {
+      menuAudio?.press('menu', hit);
+      run(hit.id, { held: true });
+    }
   }
 
   canvas.addEventListener('pointermove', onMove);
@@ -343,6 +588,7 @@ export function bootMenu(canvas) {
   const endGesture = () => {
     editor?.release();
     transition.release();
+    menuAudio?.release();
     canvas.classList.remove('is-dragging');
     refreshHover();
   };
@@ -365,27 +611,56 @@ export function bootMenu(canvas) {
     return { x: (p.x * WIPE_FRAME.width) / 2, y: (p.y * WIPE_FRAME.height) / 2 };
   }
 
-  function run(target, { held = false } = {}) {
-    if (transition.running) return;
+  /**
+   * The cap wipe, with whatever should happen behind it.
+   *
+   * ── this used to BE `run`, and the opponent screen split it ───────────────
+   * There are two things a wipe can hide now: a scene swap, which is what 설정
+   * and the new 상대 선택 screen are, and a document change, which is what
+   * starting a match is. They were one function because a mode item did both at
+   * once — pick 서바이벌 and you got the wipe and the navigation together.
+   *
+   * A mode item no longer navigates. It opens a screen, and the navigation
+   * happens one press later from that screen, so the two have to be separable —
+   * and the wipe itself, which is identical for both, should not be written
+   * twice to achieve it.
+   *
+   * @param {() => void} onSwap  runs on the first fully covered frame
+   */
+  function runWipe(onSwap, { held = false } = {}) {
+    if (transition.running) return false;
     items.setHover(null);
     items.enabled = false;
 
-    // Started here rather than at the swap: by the time the cap is covering the
-    // screen it is far too late for a fetch to help. Four hundred milliseconds
-    // of shake is what this is buying.
-    // The same question `swapTo` asks, asked the same way: a mode is a document
-    // and everything else is a scene. Two hand-maintained lists of the same two
-    // names is how curling ended up prefetching nothing and then not navigating.
-    const navigating = Object.hasOwn(MODES, target);
-    if (navigating) prefetch(destinationUrl(target));
-
     transition.begin(
-      target,
+      null,
       {
+        /**
+         * ── the cap only comes OFF THE BOTTLE when the bottle is there ───────
+         * On the menu the wipe is the bottle being opened: the cap leaves the
+         * mouth, along the axis the bottle has turned toward the camera, and
+         * the burst goes off behind it.
+         *
+         * Every other screen has no bottle on it. This used to run regardless,
+         * so pressing 시작 on the opponent screen fired a cap out of thin air —
+         * out of the point the bottle WOULD have occupied, off to one side of a
+         * screen it was not on. Reported exactly that way.
+         *
+         * With nothing to leave, the cap simply comes at the camera: dead
+         * centre, spinning, growing. That is the same launch the game page
+         * plays coming back from a result screen — `main.js` starts it with
+         * `begin({x:0, y:0}, aimedLaunchDirection(...))` — so the two look
+         * identical, which is what was asked for.
+         */
         onLaunch: () => {
-          // The cap leaves the bottle and becomes the overlay's cap on the same
-          // frame. Two caps for one frame, or none for one frame, are both
-          // visible at 60 Hz.
+          if (current !== 'menu') {
+            wipe.begin({ x: 0, y: 0 }, aimedLaunchDirection(cfg.bottle));
+            return;
+          }
+
+          // Two caps for one frame, or none for one frame, are both visible at
+          // 60 Hz — so the bottle loses its cap on the frame the overlay gains
+          // one.
           bottle.setCapVisible(false);
           bottle.popBurst();
 
@@ -399,7 +674,7 @@ export function bootMenu(canvas) {
           const ahead = toFrame(mouth.clone().addScaledVector(dir, 4));
           wipe.begin(from, { x: ahead.x - from.x, y: ahead.y - from.y });
         },
-        onSwap: (id) => swapTo(id),
+        onSwap,
         onDone: () => {
           wipe.end();
           bottle.setCapVisible(true);
@@ -409,6 +684,102 @@ export function bootMenu(canvas) {
       },
       { held },
     );
+    return true;
+  }
+
+  /**
+   * Which mode the opponent screen is currently choosing an opponent FOR.
+   *
+   * Held here rather than on the screen, because the screen is deliberately
+   * mode-agnostic — it takes a name to put in its heading and never reads it
+   * again. This file owns routing, so this file remembers where the 시작 button
+   * is going to lead.
+   */
+  let pendingMode = null;
+
+  /**
+   * A menu item was chosen.
+   *
+   * 설정 swaps a scene. A game MODE now swaps a scene too — the opponent screen —
+   * where it used to navigate. That is the whole routing change, and it is why
+   * there is no `prefetch` on this path any more: nothing is being fetched, so
+   * warming the destination four hundred milliseconds early would be warming a
+   * document the player has not chosen to open yet. The prefetch moved to
+   * `launch` below, which is where a navigation actually begins.
+   */
+  function run(target, opts) {
+    if (Object.hasOwn(MODES, target)) {
+      pendingMode = target;
+      return runWipe(() => swapTo('opponent'), opts);
+    }
+    return runWipe(() => swapTo(target), opts);
+  }
+
+  /**
+   * 시작 — leave for the match, opponent and all.
+   *
+   * The same wipe the menu item played, so entering the game is one continuous
+   * gesture across two screens rather than two different flourishes. The URL is
+   * built BEFORE the wipe starts so the prefetch has the whole shake to work
+   * with, which is the timing `menuRoutes.prefetch` explains.
+   */
+  function launch() {
+    if (!pendingMode || !opponent) return;
+    /**
+     * 온라인 does not start a match — it goes looking for one.
+     *
+     * The other two choices have an opponent already (the person next to you, or
+     * nobody) so 시작 is a navigation. Online has to find somebody first, and the
+     * navigation happens on the far side of that, from `onMatched`. Sideways to
+     * another menu screen, so it takes the short fade rather than the cap wipe:
+     * the wipe is what the menu spends on ENTERING a match, and this is not one
+     * yet.
+     */
+    if (opponent.choice === 'online') {
+      fadeTo('online');
+      return;
+    }
+    const url = destinationUrl(pendingMode, location, { vs: opponent.choice });
+    prefetch(url);
+    runWipe(() => navigateTo(url));
+  }
+
+  /**
+   * This player's mark, as the wire wants it.
+   *
+   * Three cases, and they are genuinely different — a clean cap is a CHOICE, not
+   * a missing mark, and the built-in logo has no data URL to send because both
+   * ends already have it. See `MARK_KIND` in the protocol.
+   */
+  function wireMark(player) {
+    const ref = markBook.assignedTo(player);
+    if (ref === DEFAULT_MARK) return { kind: 'default' };
+    const dataUrl = markBook.slotImage(ref);
+    return dataUrl ? { kind: 'png', dataUrl } : { kind: 'none' };
+  }
+
+  /**
+   * Hand over to the game's document.
+   *
+   * Lifted out of `swapTo` unchanged when modes stopped being a swap target.
+   * Every line of it is about the SEAM between two documents and none of it is
+   * about which mode is being opened, which is why it now takes a finished URL.
+   */
+  function navigateTo(url) {
+    // The page is about to be replaced, and the gap between this document going
+    // away and the next one's first frame is not under anyone's control. What IS
+    // controllable is what fills it: with the whole window painted the cap's own
+    // red — the letterbox included, so there is no edge between the two — the gap
+    // is the same colour as the frames either side of it and there is nothing to
+    // see. The game page sets the same colour synchronously at module load and
+    // clears it once the cap has flown off.
+    document.documentElement.style.background = CAP_COLOR;
+    document.body.style.background = CAP_COLOR;
+    // The document — and the AudioContext with it — is gone within a frame or
+    // two. Ramped on the audio clock so the last voice fades rather than being
+    // cut off, which is a click on the one frame that is supposed to be seamless.
+    audio?.fadeOutForNavigation(0.12);
+    location.assign(url);
   }
 
   /**
@@ -438,6 +809,7 @@ export function bootMenu(canvas) {
   function fadeTo(target) {
     if (fading) return;
     fading = true;
+    menuAudio?.screenChange();
     items.enabled = false;
     fadeThrough(
       () => swapTo(target),
@@ -452,6 +824,7 @@ export function bootMenu(canvas) {
   function returnToMenu() {
     if (fading) return;
     fading = true;
+    menuAudio?.screenChange();
     items.enabled = false;
     fadeThrough(
       () => swapTo('menu'),
@@ -512,35 +885,9 @@ export function bootMenu(canvas) {
   }
 
   function swapTo(id) {
-    /**
-     * A game MODE is a different document; everything else is a scene swap.
-     *
-     * ── it used to name the two modes, and adding a third broke it silently ──
-     * The test was `id === 'knockout' || id === 'football'`, which is a list of
-     * what happened to exist. Curling fell past it into the scene-swap branch,
-     * which removes the menu root, matches none of the screens below, and lands
-     * on the final `scene.add(menuRoot)` — so the transition played all five
-     * stages, the cap flew off, and the menu was still there. No error, nothing
-     * in the console, and the item simply did not work.
-     *
-     * `MODES` already decides everywhere else what a mode is — `menuRoutes`
-     * strips mode segments with it, `modeKeyFromPath` reads them with it. Asking
-     * the same object here means a fourth mode is an entry in `modes.js` and
-     * nothing in this file.
-     */
-    if (Object.hasOwn(MODES, id)) {
-      // The page is about to be replaced, and the gap between this document
-      // going away and the next one's first frame is not under anyone's
-      // control. What IS controllable is what fills it: with the whole window
-      // painted the cap's own red — the letterbox included, so there is no edge
-      // between the two — the gap is the same colour as the frames either side
-      // of it and there is nothing to see. The game page sets the same colour
-      // synchronously at module load and clears it once the cap has flown off.
-      document.documentElement.style.background = CAP_COLOR;
-      document.body.style.background = CAP_COLOR;
-      location.assign(destinationUrl(id));
-      return;
-    }
+    // A mode is no longer a swap target: choosing one opens `opponent`, and the
+    // navigation is `navigateTo`, called from `launch`. Nothing here handles a
+    // document change any more.
 
     // Whatever is showing, stop showing it. One line rather than a subtraction
     // per screen, so adding a third cannot forget to remove the second.
@@ -548,9 +895,89 @@ export function bootMenu(canvas) {
     if (settings) scene.remove(settings.root);
     if (marks) scene.remove(marks.root);
     if (editor) scene.remove(editor.root);
+    if (opponent) scene.remove(opponent.root);
+    if (online) scene.remove(online.root);
+
+    /**
+     * Leaving matchmaking closes the socket, not just the screen.
+     *
+     * Every other screen here is inert once it is off the graph. This one holds
+     * a live connection, and a connection that outlives its screen leaves the
+     * relay believing this player is still sitting in a queue — so somebody else
+     * gets paired with a room nobody is watching, and waits out the handoff
+     * timeout for an opponent who wandered back to the main menu.
+     *
+     * Disposed here rather than in the branch that builds it, because the case
+     * that matters is swapping AWAY, and that branch never runs.
+     */
+    if (id !== 'online' && online) {
+      online.dispose();
+      online = null;
+    }
+
+    if (id === 'online') {
+      online?.dispose();
+      online = new OnlineScene({
+        retro,
+        unitsPerPixel: unitsPerPixel(),
+        mode: pendingMode,
+        modeName: MODES[pendingMode]?.name ?? '',
+        profile,
+        config: CONFIG,
+        modal,
+        markOf: () => wireMark(0),
+        onMatched: (session) => {
+          // Everything the game document needs, parked where a navigation cannot
+          // destroy it. See `OnlineSession.stash`.
+          session.stash();
+          const url = destinationUrl(pendingMode, location, { vs: 'online' });
+          prefetch(url);
+          runWipe(() => navigateTo(url));
+        },
+      });
+      scene.add(online.root);
+      current = 'online';
+      return;
+    }
+
+    if (id === 'opponent') {
+      /**
+       * Rebuilt on EVERY entry, and disposed on the way out.
+       *
+       * Every other screen here is built once and cached, which is the right
+       * trade for a settings page nobody's state depends on. This one must not
+       * be: "선택을 저장하지 마라. 매번 기본 상태로 시작한다", and the cheapest
+       * way to guarantee a default is for there to be no previous instance
+       * holding a choice. It also picks up a mark edited since the last visit,
+       * which a cached screen would show stale.
+       */
+      opponent?.dispose();
+      opponent = new OpponentScene({
+        retro,
+        unitsPerPixel: unitsPerPixel(),
+        book: markBook,
+        defaultMark: capLogoTexture().image,
+        marks: cfg.marks,
+        modeName: MODES[pendingMode]?.name ?? '',
+        // The mode's own answer. See `MODES.knockout.ai`.
+        aiAvailable: !!MODES[pendingMode]?.ai,
+      });
+      scene.add(opponent.root);
+      current = 'opponent';
+      return;
+    }
 
     if (id === 'settings') {
-      if (!settings) settings = new SettingsScene({ retro, unitsPerPixel: unitsPerPixel() });
+      if (!settings) {
+        settings = new SettingsScene({
+          retro,
+          unitsPerPixel: unitsPerPixel(),
+          // The sound rows are only built when there is a model behind them.
+          audioSettings,
+          profile,
+          modal,
+        });
+      }
       scene.add(settings.root);
       current = 'settings';
       return;
@@ -610,7 +1037,7 @@ export function bootMenu(canvas) {
     onPlay: () => run('settings'),
     // ── 내 마크 ──
     markBook,
-    palette: PALETTE,
+    palette: MARK_SWATCHES,
     brushSizes: BRUSH_SIZES,
     onPalette: () => editor?.refreshPalette(),
     onCanvasSize: (v) => {
@@ -624,6 +1051,9 @@ export function bootMenu(canvas) {
       marks?.refresh();
     },
     onPreviewMark: () => previewMarkTextures(),
+    // ── 사운드 ──
+    audio,
+    audioSettings,
   });
 
   /**
@@ -639,15 +1069,18 @@ export function bootMenu(canvas) {
     const wrap = document.createElement('div');
     wrap.id = 'mark-preview';
     wrap.style.cssText =
-      'position:fixed;left:12px;bottom:12px;z-index:9999;background:#05070bee;' +
-      'padding:10px;border:1px solid #3c4759;font:11px ui-monospace;color:#8ea4c6;display:flex;gap:10px';
+      'position:fixed;left:12px;bottom:12px;z-index:9999;' +
+      `background:${withAlpha(PALETTE.ui.surface, 0.93)};` +
+      `padding:10px;border:1px solid ${PALETTE.ui.edgeStrong};` +
+      `font:11px ui-monospace;color:${PALETTE.ui.text};display:flex;gap:10px`;
     const shot = (label, canvas) => {
       const cell = document.createElement('div');
       cell.style.textAlign = 'center';
       const cv = document.createElement('canvas');
       cv.width = 96;
       cv.height = 96;
-      cv.style.cssText = 'image-rendering:pixelated;width:96px;height:96px;border:1px solid #3c4759';
+      cv.style.cssText =
+        `image-rendering:pixelated;width:96px;height:96px;border:1px solid ${PALETTE.ui.edgeStrong}`;
       const c2 = cv.getContext('2d');
       c2.imageSmoothingEnabled = false;
       if (canvas) c2.drawImage(canvas, 0, 0, 96, 96);
@@ -698,6 +1131,8 @@ export function bootMenu(canvas) {
 
     items.update(dt, current === 'menu' ? 1 : 0);
     settings?.update(dt);
+    online?.update(dt);
+    if (current === 'opponent') opponent?.update(dt);
     // The view mode's inertia lives here; nothing else in the editor moves.
     if (current === 'editor') editor?.update(dt);
 
@@ -716,7 +1151,11 @@ export function bootMenu(canvas) {
     } else {
       shakeOffset.set(0, 0, 0);
     }
-    camera.position.set(shakeOffset.x, cfg.camera.height + shakeOffset.y, cfg.camera.distance);
+    camera.position.set(
+      shakeOffset.x,
+      cfg.camera.height * camWiden + shakeOffset.y,
+      cfg.camera.distance * camWiden,
+    );
 
     switch (state.stage) {
       case STAGE.LAUNCH:
@@ -732,15 +1171,31 @@ export function bootMenu(canvas) {
         break;
     }
 
+    // The sound, after everything else has written this frame's state. The
+    // shake envelope is the curved one the bottle and the camera both use, so
+    // all three are describing the same motion.
+    menuAudio?.update(dt, { state, shake });
+    audio?.update(dt);
+
     debug.frame(state);
     render();
   }
+
+  // The same console handle the match page exposes as `__cap`. The menu had
+  // none, which meant every question about its camera or its frame had to be
+  // answered by reading source instead of by asking the running page.
+  window.__menu = { viewport, camera, scene, cfg, items, bottle, placeCamera };
 
   function render() {
     const r = viewport.renderer;
     viewport.bind();
     r.render(scene, camera);
     wipe.render(r);
+    // Last, and inside the bound target: a question has the screen while it is
+    // up, and it gets the same dither lattice and the same five bits a channel
+    // as the menu behind it. Drawn after the pass it would be the one smooth
+    // thing on the screen — which is what it was, as a DOM panel.
+    modal.render(r);
     viewport.unbind();
     retroPass.render(r, viewport.renderTarget.texture);
   }
@@ -781,8 +1236,9 @@ export function bootMenu(canvas) {
     // The screens, for the same reason `tick` is here: a sub-screen sits behind
     // a cap wipe and a fade, and neither is something you can step through by
     // hand from the outside.
-    swapTo, markBook, openEditor,
+    swapTo, markBook, openEditor, audio, menuAudio, launch,
     get marks() { return marks; }, get settings() { return settings; },
     get editor() { return editor; },
+    get opponent() { return opponent; },
   };
 }

@@ -1,4 +1,5 @@
 import { makeCanvasTexture } from '../core/textures.js';
+import { PALETTE } from '../core/palette.js';
 
 /**
  * The playing surface: a woven mat, drawn rather than loaded.
@@ -24,10 +25,13 @@ import { makeCanvasTexture } from '../core/textures.js';
 /** World units (cm) covered by one repeat of the texture. See the note above. */
 export const BOARD_TILE = 10;
 
-const BASE = '#2b313b';
-const WARP = '#313845';
-const WEFT = '#262c35';
-const FLECK = '#39414f';
+// Honey wood, not the near-black cloth this was. The weave the drawing code
+// below lays down still reads — as a woven mat in warm tones rather than as a
+// dark one — and it is PHASE 4 that replaces the weave itself with grain.
+const BASE = PALETTE.board.wood;
+const WARP = PALETTE.board.grainHi;
+const WEFT = PALETTE.board.grainLo;
+const FLECK = PALETTE.board.fleck;
 
 export function makeBoardTexture() {
   return makeCanvasTexture(128, drawBoard);

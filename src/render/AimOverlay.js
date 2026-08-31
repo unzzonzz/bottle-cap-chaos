@@ -8,6 +8,7 @@ import {
   LineSegments,
 } from 'three';
 import { rotateY, shotSpread } from '../game/shot.js';
+import { PALETTE } from '../core/palette.js';
 
 /**
  * Everything the player needs to see while the bow is drawn.
@@ -55,10 +56,16 @@ import { rotateY, shotSpread } from '../game/shot.js';
  * read as broken rather than as blind.
  */
 
-/** Warm: where the cap is going. */
-const AIM_COLOR = '#ffd36b';
-/** Cold: where the hand is. */
-const PULL_COLOR = '#7fa8e8';
+/**
+ * Warm: where the cap is going. Cold: where the hand is.
+ *
+ * Both went DARK when the fields went bright, and that is argued at length in
+ * `PALETTE.aim` — briefly: the old pale amber lands within 1.2:1 of both honey
+ * wood and summer turf, so the bow would have been invisible on two of the three
+ * fields. The warm/cold split that tells the two apart is unchanged.
+ */
+const AIM_COLOR = PALETTE.aim.bow;
+const PULL_COLOR = PALETTE.aim.pull;
 
 /**
  * The 강타 pair. Hotter than both, and it replaces both.
@@ -70,16 +77,16 @@ const PULL_COLOR = '#7fa8e8';
  * it too: the moment a boosted drag begins it is a different colour from an
  * ordinary one, at any power.
  */
-const SMASH_AIM_COLOR = '#ff7a3c';
-const SMASH_PULL_COLOR = '#e8724a';
-const SMASH_CONE_COLOR = '#ff5a2a';
-const PULL_CLAMP_COLOR = '#e0553f';
-const CONE_COLOR = '#c8863c';
-const PATH_COLOR = '#7ef0c8';
-const RING_ARMED_COLOR = '#ffd36b';
-const RING_IDLE_COLOR = '#5a6373';
+const SMASH_AIM_COLOR = PALETTE.aim.smashBow;
+const SMASH_PULL_COLOR = PALETTE.aim.smashPull;
+const SMASH_CONE_COLOR = PALETTE.aim.smashCone;
+const PULL_CLAMP_COLOR = PALETTE.aim.clamp;
+const CONE_COLOR = PALETTE.aim.cone;
+const PATH_COLOR = PALETTE.aim.path;
+const RING_ARMED_COLOR = PALETTE.aim.ringArmed;
+const RING_IDLE_COLOR = PALETTE.aim.ringIdle;
 /** The "press here and it is a shot" ring. Drawn when nothing is being pulled. */
-const HOVER_COLOR = '#8fe6c0';
+const HOVER_COLOR = PALETTE.aim.hover;
 
 /** Plenty for a 1 s preview at any sample rate the panel allows — and for the
  *  trajectory card's four. */
@@ -88,7 +95,7 @@ const MAX_PATH_POINTS = 512;
 const DASH_ON = 3;
 const DASH_PERIOD = 5;
 /** The cycled palette. Four entries, stepped — see `_writeDashes`. */
-const DASH_PALETTE = ['#7ef0c8', '#a8fff0', '#4fbfa0', '#a8fff0'];
+const DASH_PALETTE = PALETTE.aim.dash;
 const CONE_ARC_SEGMENTS = 24;
 const RING_SEGMENTS = 28;
 /** Board-plane y for the flat overlays. Above the grid, below the caps. */
@@ -283,7 +290,7 @@ export class AimOverlay {
     // the heading, so its bisector IS the deviated aim, drawn slightly less
     // legibly. Hiding the arrow and keeping the cone would leak the same number.
     if (blind || s.hideCone) this.coneGeo.setDrawRange(0, 0);
-    else this._writeCone(s.com, s.dirX, s.dirZ, s.power, reach, s.spreadMul ?? 1);
+    else this._writeCone(s.com, s.dirX, s.dirZ, s.power, reach, s.spreadMul ?? 1, s.impulseMul ?? 1);
 
     if (blind) this.aimGeo.setDrawRange(0, 0);
     else this._writeAim(s.com, s.dirX, s.dirZ, reach);
@@ -396,10 +403,16 @@ export class AimOverlay {
     );
   }
 
-  _writeCone(com, dx, dz, power, reach, spreadMul = 1) {
+  _writeCone(com, dx, dz, power, reach, spreadMul = 1, impulseMul = 1) {
     // Through `shotSpread`, not `spreadRadians`, so the drawn cone is the same
     // half-angle the seeded draw is taken from — boost included. See shot.js.
-    const half = shotSpread({ power, spreadMul }, this.config.shot);
+    //
+    // `impulseMul` has to travel with it now that the cone follows the delivered
+    // impulse rather than the pull: without it the drawn cone would be the one a
+    // 강타 shot would have had UNBOOSTED, which is narrower than the truth. A
+    // cone that under-reports is the one failure `shotSpread`'s note calls worse
+    // than having no cone at all.
+    const half = shotSpread({ power, spreadMul, impulseMul }, this.config.shot);
     const attr = this.coneGeo.getAttribute('position');
     const a = attr.array;
     let w = 0;

@@ -1,3 +1,33 @@
+/* ── the UI typeface ─────────────────────────────────────────────────────────
+   Two static faces, subset from Pretendard and renamed per OFL 1.1 — see NOTICE
+   at the repository root and src/ui/fonts/OFL.txt.
+
+   Bundled rather than fetched: this ships inside a Capacitor web view that has
+   to work with no network at all, and a CDN link is a UI that loses its
+   typeface on a plane.
+
+   `font-display: swap` is deliberate and is NOT the whole answer. The DOM text
+   it governs is one nickname input; every other glyph in this game is baked
+   into a canvas texture and cached, and a texture baked before the face arrives
+   stays wrong forever because nothing invalidates it. `src/ui/fonts.js` is what
+   handles that — it waits for both weights and then drops every registered
+   texture cache. */
+@font-face {
+  font-family: 'BCC Sans';
+  src: url('./fonts/bcc-sans-400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'BCC Sans';
+  src: url('./fonts/bcc-sans-700.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 *,
 *::before,
 *::after {
@@ -9,15 +39,54 @@ body {
   margin: 0;
   padding: 0;
   height: 100%;
-  /* The void. Everything outside the 4:3 frame is this. */
-  background: #000000;
-  color: #cfcfcf;
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /* The void. Everything outside the 4:3 frame is this.
+     Every colour in this file comes from src/ui/cssPalette.js, which writes the
+     palette into these custom properties at boot. A hex literal here is a bug —
+     see that file for why there are no fallbacks. */
+  background: var(--bcc-void);
+  color: var(--bcc-text);
+  font-family: 'BCC Sans', Pretendard, -apple-system, 'Segoe UI', system-ui, sans-serif;
   overscroll-behavior: none;
+
+  /* ── the web view's own gestures, all of them, off ────────────────────────
+     `#view` below already says `touch-action: none`, and that was enough while
+     the only thing anyone could touch was the canvas. It is not enough in a web
+     view: the canvas is letterboxed to 4:3, so on a phone there are black bars
+     of BODY on two sides of it, and a drag that starts on a bar is a drag on the
+     document — which is a rubber-band scroll, or a pull-to-refresh, or a
+     two-finger zoom, depending on how it started. Saying it here covers the
+     bars, the fade veil and anything else that ever lands on the page.
+
+     `touch-action: none` is what kills double-tap zoom as well; `manipulation`
+     would keep panning alive and is the wrong half of the pair here. */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  /* The long-press "선택 / 복사 / 조회" callout. It fires on a canvas too, and a
+     bow drawn slowly enough looks exactly like a long press. */
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
   overflow: hidden;
+  /* Pinned rather than merely clipped. `overflow: hidden` stops the document
+     scrolling; it does not stop iOS treating a drag as an overscroll and moving
+     the whole page under your finger. A fixed body has nothing to rubber-band. */
+  position: fixed;
+  inset: 0;
+  width: 100%;
+}
+
+/* The one exception to the selection ban.
+   `ModalLayer` mounts a real `<input>` for the nickname because Hangul IME
+   composition needs a focusable field, and a field you cannot put a caret in is
+   not a field. Everything else on the page stays unselectable. */
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
 }
 
 /* The canvas is letterboxed to a fixed 4:3 by Viewport, so it is centred rather
@@ -144,7 +213,7 @@ body {
   position: fixed;
   inset: 0;
   z-index: 40;
-  background: #000000;
+  background: var(--bcc-fade);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.18s linear;
@@ -155,6 +224,77 @@ body {
 }
 
 
+/* ── the measurement panel ───────────────────────────────────────────────────
+   Top LEFT, because lil-gui autoplaces itself top-right at z-index 1001 and a
+   right-hand panel would be buried under it whenever `?debug=1` is on.
+
+   The insets matter here in a way they do not for the game: this box is placed
+   against the WINDOW, not against the letterboxed canvas, so unlike the HUD it
+   really can land under a notch. `env()` in CSS is the right tool for a DOM
+   element — see src/platform/safeArea.js for why the in-canvas UI cannot use it.
+
+   `pointer-events: none` on the container is load-bearing. `PointerRouter` binds
+   pointerdown/move/up on the canvas, so any DOM box laid over the game silently
+   swallows shots. Only the badge opts back in. */
+.metrics-hud {
+  position: fixed;
+  /* BOTTOM-left, not top-left.
+     Top-left is where the turn plate lives, and while the canvas was letterboxed
+     to 4:3 the overlay sat harmlessly in the black bar beside it. In portrait the
+     canvas is full-width and the top band IS the HUD, so a top-left overlay lands
+     straight on top of the turn plate. The bottom-left corner is clear in both:
+     the card fan is centred, and in landscape it is black bar again. */
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 6px);
+  left: calc(env(safe-area-inset-left, 0px) + 6px);
+  z-index: 25; /* over .boot-error (20), under the modal input and .page-fade (40) */
+  display: flex;
+  /* Reversed, so the badge stays nearest the corner and the body grows upward
+     away from it — the same reading order the top-left version had. */
+  flex-direction: column-reverse;
+  align-items: flex-start;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.metrics-hud__badge {
+  pointer-events: auto;
+  /* 44 CSS px is the Apple minimum and the panel is the one control on screen
+     that a finger has to find without a label telling it where to look. */
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 8px;
+  margin: 0;
+  border: 1px solid var(--bcc-debug-edge);
+  border-radius: 8px;
+  background: var(--bcc-debug-bg);
+  color: var(--bcc-debug-accent);
+  font: 600 15px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Dropped frames or a saturated step drain. The one bit worth seeing from
+   across the room, and the only state the badge shows when the body is down. */
+.metrics-hud__badge[data-warn='1'] {
+  color: var(--bcc-debug-warn-ink);
+  border-color: var(--bcc-debug-warn-edge);
+}
+
+.metrics-hud__body {
+  margin: 0;
+  padding: 5px 7px;
+  background: var(--bcc-debug-bg);
+  border: 1px solid var(--bcc-debug-edge);
+  border-radius: 8px;
+  color: var(--bcc-debug-ink);
+  font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre;
+}
+
+.metrics-hud__body[hidden] {
+  display: none;
+}
+
 /* The WASM either loads or it does not, and a black canvas says neither. */
 .boot-error {
   position: fixed;
@@ -163,9 +303,10 @@ body {
   margin: 0;
   padding: 18px;
   overflow: auto;
-  background: rgba(20, 6, 6, 0.94);
-  border: 1px solid #7a2a20;
-  color: #f0a090;
+  background: var(--bcc-error-bg);
+  border: 1px solid var(--bcc-error-edge);
+  border-radius: 10px;
+  color: var(--bcc-error-ink);
   font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
   white-space: pre-wrap;
 }

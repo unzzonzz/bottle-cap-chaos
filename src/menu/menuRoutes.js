@@ -107,13 +107,66 @@ export function isReturnFromGame(loc = location) {
  * the panel on BOTH sides of it — the half that plays on the game page is the
  * half that is hardest to catch.
  */
-export function destinationUrl(id, loc = location) {
+/**
+ * Who the far seat belongs to, as a URL parameter.
+ *
+ * ── the choice travels in the ADDRESS, and that is the whole storage story ──
+ * "선택을 저장하지 마라. 매번 기본 상태로 시작한다." The menu and the game are two
+ * documents, so something has to cross the gap, and the two candidates are
+ * `localStorage` and the URL. Storage is exactly what the brief rules out — it
+ * would make the choice sticky across sessions, which is the behaviour being
+ * forbidden. The URL is the opposite: it describes THIS navigation and nothing
+ * else, it is already how the mode itself crosses, and coming back to the menu
+ * afterwards leaves nothing behind to remember.
+ *
+ * Absent means a human opponent, so every existing link and every hand-typed
+ * `/survival` still opens local play.
+ */
+export const OPPONENT_FLAG = 'vs';
+const OPPONENT_AI = 'ai';
+const OPPONENT_ONLINE = 'online';
+
+/** Every value this flag may legally take. Anything else means local play. */
+const OPPONENT_VALUES = new Set([OPPONENT_AI, OPPONENT_ONLINE]);
+
+/** @param {string} raw  a `vs` value from an address bar; anything else is local. */
+export function isAiOpponent(loc = location) {
+  return new URLSearchParams(loc.search).get(OPPONENT_FLAG) === OPPONENT_AI;
+}
+
+/**
+ * Is this document meant to be an online match?
+ *
+ * The flag alone is not enough to PLAY one — the game document also needs the
+ * room and seat that `OnlineSession.recall` picks up out of session storage, and
+ * a hand-typed `?vs=online` has none of that. So this answers "was this URL
+ * built by the matchmaker", and `main.js` falls back to local play when the
+ * handoff is missing. A URL cannot conjure an opponent.
+ */
+export function isOnlineOpponent(loc = location) {
+  return new URLSearchParams(loc.search).get(OPPONENT_FLAG) === OPPONENT_ONLINE;
+}
+
+/**
+ * @param {{vs?: string}} [opts]
+ *   `vs: 'ai'` or `vs: 'online'` puts the opponent flag on. Omitted, the URL is
+ *   exactly what it was before this parameter existed.
+ *
+ *   ── this used to compare against `'ai'` alone ─────────────────────────────
+ *   Which meant any other value — `'online'` included — silently produced a
+ *   LOCAL-play URL: no error, no flag, and a match that opens two-players-on-one-
+ *   device while the menu believes it started an online game. Checking membership
+ *   of the set makes a new opponent kind a one-line addition rather than a bug
+ *   that only shows up as "the network never connected".
+ */
+export function destinationUrl(id, loc = location, { vs = null } = {}) {
   const base = basePath(loc.pathname);
   const search = new URLSearchParams(loc.search);
   const debug = search.get('debug') === '1';
 
   const params = new URLSearchParams();
   params.set(HANDOVER_FLAG, HANDOVER_VALUE);
+  if (vs && OPPONENT_VALUES.has(vs)) params.set(OPPONENT_FLAG, vs);
   if (debug) params.set('debug', '1');
 
   // Every mode has a segment now, knockout's included — it is `/survival`, not

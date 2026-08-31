@@ -9,7 +9,17 @@ import {
 } from 'three';
 import { CapSwap } from '../game/cards/CapSwap.js';
 import { FxMaterials } from './FxMaterial.js';
-import { auraTexture, dashTexture, flashTexture, frameTexture, ringTexture, scanTexture, stunSheet } from './fxTextures.js';
+import {
+  auraTexture,
+  dashTexture,
+  flashTexture,
+  flatTexture,
+  frameTexture,
+  ringTexture,
+  scanTexture,
+  stunSheet,
+} from './fxTextures.js';
+import { PALETTE } from '../core/palette.js';
 
 /**
  * What a card LOOKS like happening.
@@ -75,8 +85,9 @@ const SMASH_PALETTE = [
 ];
 
 const ONEMORE_TINT = [1.0, 0.86, 0.42];
+
 const SWAP_TINT = [0.72, 0.9, 1.0];
-const SWAP_LINE_COLOR = '#7ec8f0';
+const SWAP_LINE_COLOR = PALETTE.fx.swapLine;
 
 /** Rings drawn at both ends of every swapped pair. */
 const MAX_SWAP_RINGS = 32;
@@ -108,6 +119,14 @@ export class CardFx {
     this._demo = null;
 
     this.arena = null;
+    /**
+     * Live caps per player, rebuilt every frame. See `_aliveOwnedCaps`.
+     *
+     * Initialised here because `capVisual` is called from `ArenaView` and there
+     * is no ordering guarantee that the first `update` has run before the first
+     * frame is drawn — an undefined set would throw rather than simply not mark.
+     */
+    this._aliveOwned = [new Set(), new Set()];
     this.chaosCaps = [];
     /** Which caps are standing on a boosted shot. Empty when nobody is. */
     this.smashCaps = [];
@@ -115,12 +134,16 @@ export class CardFx {
     this._invertLeft = 0;
     /** Whether a smash burst was running last frame. The leading edge arms it. */
     this._wasSmashing = false;
+    /** Frames of darkening still owed, and the same leading-edge latch. */
+    this._darkenLeft = 0;
+    this._wasSealing = false;
 
     this._buildStun();
     this._buildSwap();
     this._buildFlash();
     this._buildSmash();
     this._buildScreen();
+    this._buildSeal();
   }
 
   setResolution(resolution) {
@@ -289,6 +312,69 @@ export class CardFx {
     this.screen.add(this.invertQuad);
   }
 
+  /**
+   * 침묵's cast, which is one flash of darkness and nothing else.
+   *
+   * ── it used to reach, and the reach had to go ───────────────────────────────
+   * There was a dark bolt that grew from the caster's hand to the victim's and
+   * stamped a padlock where it landed. It read as smoke drifting across the
+   * pitch — a soft, drifting thing on a board where nothing else drifts — and it
+   * spent half a second saying what the padlock on the victim's own turn says
+   * better and at the moment it actually matters.
+   *
+   * What is left is the one part that was never the problem: `dst - src` over
+   * the whole frame for a frame or two. It is the mirror of 강타's inversion,
+   * it is over before the eye resolves it, and it is the only thing on screen
+   * that has to happen at CAST time — the seal itself is a thing the victim
+   * meets on their own turn, and `CardLayer` draws it there.
+   *
+   * ── nothing here goes near a cap, and that is still the card ────────────────
+   * 혼란 puts stars over the caps because it twists a SHOT. 침묵 does not touch a
+   * shot: it seals a HAND. An effect on the caps would send the player to look
+   * at the board for a change that is not there.
+   */
+  _buildSeal() {
+    // Over everything, including the cards — a darkening that the hand escaped
+    // would read as the hand being lit rather than as the frame being dimmed.
+    this.sealDarkenMat = this.materials.createDarken(flatTexture());
+    this.sealDarken = new Mesh(QUAD, this.sealDarkenMat);
+    this.sealDarken.scale.set(this.frame.width, this.frame.height, 1);
+    this.sealDarken.visible = false;
+    this.sealDarken.renderOrder = 1003;
+    this.screen.add(this.sealDarken);
+  }
+
+  /**
+   * The cast flash: counted in FRAMES, armed on the leading edge.
+   *
+   * Identical bookkeeping to 강타's inversion, and identical reasoning: a window
+   * measured in seconds lands on a different number of frames at a different
+   * refresh rate, and at one or two frames that is the difference between a hit
+   * and nothing at all. `Match.cardFx` builds a fresh object every frame, so the
+   * latch is a BOOLEAN transition rather than an identity test on the burst.
+   *
+   * The texture is re-fetched every frame rather than on a change. It is a cache
+   * hit — one map lookup — and it is the only thing that survives the panel's
+   * stun sliders emptying the whole texture cache out from under a material that
+   * is still pointing into it. A freed texture is not an error; it just draws
+   * nothing, silently.
+   */
+  _updateSeal() {
+    const cfg = this.config.cardFx;
+    this.sealDarkenMat.uniforms.uMap.value = flatTexture();
+
+    const sealing = this._burst?.cardId === 'silence';
+    if (sealing && !this._wasSealing) {
+      this._darkenLeft = Math.max(0, Math.round(cfg.sealDarkenFrames));
+    }
+    this._wasSealing = sealing;
+    this.sealDarken.visible = this._darkenLeft > 0;
+    if (this._darkenLeft > 0) {
+      this.sealDarkenMat.uniforms.uOpacity.value = Math.max(0, Math.min(1, cfg.sealDarkenStrength));
+      this._darkenLeft--;
+    }
+  }
+
   // ── the trajectory line's flow ───────────────────────────────────────────
 
   /**
@@ -330,6 +416,16 @@ export class CardFx {
       this._burst = null;
     }
 
+    /**
+     * FIRST, because everything below marks caps and every one of them has to
+     * agree about which caps are still there. See `_aliveOwnedCaps`.
+     *
+     * It is also what `capVisual` reads, and that call comes from `ArenaView`
+     * later in the same frame rather than from here — so this has to be built
+     * on the frame's own state before anything can ask.
+     */
+    this._aliveOwned = this._aliveOwnedCaps(match);
+
     this.chaosCaps = this._chaosCaps(match);
     this.smashCaps = this._smashCaps(match);
     this._updateStun(camera);
@@ -337,6 +433,11 @@ export class CardFx {
     this._updateFlash(match, camera);
     this._updateSmash(camera);
     this._updateScreen();
+    // After `_updateScreen`, which owns the other two full-frame effects. The
+    // order is only bookkeeping — they cannot be on at once — but keeping the
+    // frame-counted latches next to each other is what stops the second one
+    // being written as a timer by somebody reading only half the file.
+    this._updateSeal();
   }
 
   /**
@@ -357,6 +458,47 @@ export class CardFx {
   _isAlive(match, i) {
     const alive = match?.rules?.alive;
     return !alive || alive[i] !== false;
+  }
+
+  /**
+   * The caps a player still has ON THE BOARD. One answer, asked once a frame.
+   *
+   * ── "is it theirs" and "is it still there" are one question, not two ────────
+   * Five places in this file mark a cap because of who owns it: the stun stars,
+   * 강타's standing aura, 강타's closing ring, 원모어's flash, and the two pulses
+   * in `capVisual`. Every one of them wants the owner's LIVE caps, and for a
+   * long time only the first two said so — the pickers were given an `_isAlive`
+   * test and the burst-driven loops were left asking `capOwner` alone.
+   *
+   * That is not a small inconsistency, it is a reported bug and it was reported
+   * twice: the aura was fixed for it once, and 강타's ring kept doing the same
+   * thing on the same caps, because a second copy of the rule was never written.
+   * Measured on a knockout board with two caps eliminated: `smashCaps` was `[2]`
+   * and the rings were drawn on `[0, 1, 2]` — two of them burning on the bodies.
+   *
+   * So there is now one set, built once in `update`, and every marker reads it.
+   * A sixth effect that marks a cap gets the rule by using the set, and the way
+   * to get it wrong is to write a new loop over `capOwner` — which is now the
+   * only thing in this file that would look out of place.
+   *
+   * A Set rather than an array: these are membership tests inside per-cap loops,
+   * and `capVisual` is called once per cap per frame from `ArenaView`.
+   *
+   * @returns {Set<number>[]} indexed by player
+   */
+  _aliveOwnedCaps(match) {
+    const arena = this.arena;
+    const out = [new Set(), new Set()];
+    if (!arena) return out;
+    for (let i = 0; i < arena.capCount; i++) {
+      if (this._isAlive(match, i)) out[arena.capOwner[i]]?.add(i);
+    }
+    return out;
+  }
+
+  /** Whether `index` is a live cap of `player`'s. The one test every marker uses. */
+  _marks(player, index) {
+    return !!this._aliveOwned?.[player]?.has(index);
   }
 
   /**
@@ -391,13 +533,8 @@ export class CardFx {
    */
   _smashCaps(match) {
     const smash = match?.cards?.smash;
-    const arena = this.arena;
-    if (!smash || !arena) return [];
-    const out = [];
-    for (let i = 0; i < arena.capCount; i++) {
-      if (arena.capOwner[i] === smash.player && this._isAlive(match, i)) out.push(i);
-    }
-    return out;
+    if (!smash) return [];
+    return [...(this._aliveOwned[smash.player] ?? [])];
   }
 
   /**
@@ -544,7 +681,9 @@ export class CardFx {
 
     for (let i = 0; i < this.flashes.length; i++) {
       const f = this.flashes[i];
-      if (i >= this.arena.capCount || this.arena.capOwner[i] !== burst.player || stepped <= 0) {
+      // `_marks`, not `capOwner`: a cap that has gone off the board is still a
+      // body at a position, and flashing it lights up a corpse.
+      if (!this._marks(burst.player, i) || stepped <= 0) {
         f.mesh.visible = false;
         continue;
       }
@@ -616,7 +755,10 @@ export class CardFx {
 
     for (let i = 0; i < this.smashRings.length; i++) {
       const r = this.smashRings[i];
-      if (i >= this.arena.capCount || this.arena.capOwner[i] !== burst.player || stepped <= 0) {
+      // The reported bug, and the reason `_marks` exists: the aura above was
+      // given the alive test and this loop was not, so an eliminated cap kept
+      // its closing ring while the aura beside it had already stopped.
+      if (!this._marks(burst.player, i) || stepped <= 0) {
         r.mesh.visible = false;
         continue;
       }
@@ -743,7 +885,7 @@ export class CardFx {
     // The answering pulse, on the BACK half of the effect — after the ring has
     // finished closing. The order is the whole statement: the force gathers,
     // then it lands. Stepped, like the one-more pulse, for the same reason.
-    if (burst?.cardId === 'smash' && this.arena && this.arena.capOwner[index] === burst.player) {
+    if (burst?.cardId === 'smash' && this._marks(burst.player, index)) {
       const cfg2 = this.config.cardFx;
       const close = Math.max(0.05, Math.min(1, cfg2.smashRingFraction));
       const after = (burst.t - close) / Math.max(0.05, 1 - close);
@@ -754,7 +896,7 @@ export class CardFx {
       }
     }
 
-    if (burst?.cardId === 'onemore' && this.arena && this.arena.capOwner[index] === burst.player) {
+    if (burst?.cardId === 'onemore' && this._marks(burst.player, index)) {
       // One pulse, stepped. Not a sine: a smooth breath reads as an idle
       // animation rather than as a thing that just happened.
       const k = Math.max(0, 1 - burst.t * 2.5);

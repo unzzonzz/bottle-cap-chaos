@@ -2,8 +2,29 @@
 <html lang="ko">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="color-scheme" content="dark" />
+    <!--
+      `viewport-fit=cover` hands the web view the whole screen, notch included —
+      src/platform/safeArea.js is what gives the unsafe part back, in the frame
+      pixels the in-canvas UI is laid out in.
+
+      `user-scalable=no, maximum-scale=1` is for the BROWSER build only. iOS
+      Safari has ignored both since iOS 10 and the packaged app does not need
+      them (capacitor.config.json sets `ios.zoomEnabled: false`, which turns
+      zoom off on the WKWebView itself) — but Android's web view and desktop
+      Chrome do honour them, and the game owns its own pinch gesture.
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no, maximum-scale=1"
+    />
+    <!--
+      The UI is a light scheme now — white plates, dark navy type — and this is
+      what stops the browser painting its own dark form controls and scrollbars
+      underneath it. It is also what the nickname `<input>` inherits: it is the
+      one real DOM control in the game, and under `dark` it came up as a dark
+      field in the middle of a white modal.
+    -->
+    <meta name="color-scheme" content="light" />
     <title>Bottle Cap Chaos — cap viewer</title>
     <link rel="stylesheet" href="/src/ui/styles.css" />
   </head>

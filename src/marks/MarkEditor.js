@@ -1,4 +1,5 @@
 import { Group, Mesh, PlaneGeometry, Raycaster, Vector2 } from 'three';
+import { PALETTE } from '../core/palette.js';
 import { buildCapGeometry, CAP_DEFAULTS, CAP_GROUP } from '../cap/capGeometry.js';
 import { createSpriteMaterial } from '../menu/menuMaterials.js';
 import { menuPlateTexture } from '../menu/menuTextures.js';
@@ -58,7 +59,16 @@ const L = {
   /** Screen pixels across the cap's widest point. */
   capWidth: 236,
   toolX: 236,
-  paletteX: -246,
+  /**
+   * Left edge of the palette's first column.
+   *
+   * Moved out from −246 when the grid grew a fourth column. At −246 the new
+   * column's right edge landed at −129 against the cap's own left edge at −118,
+   * which is eleven frame pixels and reads as the swatches touching the cap.
+   * −270 puts the same clearance on both sides of the block: about 35 to the
+   * frame's edge and about 35 to the cap.
+   */
+  paletteX: -270,
   swatch: 30,
   tool: 34,
   modeY: 176,
@@ -67,19 +77,41 @@ const L = {
 };
 
 /**
- * The palette.
+ * The drawing palette, as rows of `PALETTE_COLUMNS`.
  *
- * Twelve, and every one of them survives the 5-bit quantiser as a distinct
- * colour at this size — which is why they are spaced around the wheel rather
- * than sampled from a gradient, and why there are no near-neighbours. Black and
- * white are in it because a pixel mark needs an outline and a highlight more
- * than it needs a second blue.
+ * ── the values moved to `core/palette.js`; the ORDER is still layout ─────────
+ * `_buildPalette` fills left to right, so each run of four in `marks.swatches`
+ * is a row on screen and each row is a family. That is the whole reason the
+ * array is written four to a line over there rather than sorted by hue:
+ * reordering it rearranges the grid, and a grid you can scan by family is the
+ * difference between picking a colour and hunting for one.
+ *
+ * The constraint that used to shape the list is gone. It was chosen so that
+ * every entry landed on its own 5-bit-per-channel triple, because the chain
+ * quantised to five bits and two swatches less than a thirty-second apart
+ * arrived as the same colour. There is no quantiser now, so the twenty-four
+ * were re-tuned for the bright scheme instead — the row of near-blacks became a
+ * row of navies, and every hue came up in lightness.
+ *
+ * Nothing saved depends on any of this. A mark is stored as canvas pixels, not
+ * as palette indices, so re-tinting a swatch cannot change a drawing anybody has
+ * already made.
+ *
+ * Named `MARK_SWATCHES` rather than `PALETTE`, which is what it was called when
+ * it was the only palette in the project.
  */
-export const PALETTE = [
-  '#ffffff', '#c3ccdb', '#6c7686', '#14161c',
-  '#e0553f', '#e8724a', '#e0c07a', '#f0e07a',
-  '#7ef0c8', '#3fa88a', '#7ec8f0', '#b9a0e8',
-];
+export const MARK_SWATCHES = PALETTE.marks.swatches;
+
+/**
+ * Swatches across, which decides how far down the grid reaches.
+ *
+ * Four rather than the three it was, and it is a fit rather than a taste: at
+ * three columns twenty-four colours are eight rows deep and the bottom of the
+ * grid lands on 목록으로. Four columns is six rows, which clears that button by
+ * about fifty frame pixels, and the extra column is what `paletteX` moved left
+ * to make room for — see the note there.
+ */
+const PALETTE_COLUMNS = 4;
 
 /**
  * Brush diameters in canvas texels, one per size icon.
@@ -113,7 +145,7 @@ export class MarkEditor {
     this.mode = EDITOR_MODE.DRAW;
     /** Which slot is being edited, or DEFAULT_MARK when just looking. */
     this.ref = 0;
-    this.colour = PALETTE[0];
+    this.colour = MARK_SWATCHES[0];
     this.brush = 1;
     this.erasing = false;
 
@@ -152,9 +184,9 @@ export class MarkEditor {
     this.materials[CAP_GROUP.BODY] = retro.create({ color: tuning.capColor });
     this.materials[CAP_GROUP.PANEL] = retro.create({
       map: this.panelTexture,
-      color: '#ffffff',
+      color: PALETTE.untinted,
     });
-    this.materials[CAP_GROUP.LINER] = retro.create({ color: '#ddd6c2', gloss: 0.35 });
+    this.materials[CAP_GROUP.LINER] = retro.create({ color: PALETTE.metal.liner, gloss: 0.35 });
 
     this.cap = new Mesh(this.geometry, this.materials);
     // Panel toward the camera, and parked on its mid-height so the view mode
@@ -248,9 +280,9 @@ export class MarkEditor {
   }
 
   _buildPalette(retro) {
-    this.swatches = PALETTE.map((colour, i) => {
-      const col = i % 3;
-      const row = Math.floor(i / 3);
+    this.swatches = MARK_SWATCHES.map((colour, i) => {
+      const col = i % PALETTE_COLUMNS;
+      const row = Math.floor(i / PALETTE_COLUMNS);
       return Object.assign(
         this._add(retro, {
           id: `colour:${i}`,
@@ -462,7 +494,7 @@ export class MarkEditor {
     if (this.erasing) {
       // Alpha out, not paint over. See the header.
       this.ctx.globalCompositeOperation = 'destination-out';
-      this.ctx.fillStyle = '#000';
+      this.ctx.fillStyle = PALETTE.ui.text;
     } else {
       this.ctx.globalCompositeOperation = 'source-over';
       this.ctx.fillStyle = this.colour;
@@ -626,12 +658,28 @@ export class MarkEditor {
     }
     if (id?.startsWith('brush:')) {
       this.brush = Number(id.slice(6));
-      this.erasing = false;
+      /**
+       * The size does NOT put the eraser away, and the colour below does.
+       *
+       * They look like the same kind of control sitting in the same row and they
+       * are two different axes. A COLOUR is a paint-only idea — picking one is
+       * picking to paint, and leaving the eraser armed would rub out in a colour
+       * the player just chose. A SIZE belongs to whichever tool is in hand:
+       * `_dab` reads `BRUSH_SIZES[this.brush]` for the eraser exactly as it does
+       * for the brush, so the eraser has always had a width and it has always
+       * been this one.
+       *
+       * It used to clear `erasing` here too, copied from the colour branch, and
+       * that made the eraser's width unreachable: the only way to change it was
+       * to leave eraser mode, pick a size, and arm the eraser again — three
+       * presses to do what the row looks like it does in one, with nothing on
+       * screen explaining why the middle press turned the eraser off.
+       */
       this.refresh();
       return true;
     }
     if (id?.startsWith('colour:')) {
-      this.colour = PALETTE[Number(id.slice(7))];
+      this.colour = MARK_SWATCHES[Number(id.slice(7))];
       // Choosing a colour is choosing to paint. Leaving the eraser armed would
       // make the next stroke rub out in a colour the player just picked.
       this.erasing = false;
@@ -732,7 +780,22 @@ export class MarkEditor {
     for (const t of this.tools) {
       t.mesh.visible = drawing;
       let state = t.id === hoverId ? 'hover' : 'idle';
-      if (t.id === `brush:${this.brush}` && !this.erasing) state = 'active';
+      /**
+       * TWO controls in this row can be lit at once, and that is the point.
+       *
+       * The row looks like one set of four radio buttons and is two axes: which
+       * tool is in hand (brush or eraser) and how wide it is. The size used to be
+       * lit only while painting — `&& !this.erasing` — so arming the eraser left
+       * the whole row showing one highlight on the eraser and nothing about its
+       * width, while `_dab` went on using the width the player could no longer
+       * see. The setting was in force and unreadable, which is the worst of the
+       * three possible states.
+       *
+       * So the size is lit whichever tool it is sizing. With the eraser armed
+       * the row reads "eraser, this wide", which is what it has always been
+       * doing.
+       */
+      if (t.id === `brush:${this.brush}`) state = 'active';
       if (t.id === 'eraser' && this.erasing) state = 'active';
       // Greyed when there is nothing to go back to or forward to, which the
       // brief asks for explicitly.
@@ -774,8 +837,8 @@ export class MarkEditor {
   /** The panel edited the palette. Drop the cached chips and redraw. */
   refreshPalette() {
     swatchCache.clear();
-    for (let i = 0; i < this.swatches.length; i++) this.swatches[i].colour = PALETTE[i];
-    if (!PALETTE.includes(this.colour)) this.colour = PALETTE[0];
+    for (let i = 0; i < this.swatches.length; i++) this.swatches[i].colour = MARK_SWATCHES[i];
+    if (!MARK_SWATCHES.includes(this.colour)) this.colour = MARK_SWATCHES[0];
     this.refresh();
   }
 
@@ -812,7 +875,7 @@ function swatchTexture(colour, selected) {
   canvas.height = L.swatch;
   const ctx = canvas.getContext('2d');
   ctx.imageSmoothingEnabled = false;
-  ctx.fillStyle = selected ? '#d8b45c' : '#3c4759';
+  ctx.fillStyle = selected ? PALETTE.accent.cyan : PALETTE.ui.edge;
   ctx.fillRect(0, 0, L.swatch, L.swatch);
   ctx.fillStyle = colour;
   ctx.fillRect(3, 3, L.swatch - 6, L.swatch - 6);
@@ -847,7 +910,7 @@ function ringTexture(boundary) {
       const d = Math.hypot(x + 0.5 - half, y + 0.5 - half);
       // Two texels wide, hard-edged. No falloff — a soft ring is a gradient.
       if (d >= r - 1 && d <= r + 1) {
-        ctx.fillStyle = '#4a5568';
+        ctx.fillStyle = PALETTE.ui.textMuted;
         ctx.fillRect(x, y, 1, 1);
       }
     }

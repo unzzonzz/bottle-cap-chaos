@@ -132,6 +132,37 @@ export class RuleSet {
     return null;
   }
 
+  /**
+   * What the mode wants MEASURED on the field, drawn for the player.
+   *
+   * Empty for a mode whose position explains itself: you can see which caps are
+   * left on a survival board and you can read a football score off the plate.
+   * Curling cannot be seen — two caps a centimetre apart at the far end of a
+   * table are visibly the same distance away — so the number the judge actually
+   * used is published here and drawn on the board. "이게 없으면 누가 더 가까운지
+   * 눈으로 판단이 안 된다. 필수다."
+   *
+   * A READOUT of a judgement that has already been made, not a live measurement:
+   * a mode that implements this must fill it in when a turn settles and clear it
+   * when the next shot fires, or the marks describe a world that is still moving.
+   *
+   * Each entry is a measurement FROM a point on the field TO another point, with
+   * the number it came out as and who it belongs to. Both ends are carried so
+   * the renderer never has to know what was measured — no target line, no house,
+   * no goal, nothing about which mode is loaded.
+   *
+   * @returns {{
+   *   x: number, z: number,
+   *   toX: number, toZ: number,
+   *   distance: number,
+   *   player: number,
+   *   best?: boolean,
+   * }[]}
+   */
+  distanceMarks() {
+    return [];
+  }
+
   /** Player chose a different cap of their own. */
   select(_capIndex) {}
 
@@ -162,8 +193,20 @@ export class RuleSet {
    * say so or the loser cannot tell why they lost; the other two modes leave it
    * out and their result screen is unchanged.
    *
+   * `cleared` is the other way a mode can ask for the field to be emptied, and
+   * it is deliberately not `eliminated`. They mean different things and are read
+   * by different people: `eliminated` says THIS CAP WENT OUT — the audio layer
+   * plays an out cue off it and the note line counts it — while `cleared` says
+   * the round is over and the table is being swept, which is nobody's mistake.
+   * Curling ends every round by sweeping; reusing `eliminated` for it would
+   * announce two overshoots at the end of a round in which nothing went over.
+   *
+   * Both are stowed the same way, by `Match`, after the end-of-turn hash. The
+   * rules do not touch the world.
+   *
    * @returns {{
    *   eliminated: number[],
+   *   cleared?: number[],
    *   winner: number|null,
    *   note: string,
    *   resetField?: boolean,

@@ -1,4 +1,5 @@
 import { BOTTLE_DEFAULTS } from './bottleProfile.js';
+import { PALETTE } from '../core/palette.js';
 
 /**
  * Every number the menu can be tuned by, in one object.
@@ -208,7 +209,7 @@ export const MENU_CONFIG = {
      */
     historyLimit: 24,
     /** The cap the editor draws on. Neutral: a mark belongs to neither side. */
-    capColor: '#8c94a3',
+    capColor: PALETTE.menu.capDefault,
     /** View mode: radians of roll per pixel of vertical drag. */
     rotateRadiansPerPixel: 0.012,
     /** What a release keeps of the drag's speed. */

@@ -1,5 +1,7 @@
-import { Group, Mesh, OrthographicCamera, Scene, Vector2 } from 'three';
+import { Group, Mesh, Scene, Vector2 } from 'three';
+import { FRAME as SHARED_FRAME, frameCamera, halfDiagonal } from '../core/frame.js';
 import { buildCapGeometry, CAP_DEFAULTS, CAP_GROUP } from '../cap/capGeometry.js';
+import { PALETTE } from '../core/palette.js';
 
 /**
  * The cap that flies at the camera and takes the screen with it.
@@ -44,9 +46,11 @@ import { buildCapGeometry, CAP_DEFAULTS, CAP_GROUP } from '../cap/capGeometry.js
  */
 
 /** The overlay's virtual frame, matching `CardLayer.FRAME`. */
-export const WIPE_FRAME = { width: 640, height: 480 };
+/** The layout box, in frame pixels. The shared, live one — see core/frame.js. */
+export const WIPE_FRAME = SHARED_FRAME;
 
-const HALF_DIAGONAL = Math.hypot(WIPE_FRAME.width, WIPE_FRAME.height) / 2;
+// See core/frame.js: `halfDiagonal()` is a function now, because the wipe has
+// to cover a frame whose diagonal can change. A stale constant left a gap.
 
 /** Largest radius in the geometry's panel group — the guaranteed-opaque disc. */
 function measurePanelRadius(geometry) {
@@ -70,7 +74,7 @@ export class CapWipe {
    * @param {object} tuning  the live `MENU_CONFIG.wipe` block
    * @param {import('three').Texture} [panelMap]  the cap's top artwork
    */
-  constructor({ retro, tuning, panelMap = null, color = '#c8342f', panelColor = '#ffffff' }) {
+  constructor({ retro, tuning, panelMap = null, color = PALETTE.player[0], panelColor = PALETTE.untinted }) {
     this.tuning = tuning;
 
     this.root = new Group();
@@ -91,14 +95,7 @@ export class CapWipe {
      * `CardLayer`'s.
      */
     this.scene = new Scene();
-    this.camera = new OrthographicCamera(
-      -WIPE_FRAME.width / 2,
-      WIPE_FRAME.width / 2,
-      WIPE_FRAME.height / 2,
-      -WIPE_FRAME.height / 2,
-      -3000,
-      3000,
-    );
+    this.camera = frameCamera({ near: -3000, far: 3000 });
     this.scene.add(this.root);
 
     this.geometry = buildCapGeometry({ ...CAP_DEFAULTS, shell: false });
@@ -166,7 +163,7 @@ export class CapWipe {
   coverScale(offset = 0) {
     const tilt = (this.tuning.axisTilt * Math.PI) / 180;
     const usable = this._panelRadius * Math.max(0.2, Math.cos(tilt));
-    return ((HALF_DIAGONAL + offset) / usable) * this.tuning.coverSafety;
+    return ((halfDiagonal() + offset) / usable) * this.tuning.coverSafety;
   }
 
   /**
@@ -179,7 +176,7 @@ export class CapWipe {
     // readout of what is on screen, and by the covered frame the cap has
     // squared up and is doing better than `coverScale` paid for.
     const reach = this._panelRadius * this._scale * Math.cos(this.tilt.rotation.x);
-    return reach - this.root.position.length() - HALF_DIAGONAL;
+    return reach - this.root.position.length() - halfDiagonal();
   }
 
   /**

@@ -1,4 +1,6 @@
 import { CanvasTexture, NearestFilter, ClampToEdgeWrapping } from 'three';
+import { PALETTE } from '../core/palette.js';
+import { registerTextureCache } from '../ui/fonts.js';
 
 /**
  * A card face, drawn at whatever resolution it is asked for.
@@ -30,13 +32,27 @@ import { CanvasTexture, NearestFilter, ClampToEdgeWrapping } from 'three';
  * every frame.
  */
 
-const BG = '#12161d';
-const PANEL = '#0c0f15';
-const RULE = '#262d3a';
-const BODY = '#98a1af';
-const BACK_A = '#1b2230';
-const BACK_B = '#141a25';
-const BACK_MARK = '#3d4756';
+const BG = PALETTE.ui.surface;
+const PANEL = PALETTE.ui.surfaceAlt;
+const RULE = PALETTE.ui.edge;
+const BODY = PALETTE.ui.textMuted;
+const BACK_A = PALETTE.ui.surfaceAlt;
+const BACK_B = PALETTE.ui.surfaceSunken;
+const BACK_MARK = PALETTE.ui.edgeStrong;
+
+/**
+ * A card's accent, from the palette rather than from the catalog.
+ *
+ * `cardCatalog` still carries an `accent` per card and it is deliberately not
+ * the source of truth: the catalog lives under `src/game/`, which is simulation
+ * territory that art work does not edit, and its six accents were chosen against
+ * a near-black card face. This looks the id up in `PALETTE.card` and falls back
+ * to the catalog value for a card the palette has not been told about, so adding
+ * one cannot leave the hand with an undefined `strokeStyle`.
+ */
+function accentOf(card) {
+  return PALETTE.card[card.id] ?? card.accent;
+}
 
 /** Alpha at or above this survives; everything else is dropped. */
 const ALPHA_CUT = 110;
@@ -115,10 +131,12 @@ export function cardFaceTexture(card, width) {
 
   // Border, and a chamfer at two corners. Sharp — a radius is the fastest way
   // to make this look like it came from a different program than the pitch.
-  ctx.strokeStyle = card.accent;
+  ctx.strokeStyle = accentOf(card);
   ctx.lineWidth = Math.max(1, Math.round(u));
   ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
-  ctx.fillStyle = '#000000';
+  // The chamfer's cut corners. The palette's edge rather than the black they
+  // were: on a white face a black triangle is not a cut corner, it is a hole.
+  ctx.fillStyle = PALETTE.ui.edge;
   const ch = Math.round(9 * u);
   ctx.beginPath();
   ctx.moveTo(0, 0);
@@ -137,7 +155,7 @@ export function cardFaceTexture(card, width) {
     x: Math.round(7 * u),
     y: Math.round(19 * u),
     font: `${Math.round(14 * u)}px ui-monospace, Menlo, monospace`,
-    color: card.accent,
+    color: accentOf(card),
   });
   ctx.fillStyle = RULE;
   ctx.fillRect(Math.round(5 * u), Math.round(25 * u), w - Math.round(10 * u), Math.max(1, Math.round(u)));
@@ -153,7 +171,7 @@ export function cardFaceTexture(card, width) {
     x: Math.round(w / 2),
     y: artY + Math.round(artH * 0.68),
     font: `${Math.round(46 * u)}px ui-monospace, Menlo, monospace`,
-    color: card.accent,
+    color: accentOf(card),
     align: 'center',
   });
 
@@ -235,6 +253,90 @@ export function cardBackTexture(width) {
 }
 
 /**
+ * The drop guide: a card-shaped slot, in hard yellow, hollow in the middle.
+ *
+ * ── it is an AFFORDANCE, and it is placed where the rule already is ──────────
+ * The gesture that plays a card is vertical travel out of the fan — see
+ * `CardHand._checkArmed` — and that is deliberately not "land inside a target",
+ * for the reason written there: a target is a small thing to find, and it makes
+ * the same gesture succeed or fail depending on which end of the hand the card
+ * started from. None of that changes because there is now something drawn.
+ *
+ * What the drawing is for is the other half of the problem, which is real: a
+ * threshold you cannot see is a threshold you have to discover by failing at it.
+ * So this is drawn at exactly the height the card arms at, and following it
+ * therefore always works. It is a signpost on the rule, not a second rule.
+ *
+ * ── hollow, and bigger than the card ────────────────────────────────────────
+ * Hollow because the card has to be readable through it while it is being
+ * carried. Bigger — see `guideMargin` — because a border exactly the card's size
+ * is a border the card covers completely the moment it arrives, so the guide
+ * would vanish at precisely the moment it is confirming something.
+ *
+ * ── corner brackets ─────────────────────────────────────────────────────────
+ * The border alone reads as a panel. Four brackets read as a SLOT, and they are
+ * the one shape that says "put it here" without a word on it. Drawn as whole
+ * pixels at hard values, like everything else in this file — a soft glow around
+ * a drop target is the single most modern thing this screen could grow.
+ *
+ * @param {number} width   texels across, matching the on-screen size
+ * @param {number} height  texels down. Not derived: the guide carries a margin,
+ *                         so its proportion is the card's only when that is 0.
+ */
+export function useGuideTexture(width, height) {
+  const w = Math.max(24, Math.round(width));
+  const h = Math.max(24, Math.round(height));
+  const key = `guide:${w}:${h}`;
+  const hit = cache.get(key);
+  if (hit) return hit;
+
+  const { canvas, ctx } = makeCanvas(w, h);
+  const u = w / 128;
+
+  const EDGE = PALETTE.accent.yellow;
+  const CORE = PALETTE.accent.yellowPale;
+  const SHADE = PALETTE.accent.yellowDeep;
+
+  const line = Math.max(1, Math.round(2 * u));
+  const rect = (x, y, rw, rh, style) => {
+    ctx.fillStyle = style;
+    ctx.fillRect(Math.round(x), Math.round(y), Math.max(1, Math.round(rw)), Math.max(1, Math.round(rh)));
+  };
+
+  // The frame: one lit band with a darker one inside it. Two hard tones, not a
+  // falloff — three would already start reading as a gradient at this width.
+  const band = (inset, t, style) => {
+    rect(inset, inset, w - inset * 2, t, style);
+    rect(inset, h - inset - t, w - inset * 2, t, style);
+    rect(inset, inset, t, h - inset * 2, style);
+    rect(w - inset - t, inset, t, h - inset * 2, style);
+  };
+  band(0, line, EDGE);
+  band(line, Math.max(1, Math.round(u)), SHADE);
+
+  // Brackets: a longer, brighter run at each corner, drawn over the frame.
+  const arm = Math.max(4, Math.round(22 * u));
+  const t = Math.max(1, Math.round(3 * u));
+  for (const [cx, cy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+    const x = cx ? w - arm : 0;
+    const y = cy ? h - t : 0;
+    rect(x, y, arm, t, CORE);
+    rect(cx ? w - t : 0, cy ? h - arm : 0, t, arm, CORE);
+  }
+
+  const tex = new CanvasTexture(canvas);
+  tex.magFilter = NearestFilter;
+  tex.minFilter = NearestFilter;
+  tex.generateMipmaps = false;
+  tex.wrapS = ClampToEdgeWrapping;
+  tex.wrapT = ClampToEdgeWrapping;
+  tex.anisotropy = 1;
+  tex.needsUpdate = true;
+  cache.set(key, tex);
+  return tex;
+}
+
+/**
  * A one-line plate: why a card cannot be played.
  *
  * Sized to the text rather than to a fixed box, so the plate is as wide as what
@@ -260,9 +362,9 @@ export function noticeTexture(text) {
 
   const { canvas, ctx } = makeCanvas(w, h);
   const scratch = makeCanvas(w, h);
-  ctx.fillStyle = '#0c0f15';
+  ctx.fillStyle = PALETTE.ui.surface;
   ctx.fillRect(0, 0, w, h);
-  ctx.strokeStyle = '#e0553f';
+  ctx.strokeStyle = PALETTE.ui.danger;
   ctx.lineWidth = 1;
   ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
   crispText(ctx, scratch, {
@@ -270,7 +372,7 @@ export function noticeTexture(text) {
     x: 8,
     y: 14,
     font,
-    color: '#f0a090',
+    color: PALETTE.ui.dangerDeep,
   });
 
   const tex = new CanvasTexture(canvas);
@@ -287,7 +389,6 @@ export function noticeTexture(text) {
 }
 
 /** Drop every cached texture. For a resolution change from the panel. */
-export function clearCardTextureCache() {
+export const clearCardTextureCache = registerTextureCache(() => {
   for (const t of cache.values()) t.dispose();
-  cache.clear();
-}
+  cache.clear();});

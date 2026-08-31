@@ -50,16 +50,91 @@ export class Rng {
 }
 
 /**
- * A fresh seed for a shot the player did not pin.
+ * A fresh seed for a shot, a card, or an orb the player did not pin.
  *
- * Derived from a counter rather than from `Math.random()` or the clock: a run
- * started from the same reset button plays out the same sequence of "random"
- * shots, which is what makes a whole match reproducible and not just one turn.
+ * Derived from a counter rather than from `Math.random()` or the clock: given
+ * the same starting value it plays out the same sequence of "random" shots,
+ * which is what makes a whole MATCH reproducible and not just one turn.
+ *
+ * ── the starting value is the whole question, and it used to be a constant ───
+ * This counter was initialised to a literal, which made the sequence a property
+ * of the SOURCE FILE rather than of a match. Every page load rewound it to the
+ * same number, and entering a match from the menu is a document navigation —
+ * so the first match of every session drew the identical orb, on the identical
+ * turn, at the identical spot, forever. Reported exactly that way.
+ *
+ * The counter is not the bug and is not being replaced; `seedRun` is what was
+ * missing. Determinism was never supposed to mean "one match" — it means the
+ * same seed replays, and until there was a way to START from a different seed
+ * there was only ever one seed.
  */
 let seedCounter = 0x9e3779b9;
 export function nextSeed() {
   seedCounter = (Math.imul(seedCounter, 1664525) + 1013904223) >>> 0;
   return seedCounter;
+}
+
+/**
+ * The counter's current value, without advancing it.
+ *
+ * Read-only, and it exists for the input log rather than for the game: a
+ * recorded match is replayed by restoring this before each event, which is the
+ * only way a log survives the one thing an event list cannot describe — a draw
+ * that happened and produced no event. `AimInput` takes its seed when the drag
+ * STARTS, so a press that is dragged back inside the deadzone and released
+ * advances the counter and fires nothing. Replaying such a log from the event
+ * list alone would run every later card off a counter one step behind the one
+ * that recorded it, and the divergence would be reported as a physics failure.
+ *
+ * Nothing in the simulation calls this. See `replay/InputLog.js`.
+ */
+export function peekSeed() {
+  return seedCounter >>> 0;
+}
+
+/**
+ * Point the counter at a new starting value. One call, at the top of a match.
+ *
+ * Everything a match draws — shot seeds, card seeds, and through them every orb
+ * spawn and every card drawn from one — descends from here, so this single
+ * number reproduces the whole match. That is what makes the seed worth showing
+ * to a player and worth accepting from a URL.
+ *
+ * @param {number} seed  any 32-bit value
+ */
+export function seedRun(seed) {
+  seedCounter = seed >>> 0;
+}
+
+/**
+ * An unpredictable 32-bit seed, for a match nobody pinned.
+ *
+ * ── the one sanctioned entropy call in the project, and why it is not a hole ──
+ * The rule this file opens with — no `Math.random()` downstream of the physics
+ * world — is about the SIMULATION: an unseeded call inside the shot path makes a
+ * turn unreproducible while still looking correct. This is not in that path and
+ * cannot be. It runs once, before a match exists, to CHOOSE the seed; from the
+ * first step onward every number still comes out of `nextSeed`, and the match
+ * still replays byte for byte from the value this returned.
+ *
+ * The distinction is worth stating precisely, because "we banned randomness"
+ * read too literally is what left the game with one match in it: the ban is on
+ * randomness the replay cannot see. A seed the replay is HANDED is the opposite.
+ *
+ * `crypto` where it exists, the clock mixed with a counter where it does not —
+ * two page loads in the same millisecond must not collide, which the clock alone
+ * would allow.
+ */
+let fallbackEntropy = 0;
+export function freshSeed() {
+  const c = globalThis.crypto;
+  if (c?.getRandomValues) {
+    const out = new Uint32Array(1);
+    c.getRandomValues(out);
+    return out[0] >>> 0;
+  }
+  fallbackEntropy = (fallbackEntropy + 1) >>> 0;
+  return (Math.imul(Date.now() >>> 0, 2654435761) ^ Math.imul(fallbackEntropy, 40503)) >>> 0;
 }
 
 /** FNV-1a over raw bytes. */

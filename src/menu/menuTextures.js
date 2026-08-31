@@ -1,4 +1,5 @@
 import { CanvasTexture, ClampToEdgeWrapping, NearestFilter, RepeatWrapping } from 'three';
+import { PALETTE, withAlpha } from '../core/palette.js';
 
 /**
  * Every pixel the menu needs, drawn at runtime. No image files, same as
@@ -85,7 +86,7 @@ function crispText(target, scratch, { text, x, y, font, color, align = 'left', s
  */
 export function glassHighlightTexture() {
   const { canvas, ctx } = makeCanvas(128, 128);
-  ctx.fillStyle = '#000000';
+  ctx.fillStyle = PALETTE.additiveZero;
   ctx.fillRect(0, 0, 128, 128);
 
   /** @param {number} u0  left edge in texels @param {string[]} steps  bottom to top */
@@ -106,12 +107,12 @@ export function glassHighlightTexture() {
   //
   // Narrow, too. Wide is what makes it paint: at three texels the strip is
   // about two pixels of a 320-wide framebuffer, which is a glint.
-  strip(20, 3, ['#101010', '#3a3a3a', '#8a8a8a', '#c4c4c4', '#d0d0d0', '#b0b0b0', '#4c4c4c', '#141414']);
+  strip(20, 3, PALETTE.additive.glintKey);
   // Its companion, dimmer and further round: a window next to the lamp.
-  strip(44, 2, ['#0a0a0a', '#1a1a1a', '#343434', '#4a4a4a', '#4e4e4e', '#3c3c3c', '#1c1c1c', '#080808']);
+  strip(44, 2, PALETTE.additive.glintMid);
   // Round the back, catching the same light from the other side. Seen through
   // two walls of glass, so dimmer again.
-  strip(92, 3, ['#080808', '#161616', '#282828', '#343434', '#343434', '#242424', '#101010', '#050505']);
+  strip(92, 3, PALETTE.additive.glintFar);
 
   return toTexture(canvas, { wrapS: RepeatWrapping, wrapT: ClampToEdgeWrapping });
 }
@@ -148,12 +149,12 @@ export function labelTexture() {
   const { canvas, ctx } = makeCanvas(w, h);
   const scratch = makeCanvas(w, h);
 
-  ctx.fillStyle = '#b8231f';
+  ctx.fillStyle = PALETTE.menu.labelRed;
   ctx.fillRect(0, 0, w, h);
 
   // Two darker bands at the very top and bottom, so the label has an edge
   // against the glass instead of floating on it.
-  ctx.fillStyle = '#8d1815';
+  ctx.fillStyle = PALETTE.menu.labelRedDeep;
   ctx.fillRect(0, 0, w, 4);
   ctx.fillRect(0, h - 4, w, 4);
 
@@ -167,8 +168,8 @@ export function labelTexture() {
       ctx.fillRect(x, Math.round(baseY + rise * (t * t)), 1, thick);
     }
   };
-  rule(9, -3, '#f2e6cf', 2);
-  rule(h - 10, 3, '#f2e6cf', 2);
+  rule(9, -3, PALETTE.menu.labelCreamAlt, 2);
+  rule(h - 10, 3, PALETTE.menu.labelCreamAlt, 2);
 
   // The logo. Three lines, because "BOTTLE CAP CHAOS" on one line at this width
   // is four texels a letter and unreadable; stacked, each word gets the full
@@ -178,7 +179,7 @@ export function labelTexture() {
     x: w / 2,
     y: 28,
     font: 'bold 14px ui-monospace, Menlo, monospace',
-    color: '#f7efe0',
+    color: PALETTE.menu.labelCream,
     align: 'center',
     slant: 0.22,
   });
@@ -187,7 +188,7 @@ export function labelTexture() {
     x: w / 2,
     y: 43,
     font: 'bold 17px ui-monospace, Menlo, monospace',
-    color: '#f7efe0',
+    color: PALETTE.menu.labelCream,
     align: 'center',
     slant: 0.22,
   });
@@ -196,7 +197,7 @@ export function labelTexture() {
     x: w / 2,
     y: 54,
     font: 'bold 11px ui-monospace, Menlo, monospace',
-    color: '#f2d7a8',
+    color: PALETTE.menu.labelGold,
     align: 'center',
     slant: 0.22,
   });
@@ -216,11 +217,13 @@ export function shadowTexture() {
   const size = 64;
   const { canvas, ctx } = makeCanvas(size, size);
   ctx.clearRect(0, 0, size, size);
+  // A deep blue-grey rather than black, at the same four opacities. The alphas
+  // are the falloff's shape and stay here; only the ink moved to the palette.
   const steps = [
-    [0.5, 'rgba(0,0,0,0.86)'],
-    [0.68, 'rgba(0,0,0,0.55)'],
-    [0.86, 'rgba(0,0,0,0.26)'],
-    [1.0, 'rgba(0,0,0,0.1)'],
+    [0.5, withAlpha(PALETTE.menu.shadow, 0.62)],
+    [0.68, withAlpha(PALETTE.menu.shadow, 0.4)],
+    [0.86, withAlpha(PALETTE.menu.shadow, 0.19)],
+    [1.0, withAlpha(PALETTE.menu.shadow, 0.07)],
   ];
   for (let i = steps.length - 1; i >= 0; i--) {
     ctx.fillStyle = steps[i][1];
@@ -251,12 +254,13 @@ export function floorPoolTexture() {
   // clear, so the pool has died out well before the quad it is drawn on ends.
   // Run out to the edge and the quad's own straight far edge is a horizontal
   // line across the back of the scene where the floor's tint stops.
+  const P = PALETTE.menu.pool;
   const steps = [
-    [0.84, 'rgba(10,12,18,0.45)'],
-    [0.66, 'rgba(15,18,27,0.8)'],
-    [0.48, '#141926'],
-    [0.3, '#1a2131'],
-    [0.14, '#1f283c'],
+    [0.84, withAlpha(P[0], 0.45)],
+    [0.66, withAlpha(P[1], 0.8)],
+    [0.48, P[2]],
+    [0.3, P[3]],
+    [0.14, P[4]],
   ];
   for (const [r, color] of steps) {
     ctx.fillStyle = color;
@@ -303,7 +307,7 @@ export function capLogoTexture() {
   // The corners are never sampled — the panel is the inscribed circle — but
   // filling them costs nothing and means a rounding error at the rim cannot
   // pick up a transparent texel.
-  ctx.fillStyle = '#b8231f';
+  ctx.fillStyle = PALETTE.menu.labelRed;
   ctx.fillRect(0, 0, size, size);
 
   const ring = (radius, thickness, color) => {
@@ -337,19 +341,19 @@ export function capLogoTexture() {
 
   // Rim. Outside the covering frame's crop and invisible there — this is the
   // half of the design that only ever shows on the bottle.
-  ring(60, 3, '#8d1815');
-  ring(52, 2, '#d8524a');
+  ring(60, 3, PALETTE.menu.labelRedDeep);
+  ring(52, 2, PALETTE.menu.labelRedLight);
 
   // The two rules, inside the crop so they frame the wordmark at full cover.
-  arc(37, 2, 202, 338, '#f2e6cf');
-  arc(37, 2, 22, 158, '#f2e6cf');
+  arc(37, 2, 202, 338, PALETTE.menu.labelCreamAlt);
+  arc(37, 2, 22, 158, PALETTE.menu.labelCreamAlt);
 
   crispText(ctx, scratch, {
     text: 'BOTTLE',
     x: c,
     y: 54,
     font: 'bold 15px ui-monospace, Menlo, monospace',
-    color: '#f7efe0',
+    color: PALETTE.menu.labelCream,
     align: 'center',
     slant: 0.22,
   });
@@ -358,7 +362,7 @@ export function capLogoTexture() {
     x: c,
     y: 76,
     font: 'bold 22px ui-monospace, Menlo, monospace',
-    color: '#f7efe0',
+    color: PALETTE.menu.labelCream,
     align: 'center',
     slant: 0.22,
   });
@@ -367,7 +371,7 @@ export function capLogoTexture() {
     x: c,
     y: 92,
     font: 'bold 13px ui-monospace, Menlo, monospace',
-    color: '#f2d7a8',
+    color: PALETTE.menu.labelGold,
     align: 'center',
     slant: 0.22,
   });
@@ -393,10 +397,10 @@ export function foamTexture() {
   const { canvas, ctx } = makeCanvas(size, size);
   // Light enough to survive being seen through a wall of brown glass at 60%
   // opacity, which is the only place it is ever seen.
-  ctx.fillStyle = '#d9b988';
+  ctx.fillStyle = PALETTE.menu.foam;
   ctx.fillRect(0, 0, size, size);
 
-  const tones = ['#f0dcb6', '#e2c79c', '#bd9a64', '#fbf1d8'];
+  const tones = PALETTE.menu.foamTones;
   // A fixed pattern rather than a random one: this is drawn once at boot and
   // has to look the same every run, and `Math.random` in a texture is how you
   // get a bug that only reproduces one time in twenty.
@@ -438,25 +442,25 @@ export function foamTexture() {
 export function bubbleTexture() {
   const size = 16;
   const { canvas, ctx } = makeCanvas(size, size);
-  ctx.fillStyle = '#000000';
+  ctx.fillStyle = PALETTE.additiveZero;
   ctx.fillRect(0, 0, size, size);
 
   const c = size / 2;
   // The rim, then the middle knocked back out of it.
-  ctx.fillStyle = '#e8f0f4';
+  ctx.fillStyle = PALETTE.additive.bubble.rim;
   ctx.beginPath();
   ctx.arc(c, c, 6.4, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = '#3a4448';
+  ctx.fillStyle = PALETTE.additive.bubble.mid;
   ctx.beginPath();
   ctx.arc(c, c, 4.2, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = '#12181a';
+  ctx.fillStyle = PALETTE.additive.bubble.core;
   ctx.beginPath();
   ctx.arc(c, c, 2.6, 0, Math.PI * 2);
   ctx.fill();
   // The glint, up and to the left, matching the scene's key.
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = PALETTE.additive.bubble.glint;
   ctx.fillRect(c - 3, c - 4, 2, 2);
 
   return toTexture(canvas);
@@ -493,17 +497,17 @@ export function burstSheet() {
   };
 
   // Frame 0: the pop.
-  spikes(32, 32, 6, 4, 26, 5, '#fff4d8', 0);
-  spikes(32, 32, 6, 3, 15, 4, '#ffffff', Math.PI / 6);
-  ctx.fillStyle = '#ffffff';
+  spikes(32, 32, 6, 4, 26, 5, PALETTE.additive.burst.popWide, 0);
+  spikes(32, 32, 6, 3, 15, 4, PALETTE.additive.burst.popTight, Math.PI / 6);
+  ctx.fillStyle = PALETTE.additive.burst.popCore;
   ctx.beginPath();
   ctx.arc(32, 32, 7, 0, Math.PI * 2);
   ctx.fill();
 
   // Frame 1: the spray, wider and already breaking up.
-  spikes(96, 32, 9, 10, 30, 3, '#efe0bb', 0.2);
-  spikes(96, 32, 5, 6, 20, 3, '#fffaf0', 0.9);
-  ctx.fillStyle = '#d8cbaa';
+  spikes(96, 32, 9, 10, 30, 3, PALETTE.additive.burst.sprayWide, 0.2);
+  spikes(96, 32, 5, 6, 20, 3, PALETTE.additive.burst.sprayTight, 0.9);
+  ctx.fillStyle = PALETTE.additive.burst.sprayCore;
   ctx.beginPath();
   ctx.arc(96, 32, 4, 0, Math.PI * 2);
   ctx.fill();
@@ -527,11 +531,19 @@ export function menuPlateTexture(label, state, { width = 256, height = 52 } = {}
   /** Everything below is authored against a 256-wide plate and scaled. */
   const u = width / 256;
 
-  const SKINS = {
-    idle: { bg: '#141a26', edge: '#3c4759', text: '#c3ccdb', bar: '#5c6a82' },
-    hover: { bg: '#26314a', edge: '#8ea4c6', text: '#ffffff', bar: '#d8b45c' },
-    disabled: { bg: '#101319', edge: '#242a34', text: '#4e5665', bar: '#2b323e' },
-  };
+  /**
+   * `dimmed` is `disabled` without the verdict.
+   *
+   * ── two different sentences wore one skin ──────────────────────────────
+   * `disabled` stamps "준비 중" on the right, which says a FEATURE is not built
+   * yet — correct for a mode with no AI, and false for a row that is merely
+   * unavailable at this moment. The online screen greys 방 만들기 / 코드로 참가
+   * / 랜덤 매칭 while you are already in a queue, and all three announced
+   * themselves as unfinished features.
+   *
+   * Same colours, no stamp. The caller picks the sentence.
+   */
+  const SKINS = PALETTE.button;
   const skin = SKINS[state] ?? SKINS.idle;
   const px = (n) => Math.max(1, Math.round(n * u));
 
@@ -546,11 +558,38 @@ export function menuPlateTexture(label, state, { width = 256, height = 52 } = {}
   ctx.fillStyle = skin.bar;
   ctx.fillRect(px(6), px(6), px(6), height - px(12));
 
+  /**
+   * Sized to FIT, exactly as `titleTexture` below already is.
+   *
+   * ── the same bug, in the sibling function ─────────────────────────────
+   * That one's comment records "BOTTLE CAP CHAOS" arriving on screen as
+   * "BOTTLE CAP CHA". This one was never given the same treatment and had the
+   * same defect waiting: at a fixed 24px a label simply ran off the right edge,
+   * silently, with no ellipsis and nothing to indicate anything was missing.
+   *
+   * It surfaced on the matchmaking screen, where the status row says
+   * "상대를 찾는 중  0:12" — and the elapsed time, the one part of that line
+   * that changes, was entirely off the plate. Reported as "시간이 다 짤려서
+   * 하나도 안보여".
+   *
+   * The floor is 14px rather than the title's 12: this is body-weight type on a
+   * shorter plate, and below 14 the alpha threshold starts eating 받침 strokes.
+   * A label that cannot fit even at 14 is too long for a plate and wants
+   * shortening at the call site — but it will now be small rather than absent.
+   */
+  const room = width - px(24) - px(10);
+  let size = px(24);
+  while (size > px(14)) {
+    ctx.font = `bold ${size}px ui-monospace, Menlo, monospace`;
+    if (ctx.measureText(label).width <= room) break;
+    size -= 1;
+  }
+
   crispText(ctx, scratch, {
     text: label,
     x: px(24),
     y: Math.round(height / 2 + px(9)),
-    font: `bold ${px(24)}px ui-monospace, Menlo, monospace`,
+    font: `bold ${size}px ui-monospace, Menlo, monospace`,
     color: skin.text,
   });
 
@@ -560,7 +599,7 @@ export function menuPlateTexture(label, state, { width = 256, height = 52 } = {}
       x: width - px(14),
       y: Math.round(height / 2 + px(8)),
       font: `${px(19)}px ui-monospace, Menlo, monospace`,
-      color: '#5d6575',
+      color: PALETTE.ui.disabledText,
       align: 'right',
     });
   }
@@ -594,9 +633,9 @@ export function titleTexture(text, sub, { width = 256, height = 80 } = {}) {
     x: px(4),
     y: px(32),
     font: `bold ${size}px ui-monospace, Menlo, monospace`,
-    color: '#e6ddc9',
+    color: PALETTE.ui.textOnAccent,
   });
-  ctx.fillStyle = '#8d1815';
+  ctx.fillStyle = PALETTE.menu.labelRed;
   ctx.fillRect(px(4), px(42), width - px(24), px(4));
   if (sub) {
     crispText(ctx, scratch, {
@@ -604,7 +643,16 @@ export function titleTexture(text, sub, { width = 256, height = 80 } = {}) {
       x: px(4),
       y: px(68),
       font: `${px(19)}px ui-monospace, Menlo, monospace`,
-      color: '#8892a3',
+      /**
+       * White, like the heading above it, because this plate is TRANSPARENT —
+       * `clearRect` at the top of this function — so both lines are type on the
+       * backdrop rather than type on a plate. See the note on `PALETTE.ui.text`
+       * for why that changes which ink is legal. Size carries the hierarchy.
+       *
+       * PHASE 6 gives this heading a glass panel, at which point both lines go
+       * back to `ui.text`.
+       */
+      color: PALETTE.ui.textOnAccent,
     });
   }
 

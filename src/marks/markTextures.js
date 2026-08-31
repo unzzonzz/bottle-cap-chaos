@@ -1,6 +1,7 @@
 import { CanvasTexture, ClampToEdgeWrapping, NearestFilter } from 'three';
 import { CAP_PANEL_RATIO } from '../cap/capGeometry.js';
 import { DEFAULT_MARK, isSlotRef } from './MarkStorage.js';
+import { PALETTE } from '../core/palette.js';
 
 /**
  * A mark, turned into the texture a cap's panel wears.
@@ -179,11 +180,11 @@ export function markThumbnail(mark, size = 64, boundary = MARK_BOUNDARY_DEFAULT)
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   // The cap top: a plain disc, with the untouchable ring a step darker.
-  ctx.fillStyle = '#6e737d';
+  ctx.fillStyle = PALETTE.marks.blank;
   ctx.beginPath();
   ctx.arc(half, half, capR, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = '#878d98';
+  ctx.fillStyle = PALETTE.metal.base;
   ctx.beginPath();
   ctx.arc(half, half, drawR, 0, Math.PI * 2);
   ctx.fill();
@@ -250,8 +251,27 @@ export class MarkTextures {
     size = MARK_CANVAS_DEFAULT,
     boundary = MARK_BOUNDARY_DEFAULT,
     rotations = null,
+    bookSlotFor = null,
   }) {
     this.book = book;
+    /**
+     * Which entry of the BOOK a given SEAT wears.
+     *
+     * ── they are the same number locally and not online ────────────────────
+     * A mark book holds what the two people at THIS device chose: entry 0 is
+     * player one's, entry 1 is player two's. Sitting down at a board, seat and
+     * entry are the same thing and this is the identity.
+     *
+     * Online they come apart. There is one person here, their mark is entry 0,
+     * and the server seats them wherever it likes — so a player given seat 1
+     * painted their cap from entry 1, a slot they never chose anything for, and
+     * turned up to the match with a blank cap while their opponent's showed
+     * fine. (The opponent's is an override that arrives over the wire, which is
+     * why only the local one was wrong — see `setRemoteMark`.)
+     *
+     * Identity by default, so local and AI play are untouched.
+     */
+    this._bookSlotFor = bookSlotFor ?? ((player) => player);
     this.capColors = capColors;
     this.defaultMark = defaultMark;
     this.size = size;
@@ -294,7 +314,7 @@ export class MarkTextures {
    * screen both already honour it.
    */
   get panelTint() {
-    return '#ffffff';
+    return PALETTE.untinted;
   }
 
   /** Re-bake both players. Called on every book change. */
@@ -333,7 +353,7 @@ export class MarkTextures {
   _paint(player) {
     const canvas = this._canvas[player];
     if (!canvas) return;
-    const ref = this.book.assignedTo(player);
+    const ref = this.book.assignedTo(this._bookSlotFor(player));
     const art = this._artFor(ref, player);
     const baked = bakeCapPanel(
       art,
@@ -358,6 +378,27 @@ export class MarkTextures {
    * exactly what the brief asks for in each case.
    */
   _artFor(ref, player) {
+    /**
+     * A mark that came off the wire wins, for that seat.
+     *
+     * ── the opponent's cap is not in this player's book, and must not be ────
+     * `book` is what THIS player owns and edits. An online opponent's mark
+     * arrives with the match and belongs to nobody's collection: writing it into
+     * the book would put a stranger's drawing in the mark editor, and it would
+     * outlive the match in local storage.
+     *
+     * So it is an override consulted first, keyed by seat. Everything downstream
+     * is unchanged — `bakeCapPanel` already takes any canvas or image and knows
+     * nothing about where it came from, which is what makes this a one-line
+     * injection rather than a second painting path.
+     *
+     * `undefined` means "nothing was sent for this seat" and falls through;
+     * `null` is a deliberate clean cap and is returned as such, because a clean
+     * cap is a choice rather than a missing mark.
+     */
+    const remote = this._remote?.[player];
+    if (remote !== undefined) return remote;
+
     if (ref === DEFAULT_MARK) return this.defaultMark;
     if (!isSlotRef(ref)) return null;
     const url = this.book.slotImage(ref);
@@ -367,6 +408,62 @@ export class MarkTextures {
     if (hit) return hit;
     this._decode(url, player);
     return null;
+  }
+
+  /**
+   * Put an opponent's mark on a seat, from outside the book.
+   *
+   * @param {number} player
+   * @param {import('../net/protocol.js').MARK_KIND} mark  a wire payload
+   * @returns {Promise<void>} resolves once the seat has been repainted
+   *
+   * ── what arrives is re-drawn, never trusted ─────────────────────────────
+   * The only structural check the protocol makes is that the string starts with
+   * `data:image/png;base64,` and is under the size cap. Nothing guarantees it is
+   * 128 square, and `bakeCapPanel` stretches whatever it is handed across the
+   * whole panel — so an image of the wrong shape would arrive as a smeared cap
+   * rather than as an error. Decoding it into a canvas of OUR size, through the
+   * same boundary clip a drawn mark goes through, makes the wire payload's
+   * dimensions irrelevant.
+   */
+  async setRemoteMark(player, mark) {
+    this._remote ??= [];
+    if (!mark || mark.kind === 'none') {
+      this._remote[player] = null;
+      this._paint(player);
+      return;
+    }
+    if (mark.kind === 'default') {
+      this._remote[player] = this.defaultMark ?? null;
+      this._paint(player);
+      return;
+    }
+    if (mark.kind !== 'png' || typeof mark.dataUrl !== 'string') return;
+
+    const generation = this._generation;
+    const img = await new Promise((resolve) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      // An undecodable payload is a clean cap, not a broken match. Same policy
+      // as a stored slot that will not decode.
+      el.onerror = () => resolve(null);
+      el.src = mark.dataUrl;
+    });
+    if (generation !== this._generation) return;
+
+    if (!img) {
+      this._remote[player] = null;
+    } else {
+      // Re-drawn at our own size, so whatever came over the wire is normalised
+      // before anything else sees it.
+      const size = this._canvas[player]?.width ?? 128;
+      const surface = document.createElement('canvas');
+      surface.width = size;
+      surface.height = size;
+      surface.getContext('2d').drawImage(img, 0, 0, size, size);
+      this._remote[player] = surface;
+    }
+    this._paint(player);
   }
 
   _decode(url, player) {

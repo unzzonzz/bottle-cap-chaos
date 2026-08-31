@@ -1,5 +1,6 @@
 import { Color, PerspectiveCamera, Scene } from 'three';
 import { RetroMaterials } from '../core/RetroMaterial.js';
+import { PALETTE } from '../core/palette.js';
 import { RetroPass } from '../core/RetroPass.js';
 import { DISPLAY_ASPECT, Viewport } from '../core/Viewport.js';
 import { Cap } from './Cap.js';
@@ -21,7 +22,7 @@ export function bootViewer(canvas) {
   const retro = new RetroMaterials({ resolution: viewport.resolution });
 
   const scene = new Scene();
-  scene.background = new Color('#000000');
+  scene.background = new Color(PALETTE.bg.skyMid);
 
   const camera = new PerspectiveCamera(26, DISPLAY_ASPECT, 1, 80);
 

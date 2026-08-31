@@ -1,5 +1,6 @@
 import { ClampToEdgeWrapping } from 'three';
 import { makeCanvasTexture } from '../core/textures.js';
+import { PALETTE } from '../core/palette.js';
 
 /**
  * Placeholder artwork for the panel — the slot a player's own picture drops into
@@ -24,23 +25,25 @@ export function makeCapTopTexture() {
   });
 }
 
+const PANEL = PALETTE.metal.panel;
+
 function drawCapTop(ctx, size) {
   const c = size * 0.5;
 
-  ctx.fillStyle = '#d4d4d4';
+  ctx.fillStyle = PANEL.base;
   ctx.fillRect(0, 0, size, size);
 
   // The panel is the inscribed circle of this square; the corners are never
   // sampled, so everything below stays inside it.
-  ctx.strokeStyle = '#9a9a9a';
+  ctx.strokeStyle = PANEL.ringOuter;
   ctx.lineWidth = size * 0.035;
   ring(ctx, c, size * 0.44);
 
-  ctx.strokeStyle = '#bcbcbc';
+  ctx.strokeStyle = PANEL.ringInner;
   ctx.lineWidth = size * 0.016;
   ring(ctx, c, size * 0.365);
 
-  ctx.fillStyle = '#efefef';
+  ctx.fillStyle = PANEL.hub;
   ctx.beginPath();
   ctx.arc(c, c, size * 0.2, 0, Math.PI * 2);
   ctx.fill();
@@ -57,11 +60,11 @@ function drawCapTop(ctx, size) {
       size * 0.2,
       size * (isMark ? 0.415 : 0.335),
       size * 0.05,
-      isMark ? '#5a5a5a' : '#8f8f8f',
+      isMark ? PANEL.spokeMark : PANEL.spoke,
     );
   }
 
-  ctx.fillStyle = '#5a5a5a';
+  ctx.fillStyle = PANEL.spokeMark;
   ctx.beginPath();
   ctx.arc(c, c, size * 0.075, 0, Math.PI * 2);
   ctx.fill();

@@ -25,6 +25,8 @@
  * @property {boolean} oneMoreArmed     an extra turn is already banked
  * @property {boolean} trajectoryArmed  the long preview is already on
  * @property {boolean} smashArmed       this player's next shot is already boosted
+ * @property {boolean} silencedMe       this player may not play ANY card this turn
+ * @property {boolean} silenceCastByMe  this player has already sealed the opponent
  */
 
 /** @typedef {{ok: true}|{ok: false, reason: string}} Usable */
@@ -163,6 +165,44 @@ export const CARDS = [
     canUse: (s) =>
       s.smashArmed ? { ok: false, reason: '이미 강타가 걸려 있습니다' } : OK,
   },
+  {
+    id: 'silence',
+    name: '침묵',
+    // Line art at 46px, like the other four, and picked by the same measurement
+    // the 강타 note describes: a FILLED glyph comes through the alpha threshold
+    // and the 5-bit quantiser as a lump. ⊘ inks 214 pixels — between ✳'s 292 and
+    // ↻'s 162, so it sits inside the set rather than next to it — and a struck-
+    // through circle is the one shape that reads as "no" at a glance.
+    glyph: '⊘',
+    // Says WHOSE turn and WHAT is sealed. "카드를 봉인한다" alone would be read as
+    // sealing this turn's own hand, which is the opposite of the card.
+    text: '다음 턴 상대 카드 사용 봉인',
+    // Cold and drained, against 혼란's violet: the two are the only cards that
+    // are cast ON the opponent, and they must not be confusable in the fan.
+    accent: '#8f9aa8',
+    /**
+     * One refusal, and it is about the OPPONENT, exactly as 혼란's is.
+     *
+     * Not stackable, for the reason 원모어 and 강타 are not. The seal is a
+     * DURATION on the victim's next turn, and a second cast would rewrite the
+     * same victim's slot with the same caster and the same length — a card spent
+     * for nothing the player could ever see. Refreshing the count instead would
+     * be worse: two 침묵 in a hand would be a two-turn lockout, which is a
+     * different card from the one written on the face.
+     *
+     * The reason says what would have happened rather than restating the state,
+     * for the reason the note on 혼란 gives at length.
+     *
+     * Being silenced YOURSELF is not refused here, and deliberately not: that
+     * block belongs to every card at once and lives in `canUseCard` below, where
+     * it is asked once instead of being copied into six predicates that could
+     * drift apart.
+     */
+    canUse: (s) =>
+      s.silenceCastByMe
+        ? { ok: false, reason: '이미 상대가 침묵입니다 — 겹쳐도 턴이 늘지 않습니다' }
+        : OK,
+  },
 ];
 
 /**
@@ -175,6 +215,35 @@ export const CARDS = [
 export const CARD_BY_ID = new Map([...CARDS, ...SHELVED].map((c) => [c.id, c]));
 
 /**
+ * The one refusal that belongs to no card in particular.
+ *
+ * ── 침묵 seals the HAND, so it cannot live in a card's own predicate ─────────
+ * Every other rule in this file is a property of one card: 궤적 refuses under
+ * 혼란, 강타 refuses itself. 침묵 refuses ALL SIX, which through the per-card
+ * pattern would mean pasting the same clause into six `canUse` bodies — six
+ * copies of one rule, five of them in cards this task is explicitly not to
+ * touch, and every one of them a place for the rule to drift.
+ *
+ * So it is asked HERE, before the card is consulted at all. Nothing about the
+ * existing five changes, a seventh card is sealed by existing, and the three
+ * places that must never disagree — the grey-out, the hover reason, the drag —
+ * still ask exactly one function.
+ *
+ * BEFORE the card's own predicate rather than after, so a silenced player whose
+ * 강타 is also already armed is told about the seal. The seal is the one they
+ * can do nothing about, and it is the one that explains the whole hand rather
+ * than one card of it.
+ *
+ * It seals 침묵 itself too, which is correct and worth saying out loud: a
+ * silenced player cannot answer a seal with a seal.
+ */
+function sealed(state) {
+  return state.silencedMe
+    ? { ok: false, reason: '침묵 상태입니다 — 이번 턴은 카드를 쓸 수 없습니다' }
+    : null;
+}
+
+/**
  * @param {string} id
  * @param {CardState} state
  * @returns {Usable}
@@ -182,5 +251,5 @@ export const CARD_BY_ID = new Map([...CARDS, ...SHELVED].map((c) => [c.id, c]));
 export function canUseCard(id, state) {
   const card = CARD_BY_ID.get(id);
   if (!card) return { ok: false, reason: '알 수 없는 카드' };
-  return card.canUse(state);
+  return sealed(state) ?? card.canUse(state);
 }

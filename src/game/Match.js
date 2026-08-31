@@ -1,5 +1,5 @@
 import { FIXED_DT } from '../physics/PhysicsWorld.js';
-import { nextSeed, Rng } from '../physics/rng.js';
+import { freshSeed, nextSeed, Rng, seedRun } from '../physics/rng.js';
 import { Arena, BODY_KIND, secondsToSteps } from './Arena.js';
 import { TurnSettle } from './TurnSettle.js';
 import { BallRespawn } from './BallRespawn.js';
@@ -80,14 +80,29 @@ export const MATCH_STATE = {
 const MAX_STEPS_PER_FRAME = 20;
 
 export class Match {
-  /** @param {import('./modes.js').MODES.knockout} mode  a layout plus a rule set */
-  constructor({ physics, capDims, config, mode }) {
+  /**
+   * @param {import('./modes.js').MODES.knockout} mode  a layout plus a rule set
+   * @param {number} [seed]
+   *   the opening match's root seed. Omit for a fresh one; pass to reproduce a
+   *   match exactly, which is what `?seed=` in the address bar does.
+   */
+  constructor({ physics, capDims, config, mode, seed }) {
     this.physics = physics;
     this.capDims = capDims;
     this.config = config;
     this.mode = mode;
 
-    this.arena = new Arena({ physics, capDims, config, layout: mode.createLayout(config) });
+    // `capDims` goes to the layout as well as to the arena, because a layout may
+    // be SIZED in caps rather than in world units — the curling table's width is
+    // a multiple of the cap's diameter, which is the one control that decides
+    // how big a cap looks on it. See `curlingTableMetrics`. Ignored by the two
+    // layouts whose dimensions are absolute.
+    this.arena = new Arena({
+      physics,
+      capDims,
+      config,
+      layout: mode.createLayout(config, capDims),
+    });
     this.rules = mode.createRules(this.arena);
     // No config: the settle detector reads its numbers off the arena now, so the
     // mode's own turn-end clock reaches it. See `TurnSettle`.
@@ -121,7 +136,7 @@ export class Match {
     this.startHash = '';
     this.endHash = '';
 
-    this.start();
+    this.start(seed);
   }
 
   // ── lifecycle ────────────────────────────────────────────────────────────
@@ -137,8 +152,29 @@ export class Match {
    *
    * Also the only correct response to a cap count or board size change, so
    * structural edits and the new-match button are deliberately one code path.
+   *
+   * ── the seed is drawn HERE, and it is what makes a match a match ────────────
+   * Everything the match will ever draw at random — every shot seed, every card
+   * seed, and through those every orb spawn and every card an orb yields —
+   * descends from the counter this points at. So this one number IS the match's
+   * luck, and choosing it is the first thing a new match does.
+   *
+   * Left unset it comes from `freshSeed`, which is the only unpredictable call
+   * in the project and is deliberately made before the simulation exists. Passed
+   * one, the match replays exactly: same orbs, same turns, same cards. That is
+   * what `?seed=` and the panel's seed field are for, and it is the same
+   * property the turn-level replay check has always relied on, one level up.
+   *
+   * @param {number} [seed]  32-bit. Omit for a match nobody has pinned.
    */
-  start() {
+  start(seed) {
+    /** This match's root seed. Reproduces the whole match; shown by the panel. */
+    this.seed = (seed ?? freshSeed()) >>> 0;
+    // BEFORE anything that could draw. `_beginAim` at the foot of this method
+    // snapshots the turn, and a draw taken ahead of the reseed would belong to
+    // the previous match's stream.
+    seedRun(this.seed);
+
     this.arena.rebuild();
     this.rules = this.mode.createRules(this.arena);
     this.cards.reset();
@@ -180,10 +216,10 @@ export class Match {
    * new world — rather than tearing down the old one here and leaving `start` to
    * rebuild something that no longer matches its own rules.
    */
-  setMode(mode) {
+  setMode(mode, seed) {
     this.mode = mode;
-    this.arena.setLayout(mode.createLayout(this.config));
-    this.start();
+    this.arena.setLayout(mode.createLayout(this.config, this.capDims));
+    this.start(seed);
   }
 
   /**
@@ -552,6 +588,75 @@ export class Match {
   }
 
   /**
+   * Open the match on a player other than the one the mode would have chosen.
+   *
+   * ── the server decides who leads an online match, and it has to be obeyed ──
+   * Both clients build their own `Match`, and a `Match` always opens on the
+   * player its rule set nominates — which is the same one on both machines and
+   * has nothing to do with the coin the relay flipped. Left alone, the server
+   * believes seat 1 is on move while both clients believe seat 0 is, and every
+   * turn afterwards is played by the wrong person: the input is refused as
+   * "not your turn", the timer expires, and the skip advances the clients one
+   * step out of phase with the server forever.
+   *
+   * It was found exactly that way — a relay log reading "turn 0 expired for
+   * seat 1, turn 1 expired for seat 1" — and it was invisible to the headless
+   * lockstep test, which drove whichever seat the SERVER named and so kept both
+   * clients agreeing with each other while both disagreed with the server. Two
+   * clients that agree is necessary and not sufficient.
+   *
+   * `_beginAim` is re-run rather than only the field being set, because the turn
+   * it opened belongs to the other player: in curling that means a cap has
+   * already been dealt to the wrong throw spot, and the snapshot everything
+   * downstream rewinds to was taken of it.
+   *
+   * @param {number} player
+   * @returns {boolean} whether anything changed
+   */
+  setFirstPlayer(player) {
+    if (this.state !== MATCH_STATE.AIM) return false;
+    if (this.rules.currentPlayer === player) return false;
+    this.rules.setCurrentPlayer(player);
+    this._beginAim();
+    return true;
+  }
+
+  /**
+   * Let the turn pass without anything being played.
+   *
+   * ── the timeout rule, and why it is not "play something reasonable" ───────
+   * Online, the server owns a fifteen second clock and hands the turn on when it
+   * runs out. The brief is explicit that nothing is played: "시간 초과 시 턴이
+   * 그냥 넘어간다. 자동으로 아무 수나 두지 마라." A move invented on a player's
+   * behalf is a move they are then judged on, and in a game where one bad flick
+   * puts a cap off the board that is worse than losing the turn.
+   *
+   * ── it is the tail of `_endTurn`, minus the verdict ──────────────────────
+   * Deliberately the same three calls in the same order, because a turn that
+   * passes still has to cycle which cap is offered next and still has to let an
+   * armed 원모어 have its say. What is NOT here is `rules.resolveTurn` — nothing
+   * happened, so there is nothing to judge, no elimination and no goal — and
+   * nothing that could draw from the seeded stream. That last part is what makes
+   * this safe for lockstep: both clients run it on the same server message and
+   * neither consumes a random number, so the two counters stay in step.
+   *
+   * @returns {boolean} whether there was a turn to pass
+   */
+  skipTurn() {
+    if (this.state !== MATCH_STATE.AIM) return false;
+
+    const shooter = this.rules.currentPlayer;
+    const again = this.cards.onTurnEnd(shooter);
+    this.rules.advanceTurn();
+    if (again) this.rules.setCurrentPlayer(shooter);
+
+    this.lastVerdict = null;
+    this.lastResolved = null;
+    this._beginAim();
+    return true;
+  }
+
+  /**
    * Fire the last shot again from the same world state with the same seed.
    *
    * This is the completion criterion made runnable. It rewinds the physics world
@@ -745,6 +850,19 @@ export class Match {
      * body afterwards belongs to the next turn, which takes its own snapshot.
      */
     for (const i of verdict.eliminated) this.arena.stowCap(i);
+
+    /**
+     * And whatever the mode is sweeping off because the round ended.
+     *
+     * The same operation as the line above and a different EVENT — see
+     * `RuleSet.resolveTurn`. Curling empties the table between rounds, and the
+     * caps it takes off did nothing wrong; folding them into `eliminated` would
+     * have the audio layer announce an overshoot for each of them and the note
+     * line report them as having gone out.
+     *
+     * A no-op in both of the other modes, which never set the field.
+     */
+    for (const i of verdict.cleared ?? []) this.arena.stowCap(i);
 
     if (verdict.winner !== null) {
       this.state = MATCH_STATE.OVER;

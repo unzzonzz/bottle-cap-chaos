@@ -110,9 +110,20 @@ export function pullToPower(distance, cfg) {
   return (PULL_CURVES[cfg.pullCurve] ?? PULL_CURVES.linear)(t);
 }
 
-/** Half-angle of the error cone at this power, in radians. */
+/**
+ * Half-angle of the error cone for a given amount of DELIVERED impulse.
+ *
+ * ── the argument is no longer clamped at 1, and that is the change ─────────
+ * It used to take `power`, which is a pull distance and therefore cannot exceed
+ * 1, so clamping was free. It now takes power SCALED BY the shot's impulse
+ * multiplier — see `shotSpread` — and 강타 pushes that to 1.5. Clamping there
+ * would put a ceiling on the cone at exactly the point the card is supposed to
+ * start costing something.
+ *
+ * Below zero is still clamped: a negative multiplier is not a shot.
+ */
 export function spreadRadians(power, cfg) {
-  const t = Math.max(0, Math.min(1, power));
+  const t = Math.max(0, power);
   const max = (cfg.maxSpreadDeg * Math.PI) / 180;
   return max * Math.pow(t, Math.max(0.1, cfg.spreadCurve));
 }
@@ -127,10 +138,31 @@ export function spreadRadians(power, cfg) {
  * eventually turn that claim into a lie — and a cone that is smaller than the
  * truth is worse than no cone at all.
  *
- * @param {{power: number, spreadMul?: number}} shot
+ * ── the cone follows the IMPULSE, not the pull ─────────────────────────────
+ * This read `spreadRadians(shot.power)`, and the difference matters exactly
+ * once: 강타. That card multiplies the impulse and leaves the pull alone, so
+ * under the old arithmetic it bought 50% more reach at the cone of whatever
+ * pull was used — and the cheapest way to play it was a SHORT pull, where the
+ * cone is small, boosted into a long shot. Measured against the AI, which found
+ * this immediately: at power 0.54 boosted, it covered 30 units with a ±3.5°
+ * cone — about one cap radius of lateral error — and landed 88% of long shots.
+ * "세게 친다 대신 오차가 크게 벌어진다" was written on the card and was not true.
+ *
+ * Scaling by `impulseMul` makes the card's own sentence hold: the shot that
+ * travels half again as far is drawn from a cone half again as wide, and a
+ * short pull no longer launders the boost into free accuracy. An ordinary shot
+ * is untouched — `impulseMul` is 1 and this is the identity.
+ *
+ * `spreadMul` stays a separate factor on top. It is the card's own accuracy
+ * price, tunable independently of what the impulse did, which is the whole
+ * reason the two multipliers were split apart in the first place — see
+ * `CardEffects.impulseMulFor`.
+ *
+ * @param {{power: number, impulseMul?: number, spreadMul?: number}} shot
  */
 export function shotSpread(shot, cfg) {
-  return spreadRadians(shot.power, cfg) * Math.max(0, shot.spreadMul ?? 1);
+  const delivered = Math.max(0, shot.power) * Math.max(0, shot.impulseMul ?? 1);
+  return spreadRadians(delivered, cfg) * Math.max(0, shot.spreadMul ?? 1);
 }
 
 /**
