@@ -30,19 +30,24 @@ import { PALETTE } from '../core/palette.js';
  * three draws EVERY opaque object before ANY transparent one — `renderOrder`
  * only sorts within one of those passes, never across them. So:
  *
- *   opaque pass       liquid, label and cap. All write depth.
- *   transparent pass  glass BACK (renderOrder 1), then glass FRONT (2).
+ *   opaque pass       foam, label and cap. All write depth.
+ *   transparent pass  glass BACK (0), drink (1), fizz (2), glass FRONT (3).
  *
  * and the depth buffer the opaque pass left behind does the rest:
  *
- *   · the far wall is rejected everywhere the drink is in front of it, so the
- *     drink is not seen through the back of its own bottle
  *   · the near wall is rejected everywhere the LABEL is in front of it, which
  *     is the whole reason the label can be red. A label with the bottle wall
  *     blended over it comes out brown, and that is the classic tell that
  *     someone drew the glass as one double-sided pass.
+ *   · the head of foam is opaque, so both walls are rejected behind it — a head
+ *     you can see through is not a head.
  *
- * Neither glass pass writes depth, so the two compose rather than fighting.
+ * 음료가 불투명 패스에 있었다. 콜라이던 시절의 배치이고, 그때는 깊이를 찍어
+ * 뒷벽을 지우는 것이 맞았다. 맑은 음료는 뒤가 비쳐야 하므로 이제 투명 패스에서
+ * **뒷벽 다음**에 그려지고, 깊이를 쓰지 않는다.
+ *
+ * No glass pass writes depth, and neither does the drink, so they compose
+ * rather than fighting.
  *
  * ── two glass draws, not one ────────────────────────────────────────────────
  * A single double-sided pass composites the far wall over the near one wherever
@@ -98,33 +103,50 @@ export class Bottle {
 
     this.glassBackMaterial = createGlassMaterial(retro, { map: this.highlightMap, face: 'back' });
     this.glassFrontMaterial = createGlassMaterial(retro, { map: this.highlightMap, face: 'front' });
-    // Opaque and lit, so the drink picks up the same key and fill as the glass
-    // around it. `gloss: 0` — a liquid seen through brown glass with a specular
-    // highlight on it looks like a solid.
     /**
-     * 유리 안에 담긴 음료.
+     * 유리 안에 담긴 음료. **투명하다.**
      *
      * `vertexColors` 가 액면 링을 보이게 하는 장치다 — `buildLiquidGeometry` 의
-     * 주석 참조. 나머지 세 값은 "스스로 빛나지 않게" 하려고 재서 넣었다: 액체는
-     * 유리 안쪽에 있어서 바깥 표면만큼 빛을 받을 수 없는데, 환경맵이 유일한
-     * 광원인 지금은 아무것도 안 하면 유리와 똑같이 노출된다. 그러면 병 전체가
-     * 한 덩어리로 발광한다.
+     * 주석 참조. `envIntensity` 가 1.0 인 것은 "스스로 빛나지 않게" 하려고 재서
+     * 넣은 값이다: 액체는 유리 안쪽에 있어서 바깥 표면만큼 빛을 받을 수 없는데,
+     * 환경맵이 사실상 노출 다이얼이므로 그대로 두면 병 전체가 한 덩어리로
+     * 발광한다.
+     *
+     * ── 불투명이었고, 그건 콜라의 유산이다 ──────────────────────────────────
+     * 예전 주석이 근거를 적어 두었다: "갈색 유리 너머로 보이는 액체에 정반사를
+     * 얹으면 고체로 보인다." 갈색 유리도 콜라도 없어졌다. 맑은 탄산은 뒤가
+     * 비치고, 안 비치면 그건 음료가 아니라 색칠한 속이다.
+     *
+     * 알파 블렌딩이지 `transmission` 이 아니다. three 의 투과는 전용 렌더 타겟을
+     * 샘플링하는데 그 타겟에는 **투과 물체가 빠져 있다** — 유리가 이미 투과이므로,
+     * 액체까지 투과로 만들면 둘이 서로를 보지 못한 채 각자 배경만 굴절시킨다.
+     * 한 겹의 틴트를 겹쳐 쌓는 것이 이 구성에서 실제로 맞는 그림이고, 값도 싸다.
      */
     this.liquidMaterial = retro.create({
       color: PALETTE.liquid.core,
       gloss: 0.5,
       clearcoat: 0.15,
       /**
-       * 1.5 였다. 1.0 으로 내렸다.
+       * 유리보다 진하되 뒤가 비칠 만큼. 실측으로 고른 값이다.
        *
-       * 액체 색을 유리와 구별되게 진하게 하려면(`PALETTE.liquid` 참조) 노출도 함께
-       * 내려야 한다. 색만 진하게 하고 1.5 를 그대로 두면 그 진한 색이 그대로 밝아져
-       * 다시 유리와 같은 밝기가 되고, 심하면 블룸 임계값을 넘어 하얗게 뜬다 — 처음
-       * `#2fb8d8` 을 물렸던 이유가 정확히 그것이었다. 색과 노출은 한 쌍이다.
+       * 0.55 로 시작했고 메뉴에서 병이 **비어 보였다** — 채운 곳과 빈 목의
+       * 픽셀 차이가 파랑 채널 17단계뿐이었다. 병이 하늘을 등지고 있고 유리가
+       * 이미 투과라, 얇은 틴트 한 겹은 유리 한 겹과 구별되지 않는다.
+       *
+       * 0.4 아래는 액체가 아니라 유리가 한 겹 더 있는 것으로 보이고, 0.8 위는
+       * 다시 색칠한 속이 된다. 0.68 에서 물이 있다는 것이 읽히고 뒤도 비친다.
        */
+      opacity: 0.68,
       envIntensity: 1.0,
       vertexColors: true,
     });
+    /**
+     * 깊이를 쓰지 않는다. 이것이 없으면 액체가 자기 뒤의 유리를 지운다.
+     *
+     * `GlossMaterials.create` 에 이 스위치가 없는 것은 지금까지 필요한 곳이
+     * 없었기 때문이다 — 이 파일의 유리 두 장은 자기 재질을 직접 만든다.
+     */
+    this.liquidMaterial.depthWrite = false;
     /**
      * The oval decal. `alphaTest`, never `transparent`.
      *
@@ -184,11 +206,22 @@ export class Bottle {
       this.capLinerMaterial,
     ]);
 
-    // Only the transparent entries here actually order anything — see the
-    // header. The opaque ones are numbered to match so the intent reads.
-    this.liquid.renderOrder = 0;
-    this.foam.renderOrder = 0;
-    this.glassBack.renderOrder = 1;
+    /**
+     * ── 액체가 투명해지면서 순서가 하나 바뀌었다 ────────────────────────────
+     * 액체가 불투명 패스에 있을 때는 순서를 깊이 버퍼가 정해 줬다 — 액체가 깊이를
+     * 찍고, 뒷벽이 그 뒤에서 걸러졌다. 이제 액체는 투명 패스의 일원이므로 자기
+     * 자리를 스스로 말해야 하고, **뒷벽 다음**이다. 반대로 두면 뒷벽이 액체 위에
+     * 덮인다.
+     *
+     * 뒷벽이 이제 액체 너머로 보이는 것은 결함이 아니라 결과다. 맑은 액체를 통해
+     * 병의 먼 쪽 벽이 보이는 것이 맞다 — 예전에 그것을 지웠던 이유는 액체가
+     * 불투명해서 뒤를 가려야 했기 때문이다.
+     *
+     * `foam` 과 `label` 은 여전히 불투명 패스이고, 번호는 뜻이 읽히도록 맞춰만 둔다.
+     */
+    this.glassBack.renderOrder = 0;
+    this.liquid.renderOrder = 1;
+    this.foam.renderOrder = 1;
     // Bubbles are inside the glass, so the near wall is drawn over them and
     // tints them — which is what puts them behind the glass rather than on it.
     this.fizz.mesh.renderOrder = 2;
