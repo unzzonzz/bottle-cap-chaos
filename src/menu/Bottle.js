@@ -71,7 +71,7 @@ const LINER_COLOR = PALETTE.metal.liner;
 
 export class Bottle {
   /**
-   * @param {import('../core/RetroMaterial.js').RetroMaterials} retro
+   * @param {import('../core/GlossMaterial.js').GlossMaterials} retro
    * @param {object} tuning  the live `MENU_CONFIG.bottle` block
    */
   constructor({ retro, tuning }) {
@@ -235,7 +235,10 @@ export class Bottle {
     this.fizz.setProfile(profile);
     this._foamTop = profile.params.fillLevel * MM;
 
-    this.labelMaterial.uniforms.uUvScale.value.set(label.userData.panels, 1);
+    // The label material owns a CLONE of the label texture — see
+    // `GlossMaterials.create` on why a per-material UV transform needs one —
+    // so setting the repeat here cannot pan anybody else's copy.
+    this.labelMaterial.map?.repeat.set(label.userData.panels, 1);
 
     if (!this.capGeometry) {
       // The game's own cap, straight out of the shared module. `shell: false`
@@ -490,7 +493,7 @@ export class Bottle {
 
     // Churn. Faster while it is actually being shaken.
     this._foamScroll -= dt * t.foamScrollSpeed * (0.5 + shake);
-    this.foamMaterial.uniforms.uUvOffset.value.y = this._foamScroll;
+    if (this.foamMaterial.map) this.foamMaterial.map.offset.y = this._foamScroll;
 
     const topY = this._foamTop;
     const pos = g.getAttribute('position');
@@ -650,7 +653,7 @@ export class Bottle {
     // uniforms and not `texture.offset`, which a ShaderMaterial ignores; see
     // the note on the sprite vertex stage.
     const frame = this._burstTime < life * 0.4 ? 0 : 1;
-    this.burstMaterial.uniforms.uUvOffset.value.x = frame * 0.5;
+    if (this.burstMaterial.map) this.burstMaterial.map.offset.x = frame * 0.5;
 
     const grow = 1 + (this._burstTime / life) * 1.6;
     const size = this.tuning.burstSize * grow;

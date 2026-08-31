@@ -60,14 +60,15 @@ export function bootDebug({ cap, orbit, retro, composer }) {
 
   // ── look ─────────────────────────────────────────────────────────────────
   const look = gui.addFolder('LOOK');
-  const gloss = retro.shared.uGloss.value;
+  const gloss = retro.shared.glossAmount;
   const lookParams = { color: CAP_COLOR, gloss: true, wireframe: false };
   look.addColor(lookParams, 'color').name('뚜껑 색상').onChange((v) => cap.setColor(v));
   look
     .add(lookParams, 'gloss')
     .name('유광')
     .onChange((v) => {
-      retro.shared.uGloss.value = v ? gloss : 0;
+      retro.shared.glossAmount = v ? gloss : 0;
+      retro.apply();
     });
   look
     .add(lookParams, 'wireframe')

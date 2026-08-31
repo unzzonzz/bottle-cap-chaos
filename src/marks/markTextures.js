@@ -208,13 +208,22 @@ export function markThumbnail(mark, size = 64, boundary = MARK_BOUNDARY_DEFAULT)
  * One texture per (mark, cap colour), kept alive and repainted in place.
  *
  * ── repainted, never replaced ───────────────────────────────────────────────
- * The cap materials hold a reference to whatever texture they were built with,
- * and `RetroMaterials.create` bakes `USE_RETRO_MAP` at construction — a material
- * made without a map can never sample one afterwards. So the contract here is
- * that a caller gets a texture ONCE per team and this class redraws its canvas
+ * A caller gets a texture ONCE per team and this class redraws its canvas
  * underneath: a changed assignment, a freshly decoded image and an edited mark
  * all arrive as a `needsUpdate` on the same object. Nothing above ever swaps a
  * texture, which means nothing above can leak one either.
+ *
+ * The original reason was a shader limitation — `RetroMaterials.create` baked a
+ * `USE_RETRO_MAP` define at construction, so a material built without a map
+ * could never sample one afterwards. That limitation is gone: a
+ * `MeshPhysicalMaterial` will take a new `map` given a `needsUpdate`.
+ *
+ * The contract stays anyway, and is now load-bearing for a different reason. A
+ * mark can arrive from the NETWORK mid-match, long after the cap materials were
+ * built — see `setRemoteMark` — and the whole online path assumes the object it
+ * repaints is the object already on screen. Swapping textures there would mean
+ * finding every material wearing the old one, which is exactly the bookkeeping
+ * this design exists to avoid.
  */
 export class MarkTextures {
   /**

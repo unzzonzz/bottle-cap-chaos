@@ -59,7 +59,7 @@ const L = {
 
 export class MarksScreen {
   /**
-   * @param {import('../core/RetroMaterial.js').RetroMaterials} retro
+   * @param {import('../core/GlossMaterial.js').GlossMaterials} retro
    * @param {number} unitsPerPixel
    * @param {import('./MarkBook.js').MarkBook} book
    * @param {HTMLCanvasElement|HTMLImageElement|null} defaultMark  the built-in logo

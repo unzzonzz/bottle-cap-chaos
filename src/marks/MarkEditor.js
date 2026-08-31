@@ -125,7 +125,7 @@ export const EDITOR_MODE = { DRAW: 'draw', VIEW: 'view' };
 
 export class MarkEditor {
   /**
-   * @param {import('../core/RetroMaterial.js').RetroMaterials} retro
+   * @param {import('../core/GlossMaterial.js').GlossMaterials} retro
    * @param {number} unitsPerPixel
    * @param {import('./MarkBook.js').MarkBook} book
    * @param {import('./ConfirmDialog.js').ConfirmDialog} confirm
@@ -181,12 +181,12 @@ export class MarkEditor {
     this._bakeCanvas = bakeCapPanel(null, tuning.capColor, this.size, tuning.boundary);
     this.panelTexture = toMarkTexture(this._bakeCanvas);
     this.materials = [];
-    this.materials[CAP_GROUP.BODY] = retro.create({ color: tuning.capColor });
+    this.materials[CAP_GROUP.BODY] = retro.create({ color: tuning.capColor, preset: 'wetMetal' });
     this.materials[CAP_GROUP.PANEL] = retro.create({
       map: this.panelTexture,
       color: PALETTE.untinted,
     });
-    this.materials[CAP_GROUP.LINER] = retro.create({ color: PALETTE.metal.liner, gloss: 0.35 });
+    this.materials[CAP_GROUP.LINER] = retro.create({ color: PALETTE.metal.liner, preset: 'plastic' });
 
     this.cap = new Mesh(this.geometry, this.materials);
     // Panel toward the camera, and parked on its mid-height so the view mode

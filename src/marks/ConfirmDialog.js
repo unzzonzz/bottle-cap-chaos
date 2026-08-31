@@ -64,7 +64,7 @@ const DIALOG_ORDER = 2000;
 
 export class ConfirmDialog {
   /**
-   * @param {import('../core/RetroMaterial.js').RetroMaterials} retro
+   * @param {import('../core/GlossMaterial.js').GlossMaterials} retro
    * @param {number} unitsPerPixel  frame pixels to world units, as the menu uses
    */
   constructor({ retro, unitsPerPixel }) {

@@ -1,5 +1,6 @@
 import { Color, Group, Mesh, PerspectiveCamera, PlaneGeometry, Scene, Vector3 } from 'three';
-import { RetroMaterials } from '../core/RetroMaterial.js';
+import { GlossMaterials } from '../core/GlossMaterial.js';
+import { buildEnvironment } from '../core/environment.js';
 import { DISPLAY_ASPECT, Viewport } from '../core/Viewport.js';
 import { SceneComposer } from '../core/Composer.js';
 import { BOARD_ASPECT, FRAME } from '../core/frame.js';
@@ -119,9 +120,21 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
   // simply takes the window's shape and the arrangement below stacks instead of
   // sitting side by side. See src/core/frame.js.
   const viewport = new Viewport({ canvas, portrait: true });
-  const retro = new RetroMaterials({ resolution: viewport.resolution });
+  const retro = new GlossMaterials({ resolution: viewport.resolution });
 
   viewport.onResize(({ resolution }) => retro.setResolution(resolution));
+
+  /**
+   * The environment every reflective surface samples.
+   *
+   * Built once, from the palette, and handed to the material factory rather than
+   * to the scene: `scene.environment` would only reach THIS scene, and the caps
+   * also appear in the victory sequence, the cap wipe and the match-found layer,
+   * each of which owns its own scene. Setting it per material covers all of them
+   * from one place.
+   */
+  retro.setEnvironment(buildEnvironment(viewport.renderer));
+
 
   // Same fire-and-forget as `main.js`: the menu bakes its plates into cached
   // canvas textures too, and this is what stops them being baked in the

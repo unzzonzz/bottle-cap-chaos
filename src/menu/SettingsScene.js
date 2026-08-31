@@ -78,7 +78,7 @@ const ROWS = [
 
 export class SettingsScene {
   /**
-   * @param {import('../core/RetroMaterial.js').RetroMaterials} retro
+   * @param {import('../core/GlossMaterial.js').GlossMaterials} retro
    * @param {number} unitsPerPixel
    * @param {import('../audio/AudioSettings.js').AudioSettingsBook} [audioSettings]
    *   The sound rows are only built when there is a model behind them, so a

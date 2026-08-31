@@ -1,5 +1,6 @@
 import { Color, Scene, Vector3 } from 'three';
-import { RetroMaterials } from './core/RetroMaterial.js';
+import { GlossMaterials } from './core/GlossMaterial.js';
+import { buildEnvironment } from './core/environment.js';
 import { Viewport } from './core/Viewport.js';
 import { SceneComposer } from './core/Composer.js';
 import { initRapier } from './physics/rapier.js';
@@ -242,12 +243,24 @@ async function boot(canvas) {
   // band, so it ships OFF until that is chased down. Off, every number in the
   // pipeline is what it was before core/frame.js existed.
   const viewport = new Viewport({ canvas, portrait: true });
-  const retro = new RetroMaterials({ resolution: viewport.resolution });
+  const retro = new GlossMaterials({ resolution: viewport.resolution });
 
   const scene = new Scene();
   scene.background = new Color(PALETTE.bg.skyTop);
 
   viewport.onResize(({ resolution }) => retro.setResolution(resolution));
+
+  /**
+   * The environment every reflective surface samples.
+   *
+   * Built once, from the palette, and handed to the material factory rather than
+   * to the scene: `scene.environment` would only reach THIS scene, and the caps
+   * also appear in the victory sequence, the cap wipe and the match-found layer,
+   * each of which owns its own scene. Setting it per material covers all of them
+   * from one place.
+   */
+  retro.setEnvironment(buildEnvironment(viewport.renderer));
+
 
   // ── the cap, measured once ───────────────────────────────────────────────
   // The collider is sized off the geometry's own userData rather than off the mm
@@ -374,8 +387,8 @@ async function boot(canvas) {
    *
    * `MarkTextures` hands out ONE texture per player and repaints its canvas
    * underneath forever after, which is what lets a material built now keep
-   * showing the right mark later — `RetroMaterials.create` bakes `USE_RETRO_MAP`
-   * at construction, so a swapped texture object would be ignored.
+   * showing the right mark later — including a mark that arrives from the
+   * network mid-match. See the note on `MarkTextures` itself.
    */
   const markBook = new MarkBook(new LocalStorageMarks());
   const markOptions = {

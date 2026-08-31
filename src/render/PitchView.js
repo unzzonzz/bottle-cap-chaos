@@ -99,28 +99,13 @@ const SEARCH_OK = PALETTE.pitch.searchOk;
 const SEARCH_BLOCKED = PALETTE.pitch.searchBlocked;
 const MAX_SEARCH_MARKS = 256;
 
-/**
- * The ground's share of the vertex wobble. Zero, and measured.
- *
- * The snap rounds each vertex onto the framebuffer grid, which is the whole
- * character of the look on an OBJECT: a cap is small, its vertices land on the
- * same few pixels, and the whole thing shivers together. A ground plane is the
- * opposite case — it spans the screen, so every one of its vertices rounds to a
- * different boundary and the spans between them shear against each other. The
- * texture inside goes with them, and the surface swims.
- *
- * Measured on the default pitch, nudging the zoom by 2%: 37.7% of the turf's
- * pixels changed with the snap on, 3.0% with it off. The caps, the ball, the
- * fence and the goals all keep it — this is the floor and nothing else.
- */
-const GROUND_SNAP = 0;
 
 /** Board-plane y for the flat markings. Above the turf, below everything else. */
 const MARK_Y = 0.03;
 
 export class PitchView {
   /**
-   * @param {import('../core/RetroMaterial.js').RetroMaterials} retro
+   * @param {import('../core/GlossMaterial.js').GlossMaterials} retro
    * @param {ReturnType<import('../game/layout/FootballPitch.js').FootballPitch['describe']>} description
    * @param {import('../game/layout/FootballPitch.js').FootballPitch} layout  for the
    *   live debug readouts only; the geometry all comes from `description`
@@ -187,8 +172,7 @@ export class PitchView {
     const mat = this.retro.create({
       map: this.turfTexture,
       color: RUNOFF_TINT,
-      gloss: 0.05,
-      snap: GROUND_SNAP,
+      preset: 'matte',
     });
     this._materials.push(mat);
     this.runoff = new Mesh(geo, mat);
@@ -273,11 +257,10 @@ export class PitchView {
       this.retro.create({
         map: this.turfTexture,
         color,
-        // Near-matte. Turf with any real specular reads as wet plastic, and a
-        // highlight sliding across it under the fixed key light would compete
-        // with the ball for attention.
-        gloss: 0.06,
-        snap: GROUND_SNAP,
+        // Turf with any specular reads as wet plastic, and a highlight sliding
+        // across it would compete with the ball. This is the only surface in the
+        // game with no clearcoat at all.
+        preset: 'matte',
       }),
     );
     this._materials.push(...mats);
@@ -326,13 +309,13 @@ export class PitchView {
 
   _buildShapes() {
     const byKind = {
-      fence: this.retro.create({ color: FENCE_COLOR, gloss: 0.3 }),
+      fence: this.retro.create({ color: FENCE_COLOR, preset: 'paintedMetal' }),
       // Netting reads as a pale surface rather than as a mesh: at this internal
       // resolution an actual net texture is finer than the pixel grid and
       // collapses into a flat grey anyway, so it is drawn as what it collapses
       // to and the frame carries the shape.
-      net: this.retro.create({ color: NET_COLOR, gloss: 0.15 }),
-      frame: this.retro.create({ color: FRAME_COLOR, gloss: 0.6 }),
+      net: this.retro.create({ color: NET_COLOR, preset: 'matte' }),
+      frame: this.retro.create({ color: FRAME_COLOR, preset: 'paintedMetal' }),
     };
     this._materials.push(...Object.values(byKind));
 
@@ -348,8 +331,8 @@ export class PitchView {
      * reading as an opening.
      */
     const goalMaterials = PLAYER_COLORS.map((hex) => ({
-      frame: this.retro.create({ color: hex, gloss: 0.6 }),
-      net: this.retro.create({ color: washed(hex), gloss: 0.15 }),
+      frame: this.retro.create({ color: hex, preset: 'paintedMetal' }),
+      net: this.retro.create({ color: washed(hex), preset: 'matte' }),
     }));
     for (const set of goalMaterials) this._materials.push(set.frame, set.net);
 

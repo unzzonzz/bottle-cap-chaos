@@ -70,7 +70,7 @@ function measurePanelRadius(geometry) {
 
 export class CapWipe {
   /**
-   * @param {import('../core/RetroMaterial.js').RetroMaterials} retro
+   * @param {import('../core/GlossMaterial.js').GlossMaterials} retro
    * @param {object} tuning  the live `MENU_CONFIG.wipe` block
    * @param {import('three').Texture} [panelMap]  the cap's top artwork
    */
@@ -100,7 +100,7 @@ export class CapWipe {
 
     this.geometry = buildCapGeometry({ ...CAP_DEFAULTS, shell: false });
     this.materials = [
-      retro.create({ color }),
+      retro.create({ color, preset: 'wetMetal' }),
       /**
        * The top is what fills the screen at the covered frame, so its artwork is
        * the one texture in this project that gets magnified past all reason —
@@ -113,7 +113,9 @@ export class CapWipe {
        * own red, and multiplying it by the cap's red as well would come out
        * nearly black. Only a greyscale placeholder wants tinting.
        */
-      panelMap ? retro.create({ map: panelMap, color: panelColor }) : retro.create({ color }),
+      panelMap
+        ? retro.create({ map: panelMap, color: panelColor, preset: 'wetMetal' })
+        : retro.create({ color, preset: 'wetMetal' }),
     ];
     this.mesh = new Mesh(this.geometry, this.materials);
 

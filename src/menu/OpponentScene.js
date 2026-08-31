@@ -82,7 +82,7 @@ const L = {
 export class OpponentScene {
   /**
    * @param {object} opts
-   * @param {import('../core/RetroMaterial.js').RetroMaterials} opts.retro
+   * @param {import('../core/GlossMaterial.js').GlossMaterials} opts.retro
    * @param {number} opts.unitsPerPixel
    * @param {import('../marks/MarkBook.js').MarkBook} opts.book
    * @param {HTMLCanvasElement|HTMLImageElement} opts.defaultMark
@@ -149,7 +149,7 @@ export class OpponentScene {
         map: this._marks.textureFor(player),
         color: PALETTE.untinted,
       });
-      materials[CAP_GROUP.LINER] = retro.create({ color: PALETTE.metal.liner, gloss: 0.35 });
+      materials[CAP_GROUP.LINER] = retro.create({ color: PALETTE.metal.liner, preset: 'plastic' });
 
       const pivot = new Group();
       pivot.position.set((player === 0 ? -L.capX : L.capX) * u, L.capY * u, 0);

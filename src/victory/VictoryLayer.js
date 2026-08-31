@@ -218,7 +218,7 @@ class CapActor {
 export class VictoryLayer {
   /**
    * @param {HTMLCanvasElement} canvas  for mapping pointer coordinates
-   * @param {import('../core/RetroMaterial.js').RetroMaterials} retro
+   * @param {import('../core/GlossMaterial.js').GlossMaterials} retro
    * @param {import('three').BufferGeometry} capGeometry  the board's own cap
    * @param {import('three').Vector2} resolution  the low-res target's size
    * @param {string[]} teamColors
@@ -511,8 +511,12 @@ export class VictoryLayer {
    */
   _applyTeamTexture(set, team, texture) {
     const panel = set[CAP_GROUP.PANEL];
-    panel.uniforms.uMap.value = texture ?? this._panelTexture;
-    panel.uniforms.uColor.value.set(texture ? PALETTE.untinted : this.teamColors[team]);
+    panel.map = texture ?? this._panelTexture;
+    // Swapping a map on a standard material can change the shader program — a
+    // null map compiles without `USE_MAP` — so the flag is not optional here the
+    // way it was with one hand-written shader that always sampled.
+    panel.needsUpdate = true;
+    panel.color.set(texture ? PALETTE.untinted : this.teamColors[team]);
   }
 
   /** Live, for when the customiser lands. Null puts the placeholder back. */

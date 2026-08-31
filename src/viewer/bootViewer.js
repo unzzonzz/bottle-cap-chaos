@@ -1,5 +1,6 @@
 import { Color, PerspectiveCamera, Scene } from 'three';
-import { RetroMaterials } from '../core/RetroMaterial.js';
+import { GlossMaterials } from '../core/GlossMaterial.js';
+import { buildEnvironment } from '../core/environment.js';
 import { PALETTE } from '../core/palette.js';
 import { DISPLAY_ASPECT, Viewport } from '../core/Viewport.js';
 import { SceneComposer } from '../core/Composer.js';
@@ -18,7 +19,7 @@ import { bootDebug } from './Debug.js';
 
 export function bootViewer(canvas) {
   const viewport = new Viewport({ canvas });
-  const retro = new RetroMaterials({ resolution: viewport.resolution });
+  const retro = new GlossMaterials({ resolution: viewport.resolution });
 
   const scene = new Scene();
   scene.background = new Color(PALETTE.bg.skyMid);
@@ -33,6 +34,18 @@ export function bootViewer(canvas) {
   bootDebug({ cap, orbit, retro, composer });
 
   viewport.onResize(({ resolution }) => retro.setResolution(resolution));
+
+  /**
+   * The environment every reflective surface samples.
+   *
+   * Built once, from the palette, and handed to the material factory rather than
+   * to the scene: `scene.environment` would only reach THIS scene, and the caps
+   * also appear in the victory sequence, the cap wipe and the match-found layer,
+   * each of which owns its own scene. Setting it per material covers all of them
+   * from one place.
+   */
+  retro.setEnvironment(buildEnvironment(viewport.renderer));
+
 
   let raf = 0;
   let last = 0;

@@ -59,21 +59,13 @@ const APRON_COLOR = PALETTE.curling.apron;
 /** The guides, when the panel asks. Matching the other views' pink. */
 const GUIDE_COLOR = PALETTE.curling.guide;
 
-/**
- * The ground's share of the vertex wobble. Zero, and for the reason `PitchView`
- * measured: the snap is the look on an OBJECT, whose vertices land on the same
- * few pixels and shiver together, and it is a swimming mess on a plane spanning
- * the screen, where every vertex rounds to a different boundary and the spans
- * shear against each other.
- */
-const GROUND_SNAP = 0;
 
 /** Board-plane y for the flat markings. Above the metal, below everything else. */
 const MARK_Y = 0.03;
 
 export class CurlingTableView {
   /**
-   * @param {import('../core/RetroMaterial.js').RetroMaterials} retro
+   * @param {import('../core/GlossMaterial.js').GlossMaterials} retro
    * @param {ReturnType<import('../game/layout/CurlingTable.js').CurlingTable['describe']>} description
    */
   constructor({ retro, description, config }) {
@@ -189,12 +181,17 @@ export class CurlingTableView {
       // same tones would square them and take the table to near-black. Same
       // mistake the survival board's `BOARD_TINT` records having made.
       color: METAL_TINT,
-      // Near-matte. The metal's highlight is in the texture; see the header of
-      // `metalTexture`. Left at anything real, the per-vertex specular puts a
-      // second, blotchier highlight on top of the baked one and the two slide
-      // against each other as the camera turns.
-      gloss: 0.06,
-      snap: GROUND_SNAP,
+      /**
+       * A lacquered surface rather than the near-matte it was.
+       *
+       * The old note is worth keeping in mind and no longer applies: the
+       * highlight was baked into the texture and a per-vertex specular on top of
+       * it made a second, blotchier one that slid against the baked one as the
+       * camera turned. There is no per-vertex specular now — the highlight comes
+       * from a real environment reflection, which moves the way a reflection
+       * should — so the surface can have one.
+       */
+      preset: 'lacqueredWood',
     });
     this._materials.push(mat);
 
@@ -246,7 +243,7 @@ export class CurlingTableView {
     // No map, and `gloss` at zero: this is a painted mark and the one thing it
     // must not do is pick up a highlight that makes part of it brighter than the
     // rest. Flat colour, shaded only by the scene's own lighting.
-    const mat = this.retro.create({ color: TARGET_COLOR, gloss: 0, snap: GROUND_SNAP });
+    const mat = this.retro.create({ color: TARGET_COLOR, preset: 'matte' });
     this._materials.push(mat);
 
     this.targetLine = new Mesh(geo, mat);

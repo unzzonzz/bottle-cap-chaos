@@ -40,9 +40,6 @@ import { orbShellTexture, orbMarkTexture } from './orbTextures.js';
  */
 
 const SHELL_VERT = /* glsl */ `
-  uniform vec2  uTargetRes;
-  uniform float uSnapAmount;
-  uniform float uSnapGrid;
   uniform float uRimPower;
 
   varying vec2  vUv;
@@ -51,12 +48,7 @@ const SHELL_VERT = /* glsl */ `
   void main() {
     vec4 mv = modelViewMatrix * vec4(position, 1.0);
     vec4 clip = projectionMatrix * mv;
-    if (clip.w > 0.0001 && uSnapAmount > 0.0) {
-      vec2 grid = uTargetRes * 0.5 * uSnapGrid;
-      vec3 ndc = clip.xyz / clip.w;
-      ndc.xy = mix(ndc.xy, floor(ndc.xy * grid) / grid, uSnapAmount);
-      clip.xyz = ndc * clip.w;
-    }
+
     gl_Position = clip;
 
     vUv = uv;
@@ -86,19 +78,11 @@ const SHELL_FRAG = /* glsl */ `
 `;
 
 const SPRITE_VERT = /* glsl */ `
-  uniform vec2  uTargetRes;
-  uniform float uSnapAmount;
-  uniform float uSnapGrid;
   varying vec2 vUv;
   void main() {
     vUv = uv;
     vec4 clip = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    if (clip.w > 0.0001 && uSnapAmount > 0.0) {
-      vec2 grid = uTargetRes * 0.5 * uSnapGrid;
-      vec3 ndc = clip.xyz / clip.w;
-      ndc.xy = mix(ndc.xy, floor(ndc.xy * grid) / grid, uSnapAmount);
-      clip.xyz = ndc * clip.w;
-    }
+
     gl_Position = clip;
   }
 `;
@@ -132,7 +116,7 @@ const PALETTE = [
 
 export class OrbView {
   /**
-   * @param {import('../core/RetroMaterial.js').RetroMaterials} retro
+   * @param {import('../core/GlossMaterial.js').GlossMaterials} retro
    *   its shared uniforms are borrowed by reference, so the global vertex-snap
    *   slider reaches the orbs too
    */
@@ -165,9 +149,6 @@ export class OrbView {
       transparent: true,
       depthWrite: false,
       uniforms: {
-        uTargetRes: this.retro.shared.uTargetRes,
-        uSnapAmount: this.retro.shared.uSnapAmount,
-        uSnapGrid: this.retro.shared.uSnapGrid,
         uMap: { value: this.shellMap },
         uTint: { value: new Color(1, 1, 1) },
         uOpacity: { value: 1 },
@@ -185,9 +166,6 @@ export class OrbView {
       depthWrite: false,
       blending: additive ? AdditiveBlending : NormalBlending,
       uniforms: {
-        uTargetRes: this.retro.shared.uTargetRes,
-        uSnapAmount: this.retro.shared.uSnapAmount,
-        uSnapGrid: this.retro.shared.uSnapGrid,
         uMap: { value: map },
         uTint: { value: new Color(1, 1, 1) },
         uOpacity: { value: 1 },

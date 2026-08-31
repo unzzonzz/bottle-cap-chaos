@@ -28,7 +28,7 @@ export const CAP_COLOR = PALETTE.player[0];
 const LINER_COLOR = PALETTE.metal.liner;
 
 export class Cap {
-  /** @param {import('../core/RetroMaterial.js').RetroMaterials} retro */
+  /** @param {import('../core/GlossMaterial.js').GlossMaterials} retro */
   constructor({ retro, color = CAP_COLOR }) {
     this.retro = retro;
     this.params = { ...CAP_DEFAULTS };
@@ -36,11 +36,11 @@ export class Cap {
     this.root = new Group();
 
     this.topTexture = makeCapTopTexture();
-    this.bodyMaterial = retro.create({ color });
-    this.panelMaterial = retro.create({ map: this.topTexture, color });
+    this.bodyMaterial = retro.create({ color, preset: 'wetMetal' });
+    this.panelMaterial = retro.create({ map: this.topTexture, color, preset: 'wetMetal' });
     // Soft plastic under the same gloss switch as the paint, but at a fraction
     // of it: a liner as shiny as the lacquer reads as a second metal disc.
-    this.linerMaterial = retro.create({ color: LINER_COLOR, gloss: 0.35 });
+    this.linerMaterial = retro.create({ color: LINER_COLOR, preset: 'plastic' });
 
     this.materials = [];
     this.materials[CAP_GROUP.BODY] = this.bodyMaterial;
@@ -73,8 +73,8 @@ export class Cap {
 
   /** The paint. Not the liner — see the note at the top. */
   setColor(hex) {
-    this.bodyMaterial.uniforms.uColor.value.set(hex);
-    this.panelMaterial.uniforms.uColor.value.set(hex);
+    this.bodyMaterial.color.set(hex);
+    this.panelMaterial.color.set(hex);
   }
 
   setWireframe(on) {

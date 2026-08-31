@@ -127,7 +127,7 @@ const BALL_DARK = PALETTE.ball.dark;
 
 export class ArenaView {
   /**
-   * @param {import('../core/RetroMaterial.js').RetroMaterials} retro
+   * @param {import('../core/GlossMaterial.js').GlossMaterials} retro
    * @param {import('../game/Arena.js').Arena} arena
    */
   /**
@@ -173,13 +173,13 @@ export class ArenaView {
     // Soft plastic under the same gloss switch as the paint but at a fraction of
     // it: a liner as shiny as the lacquer reads as a second metal disc. One
     // instance, shared by both players — see LINER_COLOR.
-    this.linerMaterial = retro.create({ color: LINER_COLOR, gloss: 0.35 });
+    this.linerMaterial = retro.create({ color: LINER_COLOR, preset: 'plastic' });
     // Indexed by CAP_GROUP: body, panel, liner. The array has to have an entry
     // for every group the geometry declares — with the shell on there are three,
     // and a mesh handed only two silently drops the liner.
     this._materials = PLAYER_COLORS.map((color, player) => {
       const set = [];
-      set[CAP_GROUP.BODY] = retro.create({ color });
+      set[CAP_GROUP.BODY] = retro.create({ color, preset: 'wetMetal' });
       /**
        * An injected mark is a FULL-COLOUR bake that already contains the cap's
        * paint, so it multiplies by white. The placeholder is near-greyscale and
@@ -188,8 +188,8 @@ export class ArenaView {
        * contract and `CapWipe` makes the same distinction.
        */
       set[CAP_GROUP.PANEL] = panelTextureFor
-        ? retro.create({ map: panelTextureFor(player), color: PALETTE.untinted })
-        : retro.create({ map: this.panelTexture, color });
+        ? retro.create({ map: panelTextureFor(player), color: PALETTE.untinted, preset: 'wetMetal' })
+        : retro.create({ map: this.panelTexture, color, preset: 'wetMetal' });
       set[CAP_GROUP.LINER] = this.linerMaterial;
       return set;
     });
@@ -207,8 +207,8 @@ export class ArenaView {
      * light and tell the eye it is round, well short of the caps' shine.
      */
     this.ballMaterials = [];
-    this.ballMaterials[BALL_GROUP.PENTAGON] = retro.create({ color: BALL_DARK, gloss: 0.22 });
-    this.ballMaterials[BALL_GROUP.HEXAGON] = retro.create({ color: BALL_LIGHT, gloss: 0.3 });
+    this.ballMaterials[BALL_GROUP.PENTAGON] = retro.create({ color: BALL_DARK, preset: 'plastic' });
+    this.ballMaterials[BALL_GROUP.HEXAGON] = retro.create({ color: BALL_LIGHT, preset: 'plastic' });
 
     this.meshes = [];
     this.ball = null;
@@ -360,10 +360,18 @@ export class ArenaView {
       // tinting with the same dark grey the texture is already painted in would
       // square it and the mat would come out near black.
       color: BOARD_TINT,
-      // Near-matte. A mat with any real specular reads as polished stone, and a
-      // highlight sliding across it under the fixed key light would compete with
-      // the caps for attention.
-      gloss: 0.08,
+      /**
+       * Wood under a thin lacquer, not the near-matte mat it was.
+       *
+       * The old note said any real specular would read as polished stone and
+       * would compete with the caps. Both halves of that changed: the surface is
+       * honey wood rather than a dark cloth mat, and the caps now have a
+       * clearcoat of their own, so a board with none reads as paper next to
+       * them. The lacquer's clearcoat is a quarter of the cap's and its
+       * roughness is more than double, which keeps the board's highlight broad
+       * and dim while the caps keep the tight bright one.
+       */
+      preset: 'lacqueredWood',
     });
     this.boardMesh = new Mesh(geo, this.boardMaterial);
     this.boardMesh.position.y = -boardThickness * 0.01;

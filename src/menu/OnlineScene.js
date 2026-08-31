@@ -45,7 +45,7 @@ const L = {
 export class OnlineScene {
   /**
    * @param {object} opts
-   * @param {import('../core/RetroMaterial.js').RetroMaterials} opts.retro
+   * @param {import('../core/GlossMaterial.js').GlossMaterials} opts.retro
    * @param {number} opts.unitsPerPixel
    * @param {string} opts.mode          which mode a match will be played in
    * @param {string} opts.modeName      for the heading only

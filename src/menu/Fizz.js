@@ -115,7 +115,7 @@ function solveAge(distance, growth) {
 
 export class Fizz {
   /**
-   * @param {import('../core/RetroMaterial.js').RetroMaterials} retro
+   * @param {import('../core/GlossMaterial.js').GlossMaterials} retro
    * @param {object} tuning  the live `MENU_CONFIG.bottle` block
    * @param {number} count   sites times bubbles per site
    */

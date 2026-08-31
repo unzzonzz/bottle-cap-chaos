@@ -74,7 +74,7 @@ const clamp01 = (t) => Math.min(1, Math.max(0, t));
 export class MatchFoundLayer {
   /**
    * @param {object} opts
-   * @param {import('../core/RetroMaterial.js').RetroMaterials} opts.retro
+   * @param {import('../core/GlossMaterial.js').GlossMaterials} opts.retro
    * @param {import('three').Vector2} opts.resolution
    * @param {object} opts.config
    * @param {(player: number) => import('three').Texture} opts.panelFor
@@ -128,14 +128,14 @@ export class MatchFoundLayer {
 
       const materials = [];
       const retro = this._retro;
-      materials[CAP_GROUP.BODY] = this._sortable(retro.create({ color: PLAYER_COLORS[player] }));
+      materials[CAP_GROUP.BODY] = this._sortable(retro.create({ color: PLAYER_COLORS[player], preset: 'wetMetal' }));
       // White, because the mark bake already contains the cap's paint — the
       // paired contract `markTextures` states. Tinting it again would double it.
       materials[CAP_GROUP.PANEL] = this._sortable(
-        retro.create({ map: this.panelFor?.(player) ?? null, color: PALETTE.untinted }),
+        retro.create({ map: this.panelFor?.(player) ?? null, color: PALETTE.untinted, preset: 'wetMetal' }),
       );
       materials[CAP_GROUP.LINER] = this._sortable(
-        retro.create({ color: PALETTE.metal.liner, gloss: 0.35 }),
+        retro.create({ color: PALETTE.metal.liner, preset: 'plastic' }),
       );
 
       const cap = new Mesh(this._geometry, materials);

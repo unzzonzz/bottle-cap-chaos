@@ -37,7 +37,7 @@ const STAGE = { IDLE: 'idle', LAUNCH: 'launch', COVER: 'cover', EXIT: 'exit' };
 
 export class WipeOut {
   /**
-   * @param {import('../core/RetroMaterial.js').RetroMaterials} retro
+   * @param {import('../core/GlossMaterial.js').GlossMaterials} retro
    * @param {object} wipe        the live `MENU_CONFIG.wipe` block
    * @param {object} transition  the live `MENU_CONFIG.transition` block
    * @param {import('three').Texture} [panelMap]  the cap's top artwork

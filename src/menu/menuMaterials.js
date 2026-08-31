@@ -1,13 +1,4 @@
-import {
-  AdditiveBlending,
-  BackSide,
-  Color,
-  DoubleSide,
-  FrontSide,
-  NormalBlending,
-  ShaderMaterial,
-  Vector2,
-} from 'three';
+import { AdditiveBlending, BackSide, Color, DoubleSide, FrontSide, NormalBlending, ShaderMaterial, Vector2, Vector3 } from 'three';
 import { PALETTE } from '../core/palette.js';
 
 /**
@@ -56,9 +47,6 @@ import { PALETTE } from '../core/palette.js';
  */
 
 const VERT = /* glsl */ `
-  uniform vec2  uTargetRes;
-  uniform float uSnapAmount;
-  uniform float uSnapGrid;
   uniform vec3  uLightDir;
   uniform vec3  uLightColor;
   uniform vec3  uFillDir;
@@ -79,14 +67,6 @@ const VERT = /* glsl */ `
     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
     vec4 clip = projectionMatrix * mvPosition;
 
-    // Identical to RetroMaterial's, w guard included: a vertex behind the
-    // camera has w <= 0 and dividing by it tears the mesh apart.
-    if (clip.w > 0.0001 && uSnapAmount > 0.0) {
-      vec2 grid = uTargetRes * 0.5 * uSnapGrid;
-      vec3 ndc = clip.xyz / clip.w;
-      ndc.xy = mix(ndc.xy, floor(ndc.xy * grid) / grid, uSnapAmount);
-      clip.xyz = ndc * clip.w;
-    }
     gl_Position = clip;
 
     vUv  = uv;
@@ -147,9 +127,6 @@ const FRAG = /* glsl */ `
  * can be seen.
  */
 const SPRITE_VERT = /* glsl */ `
-  uniform vec2  uTargetRes;
-  uniform float uSnapAmount;
-  uniform float uSnapGrid;
   uniform vec2  uUvScale;
   uniform vec2  uUvOffset;
 
@@ -158,12 +135,6 @@ const SPRITE_VERT = /* glsl */ `
   void main() {
     vUv = uv * uUvScale + uUvOffset;
     vec4 clip = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    if (clip.w > 0.0001 && uSnapAmount > 0.0) {
-      vec2 grid = uTargetRes * 0.5 * uSnapGrid;
-      vec3 ndc = clip.xyz / clip.w;
-      ndc.xy = mix(ndc.xy, floor(ndc.xy * grid) / grid, uSnapAmount);
-      clip.xyz = ndc * clip.w;
-    }
     gl_Position = clip;
   }
 `;
@@ -183,13 +154,36 @@ const SPRITE_FRAG = /* glsl */ `
 `;
 
 /**
- * @param {import('../core/RetroMaterial.js').RetroMaterials} retro
+ * @param {import('../core/GlossMaterial.js').GlossMaterials} retro
  *   its `shared` uniforms are taken BY REFERENCE, so the panel's global
  *   vertex-snap and light-angle controls reach the glass too
  * @param {object} opts
  * @param {import('three').Texture} opts.map  the baked highlight strips
  * @param {'front'|'back'} opts.face
  */
+/**
+ * The menu shaders' own lighting, no longer borrowed from the material factory.
+ *
+ * These two shaders — the bottle's glass and the flat sprite — do their own
+ * vertex lighting, and they used to take the direction and colour uniforms BY
+ * REFERENCE out of `RetroMaterials.shared`, so one debug slider moved the bottle
+ * and the board together. `GlossMaterials` has no such uniforms: it is a
+ * `MeshPhysicalMaterial` factory and its lighting comes from the scene.
+ *
+ * So the glass carries its own copy, read from the palette at construction. It
+ * is a stopgap with a known end date — the bottle redesign replaces this shader
+ * with a real `transmission` material, at which point the whole set goes.
+ */
+function menuLightUniforms() {
+  return {
+    uLightDir: { value: new Vector3(-0.71, 0.44, 0.55).normalize() },
+    uLightColor: { value: new Color(PALETTE.light.sun).multiplyScalar(1.15) },
+    uFillDir: { value: new Vector3(0.5, -0.68, 0.54).normalize() },
+    uFillColor: { value: new Color(PALETTE.light.fill).multiplyScalar(0.42) },
+    uAmbientColor: { value: new Color(PALETTE.light.ambientSky).multiplyScalar(0.28) },
+  };
+}
+
 export function createGlassMaterial(retro, { map, face = 'front', color = PALETTE.glass.tint } = {}) {
   return new ShaderMaterial({
     vertexShader: VERT,
@@ -203,7 +197,7 @@ export function createGlassMaterial(retro, { map, face = 'front', color = PALETT
     side: face === 'back' ? BackSide : FrontSide,
     vertexColors: true,
     uniforms: {
-      ...retro.shared,
+      ...menuLightUniforms(),
       uColor: { value: new Color(color) },
       uMap: { value: map },
       // Low. The highlight is ADDED, so on a surface whose own alpha is around
@@ -262,9 +256,6 @@ export function createSpriteMaterial(
     side,
     blending: blend === 'add' ? AdditiveBlending : NormalBlending,
     uniforms: {
-      uTargetRes: retro.shared.uTargetRes,
-      uSnapAmount: retro.shared.uSnapAmount,
-      uSnapGrid: retro.shared.uSnapGrid,
       uMap: { value: map },
       uTint: { value: new Color(tint) },
       uOpacity: { value: opacity },

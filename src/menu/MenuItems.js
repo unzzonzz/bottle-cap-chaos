@@ -41,7 +41,7 @@ const DEFAULT_ITEMS = [
 
 export class MenuItems {
   /**
-   * @param {import('../core/RetroMaterial.js').RetroMaterials} retro
+   * @param {import('../core/GlossMaterial.js').GlossMaterials} retro
    * @param {object} tuning  the live `MENU_CONFIG.items` block
    */
   constructor({ retro, tuning, items = DEFAULT_ITEMS }) {
