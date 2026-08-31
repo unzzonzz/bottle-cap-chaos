@@ -526,26 +526,14 @@ export const PALETTE = {
   },
 
   /**
-   * The bottle's oval label. A printed decal, and therefore MATTE.
+   * 병의 타원 라벨. 인쇄된 종이이므로 무광이다.
    *
-   * Nothing in this group gets a gloss or a gel highlight, and that is the one
-   * rule worth stating: the label is paper under glass, and the shine on it
-   * belongs to the bottle. Treating it like a UI panel — which is the obvious
-   * mistake, since the UI right next to it is all gel — makes it read as a
-   * sticker floating in front of the bottle rather than wrapped onto it.
-   *
-   * A pale aqua-mint ground is the convention for cider and ramune labels; it is
-   * not any one brand's, and neither is the layout it carries (arched Latin
-   * along the oval, an illustration in the middle, a fine-print band at the
-   * bottom). The illustration is this game's own crown cap.
+   * 한 값만 남아 있고, 그게 요점이다. 라벨은 흰 타원 한 장이고 그 위의 광택은
+   * 앞에 있는 유리가 낸다. UI 바로 옆에 젤 버튼이 잔뜩 있어서 라벨에도 하이라이트를
+   * 넣고 싶어지는데, 그러면 병에 감긴 라벨이 아니라 병 앞에 떠 있는 스티커로 읽힌다.
    */
   label: {
-    mint: '#bfe8e0',
-    mintTop: '#d8f4ee',
     paper: PAPER,
-    ink: INK,
-    inkMuted: SLATE,
-    band: '#a4d6cc',
   },
 
   /**

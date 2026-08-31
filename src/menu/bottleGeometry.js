@@ -135,8 +135,21 @@ function revolve(
     }
   }
 
+  /**
+   * 부분 호는 마지막 컬럼을 첫 컬럼에 이어붙이면 안 된다.
+   *
+   * `(i + 1) % stride` 는 `wrap: false` + 한 바퀴일 때 링을 닫아주는 장치인데,
+   * 라벨처럼 160도만 도는 호에서는 마지막 컬럼과 첫 컬럼 사이 200도를 가로지르는
+   * 면을 하나 만들어낸다. 그 면은 텍스처 u 를 0.01 에서 1.0 까지 통째로 늘려
+   * 붙이므로, 병 뒤쪽에 라벨 전체가 잡아늘여진 판이 생긴다.
+   *
+   * 그래서 세그먼트 수를 링이 실제로 닫히는지로 결정한다.
+   */
+  const closed = wrap || Math.abs(sweep - TAU) < 1e-6;
+  const segments = closed ? cols : cols - 1;
+
   for (let j = 0; j < rows.length - 1; j++) {
-    for (let i = 0; i < cols; i++) {
+    for (let i = 0; i < segments; i++) {
       const a = j * stride + i;
       const b = j * stride + ((i + 1) % stride);
       index.push(a, a + stride, b, b, a + stride, b + stride);
@@ -271,10 +284,16 @@ export function buildGlassGeometry(profile) {
  */
 export function buildLiquidGeometry(profile) {
   const p = profile.params;
-  // Fewer columns than the glass: it is seen THROUGH the glass, at a fraction
-  // of the contrast, and nothing about it survives to the framebuffer that a
-  // finer ring would have improved.
-  const cols = Math.max(8, Math.round(p.columns / 2));
+  /**
+   * 유리와 같은 분할 수. 예전엔 절반이었다.
+   *
+   * "유리를 통해 낮은 대비로 보이니 더 촘촘하게 해도 프레임버퍼까지 살아남지
+   * 않는다" 는 게 절반이었던 이유였는데, 두 전제가 다 사라졌다. 유리가 맑아져서
+   * 액체가 그대로 보이고, 액면에 1 을 넘는 밝은 링을 넣었기 때문에 — 그 링이
+   * 정확히 이 다각형의 윤곽을 그린다. 36 컬럼이면 한 변이 10도라 액면 테두리가
+   * 눈에 띄게 각져 보였다.
+   */
+  const cols = Math.max(12, Math.round(p.columns));
   const fill = Math.min(profile.height - 4, p.fillLevel);
 
   const surfaceR = profile.envelopeAt(fill) * p.liquidInset;
@@ -389,7 +408,9 @@ const FOAM_ROWS = 6;
 
 export function buildFoamGeometry(profile) {
   const p = profile.params;
-  const cols = Math.max(8, Math.round(p.columns / 2));
+  // 액체 바로 위에 앉으므로 같은 분할 수를 쓴다. 다르면 두 실루엣의 다각형
+  // 꼭짓점이 어긋나 경계에 톱니가 생긴다.
+  const cols = Math.max(12, Math.round(p.columns));
 
   const pos = [];
   const nor = [];

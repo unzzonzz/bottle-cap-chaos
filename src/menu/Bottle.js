@@ -129,16 +129,14 @@ export class Bottle {
       alphaToCoverage: true,
       preset: 'plastic',
       /**
-       * Dimmer than everything else, and measurably so.
+       * 다른 무엇보다 어둡게, 그리고 그 값은 재서 정했다.
        *
-       * The mint ground is the brightest diffuse colour in the palette and the
-       * decal faces the camera and the sun at once. At full environment
-       * intensity it cleared the bloom threshold across its whole area and came
-       * out as a featureless white oval — the artwork was drawn correctly and
-       * simply could not be seen. Verified by sampling the texture, which was
-       * fine, and then by dropping this.
+       * 라벨은 흰 종이고 카메라와 태양을 동시에 마주 본다. 환경 강도를 그대로 주면
+       * 타원 전체가 블룸 임계값을 넘어 하얗게 날아가서, 병에 구멍이 뚫린 것처럼 보인다.
+       * 브라우저에서 세 번 재봤다 — 0.75 는 날아가고, 0.35 는 흰 종이가 회색으로
+       * 보이고, 0.5 가 흰색으로 읽히면서 임계값 아래에 머문다.
        */
-      envIntensity: 0.35,
+      envIntensity: 0.5,
     });
 
     this.capBodyMaterial = retro.create({ color: CAP_COLOR });
