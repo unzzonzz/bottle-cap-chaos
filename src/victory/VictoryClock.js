@@ -24,7 +24,7 @@
  * Two to four of them, per the brief. A duration in seconds would land on a
  * different number of frames depending on the display, and at three frames that
  * is the difference between a flash and nothing at all — the same argument
- * `CardFx` makes for `smashInvertFrames`, and this clock is where it is spent:
+ * `CardFx` makes for `smashFlashFrames`, and this clock is where it is spent:
  * `update` is told how many frames are owed and counts them down itself.
  *
  * ── the skip lands on DONE, not on the end of a stage ───────────────────────

@@ -95,11 +95,31 @@ export const MENU_CONFIG = {
      * clear cider shows almost nothing of its own — the slosh included — so the
      * carbonation is what says there is liquid in there at all.
      */
-    nucleationSites: 12,
+    /**
+     * 12 였다. 탄산이 이 화면의 **모티프**가 되면서 더 필요해졌다.
+     *
+     * 아트 디렉션이 병과 물과 거품으로 바뀐 뒤, 거품은 "액체가 있다"를 말하는
+     * 디테일이 아니라 화면이 무엇에 관한 것인지를 말하는 것이 됐다. 사이트 수는
+     * **줄기의 수**이고 — `Fizz` 머리말의 1번 — 줄기가 적으면 흔들었을 때 솟는
+     * 것이 아니라 몇 방울이 오르는 것으로 보인다.
+     *
+     * 물리는 그대로다. 사이트가 늘어도 각 거품의 성장과 상승은 같은 식을 쓴다.
+     */
+    nucleationSites: 20,
     /** Radius at nucleation, world units. 0.09 is about nine tenths of a mm. */
     bubbleRadius: 0.09,
-    /** How much a bubble grows over one climb. 1.5 means it ends 2.5x bigger. */
-    bubbleGrowth: 1.5,
+    /**
+     * How much a bubble grows over one climb. 2.2 means it ends 3.2x bigger.
+     *
+     * 1.5 였다. 올렸는데, 이것은 밝기 조절이 아니라 물리량이라는 점이 중요하다 —
+     * 상승 속도가 반지름의 **제곱**이므로(`riseCoefficient` 주석) 더 크게 자라는
+     * 거품은 더 빨라지고, 그래서 줄기가 위로 갈수록 넓어지고 빨라진다. `Fizz`
+     * 머리말이 "탄산 한 잔에서 가장 알아보기 쉬운 것" 이라고 부른 그 모양이다.
+     *
+     * 3.2배는 화면에서 위쪽 거품이 유리 구슬로 읽히기 시작하는 지점이다 — 테와
+     * 정반사가 각각 한 픽셀을 넘는다. 그 아래로는 어떤 텍스처를 써도 밝은 점이다.
+     */
+    bubbleGrowth: 2.2,
     /**
      * The rise coefficient in v = K r^2.
      *
@@ -112,7 +132,7 @@ export const MENU_CONFIG = {
     /** How far the helical path instability swings the bubble off its site. */
     bubbleWobble: 0.42,
     /** Overall brightness of the bubbles. */
-    fizzStrength: 1.1,
+    fizzStrength: 1.25,
 
     // ── aiming at the camera ───────────────────────────────────────────────
     /** The lean it turns TO as the pressure builds. See `applyLean`. */

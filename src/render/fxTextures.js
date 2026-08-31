@@ -167,9 +167,14 @@ export function stunSheet(frames = 16, size = 96) {
 
   const { canvas: cv, ctx } = canvas(f * s, s);
   ctx.clearRect(0, 0, f * s, s);
-  // 한 바퀴가 아니라 45도만 돌면 된다. 별에 여덟 겹 대칭이 있으므로 그 이상은
-  // 같은 그림의 반복이고, 시트만 여덟 배로 길어진다.
-  for (let i = 0; i < f; i++) drawStar(ctx, i * s, 0, s, (i / f) * (Math.PI / 4));
+  /**
+   * 한 바퀴가 아니라 **90도**만 돌면 된다.
+   *
+   * 팔이 여덟이지만 긴 것과 짧은 것이 번갈아 나므로 대칭은 여덟 겹이 아니라 네
+   * 겹이다 — 90도를 돌아야 긴 팔이 긴 팔 자리에 온다. 45도로 잡았다가 시트가 한
+   * 바퀴 돌 때마다 긴 팔과 짧은 팔이 자리를 바꿔 툭 튀었다.
+   */
+  for (let i = 0; i < f; i++) drawStar(ctx, i * s, 0, s, (i / f) * (Math.PI / 2));
   return finish(key, cv);
 }
 
@@ -218,17 +223,28 @@ export function auraTexture(size = 192) {
 
   const { canvas: cv, ctx } = canvas(s, s);
   ctx.clearRect(0, 0, s, s);
+  /**
+   * 알파가 낮다. 이것은 **한 턴 내내** 뚜껑 밑에 깔려 있는 것이다.
+   *
+   * 처음에는 0.5 / 0.62 / 0.44 로 잡았는데 — 예전 하드 밴드와 비슷한 세기 —
+   * 부드러운 감쇠는 같은 알파에서 훨씬 넓은 면적을 덮으므로 실측하니 뚜껑 셋이
+   * 흰 후광에 거의 지워졌다. §0.4 는 효과가 도는 동안에도 무엇이 어디 있는지
+   * 읽혀야 한다고 요구한다.
+   *
+   * 링 사이의 **틈**이 여전히 요점이다. 틈이 있어야 눈이 형태를 계속 찾고, 그
+   * 틈에서 팔레트 순환이 보인다.
+   */
   const [outer, mid, inner] = PALETTE.fx.aura;
   radial(ctx, s, [
     [0, inner, 0],
-    [0.36, inner, 0],
-    [0.44, inner, 0.5],
-    [0.52, inner, 0],
-    [0.62, mid, 0],
-    [0.68, mid, 0.62],
-    [0.76, mid, 0],
-    [0.86, outer, 0],
-    [0.92, outer, 0.44],
+    [0.38, inner, 0],
+    [0.44, inner, 0.2],
+    [0.5, inner, 0],
+    [0.63, mid, 0],
+    [0.68, mid, 0.26],
+    [0.74, mid, 0],
+    [0.87, outer, 0],
+    [0.92, outer, 0.2],
     [1, outer, 0],
   ]);
   return finish(key, cv);

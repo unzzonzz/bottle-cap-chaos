@@ -130,8 +130,8 @@ export class CardFx {
     this.chaosCaps = [];
     /** Which caps are standing on a boosted shot. Empty when nobody is. */
     this.smashCaps = [];
-    /** Frames of inversion still owed. Counted DOWN in frames, not seconds. */
-    this._invertLeft = 0;
+    /** Frames of flash still owed. Counted DOWN in frames, not seconds. */
+    this._flashLeft = 0;
     /** Whether a smash burst was running last frame. The leading edge arms it. */
     this._wasSmashing = false;
     /** Frames of darkening still owed, and the same leading-edge latch. */
@@ -301,15 +301,31 @@ export class CardFx {
     this.frameQuad.renderOrder = 1001;
     this.screen.add(this.frameQuad);
 
-    // Last of all, over everything including the cards: an inversion that any
-    // part of the picture escaped would look like a rendering fault rather than
-    // like a flash.
-    this.invertMat = this.materials.createInvert();
-    this.invertQuad = new Mesh(QUAD, this.invertMat);
-    this.invertQuad.scale.set(this.frame.width, this.frame.height, 1);
-    this.invertQuad.visible = false;
-    this.invertQuad.renderOrder = 1002;
-    this.screen.add(this.invertQuad);
+    /**
+     * 강타의 섬광. 카드까지 포함해 모든 것 위에.
+     *
+     * 그림의 어느 부분이라도 빠지면 섬광이 아니라 렌더링 오류로 보이므로, 이것은
+     * 언제나 프레임 전체다.
+     *
+     * ── 색 반전에서 흰 섬광으로 ─────────────────────────────────────────────
+     * `createInvert` 였다 — `src * (1 - dst)`. 화면이 거의 검던 시절에는 훌륭했다:
+     * 어두운 판이 순간 밝아지니 번쩍인다.
+     *
+     * 지금 팔레트는 반대다. 나무판도 유리 카드도 하늘도 밝아서, 반전하면 화면이
+     * **어두워진다** — 번쩍임이 아니라 정전이다. 승리 화면의 충격 섬광이 같은
+     * 이유로 같은 수정을 받았고(`VictoryLayer.flash`), 이것이 그 나머지 절반이다.
+     *
+     * 흰 quad 는 어느 팔레트에서나 같은 방향으로 작동한다. 세기가 1 이 아닌 것은
+     * 완전히 흰 프레임이 판 위의 뚜껑을 지워 버리기 때문이다 — §0.4 는 효과가
+     * 도는 동안에도 무엇이 어디 있는지 읽혀야 한다고 요구한다.
+     */
+    this.flashMat = this.materials.create(flatTexture());
+    this.flashMat.uniforms.uTint.value.set(1, 1, 1);
+    this.flashQuad = new Mesh(QUAD, this.flashMat);
+    this.flashQuad.scale.set(this.frame.width, this.frame.height, 1);
+    this.flashQuad.visible = false;
+    this.flashQuad.renderOrder = 1002;
+    this.screen.add(this.flashQuad);
   }
 
   /**
@@ -807,7 +823,7 @@ export class CardFx {
       this.frameQuad.visible = false;
     }
 
-    // ── the 강타 inversion ──
+    // ── 강타의 섬광 ──
     // Counted in FRAMES, and armed once per burst rather than driven off `t`.
     // A time-based window would land on a different number of frames depending
     // on the frame rate, and at 1-2 frames that is the difference between a hit
@@ -816,14 +832,28 @@ export class CardFx {
     // The edge is a BOOLEAN transition, not an identity check on the burst.
     // `Match.cardFx` builds a fresh object every frame, so `burst !== lastBurst`
     // is true on every one of them — which re-armed the counter each frame and
-    // left the screen inverted for the whole effect instead of for two frames.
+    // left the flash up for the whole effect instead of for two frames.
     const smashing = burst?.cardId === 'smash';
     if (smashing && !this._wasSmashing) {
-      this._invertLeft = Math.max(0, Math.round(cfg.smashInvertFrames));
+      this._flashLeft = Math.max(0, Math.round(cfg.smashFlashFrames));
     }
     this._wasSmashing = smashing;
-    this.invertQuad.visible = this._invertLeft > 0;
-    if (this._invertLeft > 0) this._invertLeft--;
+
+    /**
+     * 남은 프레임 수에 비례해 옅어진다.
+     *
+     * 세 장이 같은 세기면 섬광이 툭 끊긴다. 옅어지면 짧은 잔상이 되어, 뒤이어
+     * 열리는 링과 오라로 이어진다.
+     */
+    const owed = this._flashLeft;
+    this.flashQuad.visible = owed > 0;
+    if (owed > 0) {
+      const total = Math.max(1, Math.round(cfg.smashFlashFrames));
+      const k = owed / total;
+      this.flashMat.uniforms.uOpacity.value =
+        Math.max(0, Math.min(1, cfg.smashFlashStrength)) * k;
+      this._flashLeft--;
+    }
   }
 
   // ── what the caps do about it ────────────────────────────────────────────

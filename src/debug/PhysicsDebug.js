@@ -1342,7 +1342,8 @@ export function bootPhysicsDebug({
   // Its own folder because it has two halves that are judged separately: the
   // half-second the card lands in, and the whole turn it then sits there for.
   const smashLook = fxLook.addFolder('강타');
-  smashLook.add(config.cardFx, 'smashInvertFrames', 0, 6, 1).name('반전 플래시 (프레임)');
+  smashLook.add(config.cardFx, 'smashFlashFrames', 0, 6, 1).name('섬광 (프레임)');
+  smashLook.add(config.cardFx, 'smashFlashStrength', 0, 1, 0.01).name('섬광 세기');
   smashLook.add(config.cardFx, 'smashRingStart', 1, 8, 0.1).name('링 시작 크기 (배)');
   smashLook.add(config.cardFx, 'smashRingFraction', 0.1, 1, 0.02).name('링 수축 속도 (연출 비율)');
   smashLook.add(config.cardFx, 'smashRingSteps', 2, 20, 1).name('링 수축 단계 수');

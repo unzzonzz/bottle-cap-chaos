@@ -1063,9 +1063,9 @@ export const CONFIG = {
      * is the look. Raise it and the star starts to turn smoothly, which is both
      * more work and less period-correct.
      */
-    stunFrames: 8,
+    stunFrames: 16,
     /** Texels per frame of that sheet. */
-    stunTexels: 24,
+    stunTexels: 96,
     /**
      * World-unit size of the drawn sprite.
      *
@@ -1089,7 +1089,7 @@ export const CONFIG = {
 
     // ── swap and one-more ────────────────────────────────────────────────
     /** Texels of the ring and flash sprites. */
-    ringTexels: 32,
+    ringTexels: 192,
     /** World-unit size of them, and how far above the pitch they sit. */
     ringSize: 5.5,
     ringHeight: 0.9,
@@ -1110,7 +1110,14 @@ export const CONFIG = {
      * eye resolves it and reads as an impact rather than as a transition. Three
      * or more and it starts to look like a strobe.
      */
-    smashInvertFrames: 2,
+    smashFlashFrames: 2,
+    /**
+     * 섬광의 세기. 1 이면 완전한 흰 프레임이다.
+     *
+     * 그 아래인 이유는 §0.4 다 — 효과가 도는 동안에도 뚜껑이 어디 있는지 읽혀야
+     * 한다. 0.68 이면 아래가 비치면서도 충분히 아프다.
+     */
+    smashFlashStrength: 0.5,
     /**
      * How long the condensing ring takes to close, as a fraction of the effect.
      *
@@ -1144,9 +1151,9 @@ export const CONFIG = {
     /** Height of the swept band, in frame pixels. */
     scanHeight: 40,
     /** Texels down that band. Few: it is a stepped tail, not a gradient. */
-    scanTexels: 32,
+    scanTexels: 128,
     /** Samples per dash cycle on the trajectory line. */
-    dashLength: 16,
+    dashLength: 64,
     /** How fast the dashes march, in samples per second. Stepped. */
     dashSamplesPerSecond: 14,
 
@@ -1164,7 +1171,7 @@ export const CONFIG = {
      * nobody at 640x480 will ever resolve, and the sprite starts to look
      * photographed rather than drawn.
      */
-    sealLockTexels: 16,
+    sealLockTexels: 96,
     /**
      * How the padlock ARRIVES on the sealed player's hand.
      *
@@ -1190,7 +1197,7 @@ export const CONFIG = {
      * The mirror of 강타's inversion, and drawn with the same kind of
      * arithmetic: `dst - src`, which is one of the four semi-transparency modes
      * the hardware actually had. Counted in FRAMES rather than seconds for the
-     * reason given on `smashInvertFrames` — at this length the frame rate would
+     * reason given on `smashFlashFrames` — at this length the frame rate would
      * otherwise decide whether it happens at all.
      */
     sealDarkenFrames: 2,
@@ -2046,7 +2053,7 @@ export const CONFIG = {
     /**
      * 3. The hit, in FRAMES.
      *
-     * Frames and not seconds, for the same reason `cardFx.smashInvertFrames` is:
+     * Frames and not seconds, for the same reason `cardFx.smashFlashFrames` is:
      * the colour inversion is a whole-frame blend operation and at three frames
      * the difference between counting time and counting frames is the difference
      * between a flash and nothing at all. See `FxMaterials.createInvert`.

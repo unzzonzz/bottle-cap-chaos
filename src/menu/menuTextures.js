@@ -44,12 +44,12 @@ function makeCanvas(w, h) {
  * 쿼드에 붙으므로 축소되는 일이 없고, 밉맵은 만들 이유가 없는 메모리다.
  * 확대는 일어난다 — 그래서 mag 가 nearest 면 안 된다.
  */
-function toTexture(canvas, { wrapS = ClampToEdgeWrapping, wrapT = ClampToEdgeWrapping } = {}) {
+function toTexture(canvas, { wrapS = ClampToEdgeWrapping, wrapT = ClampToEdgeWrapping, mips = false } = {}) {
   const tex = new CanvasTexture(canvas);
   tex.colorSpace = SRGBColorSpace;
   tex.magFilter = LinearFilter;
-  tex.minFilter = LinearFilter;
-  tex.generateMipmaps = false;
+  tex.minFilter = mips ? LinearMipmapLinearFilter : LinearFilter;
+  tex.generateMipmaps = mips;
   tex.wrapS = wrapS;
   tex.wrapT = wrapT;
   tex.anisotropy = 1;
@@ -309,11 +309,24 @@ export function floorPoolTexture() {
  * because on a disc that is what "follows the curvature" means. Nothing here is
  * anyone's trademark: a red cap with white type on it is the whole of it.
  */
-export function capLogoTexture() {
+export function capLogoTexture(texels = 512) {
+  /**
+   * 좌표는 128 기준으로 저술되고, 캔버스에 배율을 건다.
+   *
+   * ── 왜 512 로 굽나 ──────────────────────────────────────────────────────
+   * 이 그림은 이 프로젝트에서 유일하게 말도 안 되게 확대되는 텍스처다. 캡 와이프의
+   * 덮인 프레임에서 뚜껑 윗면이 화면을 채우므로 800 프레임 픽셀쯤 된다. 128 텍셀로
+   * 구우면 6배 확대이고, 실제로 화면에 계단진 글자가 그대로 보였다.
+   *
+   * 저술 좌표를 512 로 옮기지 않고 배율을 거는 이유는 위의 설계 근거 때문이다 —
+   * "읽혀야 하는 것은 128 텍셀 중 102x77 안에 있다" 는 계산이 이 함수의 모든
+   * 숫자에 걸려 있고, 그 관계는 텍셀 수와 무관하게 유지되어야 한다.
+   */
   const size = 128;
+  const scale = Math.max(1, Math.round(texels / size));
   const c = size / 2;
-  const { canvas, ctx } = makeCanvas(size, size);
-  const scratch = makeCanvas(size, size);
+  const { canvas, ctx } = makeCanvas(size * scale, size * scale);
+  ctx.scale(scale, scale);
 
   // The corners are never sampled — the panel is the inscribed circle — but
   // filling them costs nothing and means a rounding error at the rim cannot
@@ -321,33 +334,37 @@ export function capLogoTexture() {
   ctx.fillStyle = PALETTE.menu.labelRed;
   ctx.fillRect(0, 0, size, size);
 
+  /**
+   * 테두리 원. 실제 호를 그린다.
+   *
+   * ── 사각형을 360번 찍던 것에서 ────────────────────────────────────────────
+   * 예전에는 원 위를 360 스텝으로 걸으며 정수 좌표에 사각형을 찍었고, 바로 아래
+   * `arc` 헬퍼의 주석이 이유를 적어 두었다: "`ctx.arc` 를 스트로크하면 끝이
+   * 안티에일리어스된다". 그 파이프라인에서는 안티에일리어스가 먼지가 됐다.
+   *
+   * 지금은 반대다. 512 텍셀로 구우면 정수 좌표에 찍은 사각형이 4x4 블록이 되고,
+   * 블록 사이에 틈이 벌어져 원이 점선이 된다. 진짜 호는 어느 배율에서나 원이다.
+   */
   const ring = (radius, thickness, color) => {
-    ctx.fillStyle = color;
-    const steps = 360;
-    for (let i = 0; i < steps; i++) {
-      const a = (i / steps) * Math.PI * 2;
-      ctx.fillRect(
-        Math.round(c + Math.cos(a) * radius),
-        Math.round(c + Math.sin(a) * radius),
-        thickness,
-        thickness,
-      );
-    }
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = thickness;
+    ctx.beginPath();
+    ctx.arc(c, c, radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
   };
 
-  /** Hard-pixel arc. `ctx.arc` with a stroke would antialias the ends. */
+  /** 호 한 토막. 각도는 도. 위와 같은 이유로 진짜 호다. */
   const arc = (radius, thickness, fromDeg, toDeg, color) => {
-    ctx.fillStyle = color;
-    const steps = 220;
-    for (let i = 0; i <= steps; i++) {
-      const a = ((fromDeg + (toDeg - fromDeg) * (i / steps)) * Math.PI) / 180;
-      ctx.fillRect(
-        Math.round(c + Math.cos(a) * radius),
-        Math.round(c + Math.sin(a) * radius),
-        thickness,
-        thickness,
-      );
-    }
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = thickness;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(c, c, radius, (fromDeg * Math.PI) / 180, (toDeg * Math.PI) / 180);
+    ctx.stroke();
+    ctx.restore();
   };
 
   // Rim. Outside the covering frame's crop and invisible there — this is the
@@ -387,7 +404,12 @@ export function capLogoTexture() {
     slant: 0.22,
   });
 
-  return toTexture(canvas);
+  /**
+   * 밉맵을 켠다. 이 그림은 축소와 확대를 **둘 다** 겪는 유일한 텍스처다 — 캡
+   * 와이프에서는 800 픽셀로 커지고, 병 위에서는 열두 픽셀짜리 점이 된다. 밉이
+   * 없으면 후자에서 텍셀 행이 통째로 버려진다(`core/textures.js` 머리말).
+   */
+  return toTexture(canvas, { mips: true });
 }
 
 /**
@@ -438,90 +460,172 @@ export function foamTexture() {
 }
 
 /**
- * One bubble, as a sprite.
+ * 거품 하나. 가산 블렌드로 액체 위에 올라간다.
  *
- * A bubble in a dark drink is not a white dot. It is a lens: the light that
- * reaches your eye comes round the EDGE of it, so what you see is a bright ring
- * with a dimmer middle, plus one hard glint where the key light reflects off
- * the top of the sphere. Painting it as a filled disc is what makes CG fizz
- * look like grains of rice.
+ * ── 세 겹 원반에서 유리 구슬로 ──────────────────────────────────────────────
+ * 예전 것은 16 텍셀에 채워진 원 셋(테 · 중간 · 코어)과 2x2 정사각형 반짝이였다.
+ * 가산 블렌드에서 채워진 원은 **덩어리**로 더해지므로, 화면에서는 구슬이 아니라
+ * 밝은 점이었다.
  *
- * Sixteen texels, because the thing is two to seven pixels across on screen and
- * anything more detailed than this is a decision the framebuffer will not
- * record. Added, so the black surround contributes nothing.
+ * 진짜 거품에서 보이는 것은 몸통이 아니라 **가장자리**다. 액체와 기체의 경계에서
+ * 빛이 크게 꺾이므로 테두리가 밝고 가운데는 거의 그냥 뒤가 비친다. 가산으로 그리면
+ * 그 사실이 그대로 옮겨진다 — 테는 더하고 가운데는 아무것도 더하지 않는다.
+ *
+ * 여기 얹는 세 가지:
+ *   테        얇고 밝다. 이것 하나가 "구"라고 말한다.
+ *   정반사    왼쪽 위, 작고 뜨겁다. 장면의 키 라이트와 같은 방향.
+ *   되비침    오른쪽 아래, 넓고 어둡다. 액체에서 되올라온 빛이라 테보다 약하다.
+ *
+ * 셋의 관계가 Frutiger Aero 의 물방울 그 자체다. 하나라도 빠지면 원이 되고, 넷이
+ * 되면 유리구슬 렌더가 된다 — 여기 크기에서는 후자가 그냥 지저분해진다.
+ *
+ * 64 텍셀인 것은 화면에서 거품이 커야 20 픽셀쯤 되기 때문이다. 밉맵이 있으므로
+ * 작을 때 손해가 없고, 큰 거품이 계단지지 않는다.
  */
 export function bubbleTexture() {
-  const size = 16;
+  const size = 64;
   const { canvas, ctx } = makeCanvas(size, size);
   ctx.fillStyle = PALETTE.additiveZero;
   ctx.fillRect(0, 0, size, size);
 
   const c = size / 2;
-  // The rim, then the middle knocked back out of it.
-  ctx.fillStyle = PALETTE.additive.bubble.rim;
+  const r = size * 0.44;
+  const B = PALETTE.additive.bubble;
+
+  // 되비침. 가장 먼저, 가장 넓게, 가장 약하게. 오른쪽 아래에서 올라온다.
+  const bounce = ctx.createRadialGradient(
+    c + r * 0.3, c + r * 0.34, 0,
+    c + r * 0.3, c + r * 0.34, r * 0.72,
+  );
+  bounce.addColorStop(0, withAlpha(B.rim, 0.3));
+  bounce.addColorStop(0.5, withAlpha(B.mid, 0.12));
+  bounce.addColorStop(1, withAlpha(B.core, 0));
+  ctx.fillStyle = bounce;
   ctx.beginPath();
-  ctx.arc(c, c, 6.4, 0, Math.PI * 2);
+  ctx.arc(c, c, r, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = PALETTE.additive.bubble.mid;
-  ctx.beginPath();
-  ctx.arc(c, c, 4.2, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = PALETTE.additive.bubble.core;
-  ctx.beginPath();
-  ctx.arc(c, c, 2.6, 0, Math.PI * 2);
-  ctx.fill();
-  // The glint, up and to the left, matching the scene's key.
-  ctx.fillStyle = PALETTE.additive.bubble.glint;
-  ctx.fillRect(c - 3, c - 4, 2, 2);
+
+  /**
+   * 테. 안쪽 가장자리에서 시작해 바깥으로 빠르게 사라진다.
+   *
+   * 정지점 사이가 좁은 것이 요점이다 — 넓으면 테가 아니라 후광이 되고, 후광은
+   * 거품이 아니라 빛나는 점이다.
+   */
+  const rim = ctx.createRadialGradient(c, c, r * 0.6, c, c, r);
+  rim.addColorStop(0, withAlpha(B.rim, 0));
+  rim.addColorStop(0.62, withAlpha(B.mid, 0.22));
+  rim.addColorStop(0.86, withAlpha(B.rim, 0.92));
+  rim.addColorStop(1, withAlpha(B.rim, 0));
+  ctx.fillStyle = rim;
+  ctx.fillRect(0, 0, size, size);
+
+  // 정반사. 왼쪽 위. 작고 뜨겁다.
+  const gx = c - r * 0.34;
+  const gy = c - r * 0.38;
+  const glint = ctx.createRadialGradient(gx, gy, 0, gx, gy, r * 0.3);
+  glint.addColorStop(0, withAlpha(B.glint, 1));
+  glint.addColorStop(0.4, withAlpha(B.glint, 0.5));
+  glint.addColorStop(1, withAlpha(B.glint, 0));
+  ctx.fillStyle = glint;
+  ctx.fillRect(0, 0, size, size);
 
   return toTexture(canvas);
 }
 
 /**
- * The burst at the mouth. Two frames side by side in one 128x64 page.
+ * 입구에서 터지는 것. 128x64 한 장에 두 프레임.
  *
- * Two frames is the whole animation: a tight star, then a wider ragged ring.
- * The brief allows "저해상도 스프라이트 1~2프레임" and rules out a particle
- * system, and there is nothing a hundred quads would say here that these two do
- * not — the fizz is over in a tenth of a second.
+ * ── 각진 삼각 가시에서 뿜어지는 빛으로 ─────────────────────────────────────
+ * 예전 것은 하드 엣지 삼각형 여섯 개와 아홉 개, 그리고 채워진 원이었다. 브리프가
+ * "저해상도 스프라이트 1~2프레임" 을 허용하고 파티클 시스템을 배제한 것이 근거였고,
+ * 프레임 수는 여전히 옳다 — 이 일은 10분의 1초 만에 끝난다.
+ *
+ * 각진 것이 틀렸다. 탄산이 터지는 것은 **액체와 빛**이지 파편이 아니다. 같은 두
+ * 프레임을 부드러운 방사 스프레이로 다시 그린다: 뜨거운 심, 거기서 뻗는 가는
+ * 빛줄기, 그리고 함께 튀어 오르는 작은 방울들.
+ *
+ * 방울이 요점이다. 빛만 있으면 폭발이고, 방울이 섞여야 **탄산**이다 — 병에서
+ * 올라오던 거품과 같은 것이 한꺼번에 터져 나온 것으로 읽힌다.
  */
 export function burstSheet() {
   const { canvas, ctx } = makeCanvas(128, 64);
   ctx.clearRect(0, 0, 128, 64);
+  const B = PALETTE.additive.burst;
 
-  /** Radial spikes, hard-edged, drawn as triangles. */
-  const spikes = (cx, cy, count, r0, r1, width, color, phase) => {
-    ctx.fillStyle = color;
+  /** 가운데에서 뻗는 빛줄기. 끝으로 갈수록 얇아지고 사라진다. */
+  const rays = (cx, cy, count, r0, r1, width, colour, phase) => {
     for (let i = 0; i < count; i++) {
       const a = phase + (i / count) * Math.PI * 2;
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate(a);
+      const g = ctx.createLinearGradient(r0, 0, r1, 0);
+      g.addColorStop(0, withAlpha(colour, 0.85));
+      g.addColorStop(0.45, withAlpha(colour, 0.4));
+      g.addColorStop(1, withAlpha(colour, 0));
+      ctx.fillStyle = g;
       ctx.beginPath();
       ctx.moveTo(r0, -width);
-      ctx.lineTo(r1, 0);
-      ctx.lineTo(r0, width);
+      ctx.quadraticCurveTo((r0 + r1) / 2, -width * 0.3, r1, 0);
+      ctx.quadraticCurveTo((r0 + r1) / 2, width * 0.3, r0, width);
       ctx.closePath();
       ctx.fill();
       ctx.restore();
     }
   };
 
-  // Frame 0: the pop.
-  spikes(32, 32, 6, 4, 26, 5, PALETTE.additive.burst.popWide, 0);
-  spikes(32, 32, 6, 3, 15, 4, PALETTE.additive.burst.popTight, Math.PI / 6);
-  ctx.fillStyle = PALETTE.additive.burst.popCore;
-  ctx.beginPath();
-  ctx.arc(32, 32, 7, 0, Math.PI * 2);
-  ctx.fill();
+  /** 뜨거운 심. 빛줄기가 여기서 나오는 것으로 보여야 한다. */
+  const core = (cx, cy, r, colour) => {
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    g.addColorStop(0, withAlpha(colour, 1));
+    g.addColorStop(0.35, withAlpha(colour, 0.62));
+    g.addColorStop(1, withAlpha(colour, 0));
+    ctx.fillStyle = g;
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+  };
 
-  // Frame 1: the spray, wider and already breaking up.
-  spikes(96, 32, 9, 10, 30, 3, PALETTE.additive.burst.sprayWide, 0.2);
-  spikes(96, 32, 5, 6, 20, 3, PALETTE.additive.burst.sprayTight, 0.9);
-  ctx.fillStyle = PALETTE.additive.burst.sprayCore;
-  ctx.beginPath();
-  ctx.arc(96, 32, 4, 0, Math.PI * 2);
-  ctx.fill();
+  /**
+   * 튀어 오른 방울들.
+   *
+   * ── 속이 빈 테로 그렸다가 되돌렸다 ────────────────────────────────────────
+   * 병 안의 거품과 같은 것이니 같은 방식(테 + 정반사 + 빈 가운데)으로 그렸는데,
+   * 반지름이 2~3 텍셀이라 테가 테로 읽히지 않았다 — 작은 "o" 자국이 흩어진 것처럼
+   * 보였고, 그건 방울이 아니라 지저분함이다.
+   *
+   * 이 크기에서는 **채운다**. 날아가는 방울은 어차피 흐려지고, 눈이 찾는 것은 형태가
+   * 아니라 반짝임이다. 크기도 키웠다: 3 텍셀짜리 방울은 어떤 방식으로 그려도 점이다.
+   */
+  const drops = (cx, cy, list, colour) => {
+    for (const [dx, dy, dr] of list) {
+      const x = cx + dx;
+      const y = cy + dy;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, dr);
+      g.addColorStop(0, withAlpha(PALETTE.additive.bubble.glint, 0.95));
+      g.addColorStop(0.42, withAlpha(colour, 0.6));
+      g.addColorStop(1, withAlpha(colour, 0));
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(x, y, dr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  };
+
+  // 프레임 0: 터지는 순간. 심이 밝고 줄기는 아직 짧다.
+  core(32, 32, 13, B.popCore);
+  rays(32, 32, 7, 5, 27, 4.5, B.popWide, 0);
+  rays(32, 32, 5, 4, 17, 3, B.popTight, Math.PI / 6);
+  drops(32, 32, [[-14, -10, 5.5], [12, -13, 4.6], [5, 15, 4], [-9, 13, 3.4]], B.popWide);
+
+  // 프레임 1: 흩어지는 순간. 심은 식고 줄기는 길고 가늘어졌으며 방울이 멀리 갔다.
+  core(96, 32, 7, B.sprayCore);
+  rays(96, 32, 10, 10, 31, 2.6, B.sprayWide, 0.2);
+  rays(96, 32, 6, 7, 22, 2, B.sprayTight, 0.9);
+  drops(
+    96,
+    32,
+    [[-21, -15, 4.4], [18, -18, 3.8], [8, 22, 3.4], [-15, 19, 3], [25, 7, 2.6]],
+    B.sprayWide,
+  );
 
   return toTexture(canvas);
 }
