@@ -1241,6 +1241,10 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
 
     items.update(dt, current === 'menu' ? 1 : 0);
     settings?.update(dt);
+    // 마크 목록도 호버가 움직인다. 예전에는 `update` 가 빈 함수라 부를 이유가 없었다.
+    if (current === 'marks') marks?.update(dt);
+    // 모달의 등장. `render()` 에는 dt 가 없으므로 여기서 민다.
+    modal.update(dt);
     online?.update(dt);
     if (current === 'opponent') opponent?.update(dt);
     // The view mode's inertia lives here; nothing else in the editor moves.

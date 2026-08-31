@@ -1,4 +1,5 @@
 import { PALETTE, withAlpha } from '../core/palette.js';
+import { MOTION } from '../core/tokens.js';
 
 /**
  * The palette, pushed into CSS custom properties.
@@ -51,6 +52,13 @@ export function applyCssPalette(root = document.documentElement) {
   // Leaving a match for the menu. Fades to the UI's own surface, not to black —
   // the menu's first frame is a bright page and this is the seam into it.
   set('--bcc-fade', PALETTE.ui.surface);
+  /**
+   * 그 페이드의 길이. `MOTION.screen` 은 왕복이므로 절반이 한 방향이다.
+   *
+   * 숫자가 세 곳(`pageFade.js`, `styles.css`, 토큰)에 적혀 있었다. 스타일시트는
+   * 모듈을 읽지 못하므로 이 함수가 다리를 놓는다 — 이제 고칠 곳은 토큰 하나다.
+   */
+  set('--bcc-fade-ms', `${(MOTION.screen / 2) * 1000}ms`);
 
   // ── developer overlays ─────────────────────────────────────────────────────
   // `?debug=1` only. Kept in the palette anyway: a metrics panel that does not

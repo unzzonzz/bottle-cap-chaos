@@ -2,7 +2,8 @@ import { Group, Mesh, PlaneGeometry, Raycaster, Vector2 } from 'three';
 import { createSpriteMaterial } from './menuMaterials.js';
 import { menuPlateTexture, titleTexture } from './menuTextures.js';
 import { FRAME } from '../core/frame.js';
-import { SPACE } from '../core/tokens.js';
+import { MOTION, SPACE } from '../core/tokens.js';
+import { approach, easeOut } from '../ui/motion.js';
 
 /**
  * The four items, as flat plates standing in the scene.
@@ -212,15 +213,28 @@ export class MenuItems {
    */
   update(dt, fade = 1) {
     const t = this.tuning;
+    const u = this._unitsPerPixel ?? 1;
     for (const item of this.items) {
-      // Eased rather than snapped, so the step forward reads as the plate
-      // answering the pointer rather than as it teleporting.
-      const want = item.hovered ? 1 : 0;
-      const rate = dt / 0.09;
-      item.shift += Math.max(-rate, Math.min(rate, want - item.shift));
+      /**
+       * ── 호버는 앞으로 나오고, 동시에 조금 커진다 ─────────────────────────
+       * 앞으로 나오는 것만 있었다. 카메라가 거의 정면이라 z 로 나오는 것은 화면에서
+       * 거의 안 보이고, 남는 것은 x 로 밀리는 것뿐이었다 — 판이 오른쪽으로 조금
+       * 미끄러진다는 뜻이고, "닿았다" 보다는 "밀렸다" 로 읽힌다.
+       *
+       * 배율이 그 일을 대신한다. 화면의 어느 축에서 보든 커지는 것은 커지는 것이다.
+       * 밀림은 남겨 둔다 — 둘이 함께 있어야 판이 열에서 **떼어져** 앞으로 나온
+       * 것으로 보이고, 그게 Wii 의 메뉴가 하는 일이다.
+       *
+       * 진행도는 선형으로 두고 읽을 때 곡선을 씌운다. `motion.approach` 의 주석에
+       * 왜 그 순서여야 하는지 적혀 있다.
+       */
+      item.shift = approach(item.shift, item.hovered ? 1 : 0, dt, MOTION.hover);
+      const k = easeOut(item.shift);
 
-      const push = item.shift * t.hoverShift;
+      const push = k * t.hoverShift;
       item.mesh.position.set(item.home.x + push, item.home.y, push * 1.4);
+      const grow = 1 + k * 0.045;
+      item.mesh.scale.set(t.plateWidth * u * grow, t.plateHeight * u * grow, 1);
       item.material.uniforms.uOpacity.value = fade;
     }
     this.title.material.uniforms.uOpacity.value = fade;

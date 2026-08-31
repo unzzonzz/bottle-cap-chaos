@@ -1,6 +1,7 @@
 import { Mesh, PlaneGeometry, Raycaster, Scene, Vector2 } from 'three';
 import { FRAME, frameCamera, refitFrameCamera } from '../core/frame.js';
 import { CARD_ASPECT, cardScale, handExposure } from '../render/CardHand.js';
+import { controlScale, controlState, easeInOut, stepControl } from './motion.js';
 import { MATCH_STATE } from '../game/Match.js';
 import { scoreboardFor } from '../game/modes.js';
 import { PLAYER_COLORS } from '../render/playerColors.js';
@@ -292,6 +293,8 @@ export class HudLayer {
     this.hovered = null;
     /** Which control the press went down on. Released over it = a click. */
     this._pressed = null;
+    /** 컨트롤별 호버/프레스 진행도. `motion.js` 가 민다. */
+    this._motion = {};
 
     /** 0 hidden, 1 shown. Eased; see `update`. */
     this._scoreShown = 0;
@@ -618,7 +621,7 @@ export class HudLayer {
     this._updateTurn(match, labelFor, nameFor, outcomeFor);
     this._updateTimer(turnClock);
     this._updateNote(match);
-    this._updateButtons();
+    this._updateButtons(dt);
 
     /**
      * Last, over the top of whatever each updater decided for itself.
@@ -719,9 +722,15 @@ export class HudLayer {
     this.score.userData.base = shown;
     this.score.userData.want = shown > 0.004;
 
-    // 아래 줄은 점수판이 나타나는 만큼 내려간다. `_rowTwoUp`/`_rowTwoDown` 의
-    // 주석에 왜 자리를 비워 두지 않고 미끄러지게 했는지 적혀 있다.
-    this._applyRowTwo(shown);
+    /**
+     * 아래 줄은 점수판이 나타나는 만큼 내려간다. `_rowTwoUp`/`_rowTwoDown` 의
+     * 주석에 왜 자리를 비워 두지 않고 미끄러지게 했는지 적혀 있다.
+     *
+     * 곡선이 페이드와 다르다. 페이드는 `smoothstep` 이고 — 불투명도는 양 끝에서
+     * 천천히 시작하고 끝나면 된다 — 위치는 `MOTION.easeInOut` 이다. 두 지점 사이를
+     * 움직여 **멈추는** 것이라 감속이 눈에 보여야 하고, 그게 이 곡선이 하는 일이다.
+     */
+    this._applyRowTwo(easeInOut(this._scoreShown));
   }
 
   /** 아래 줄(턴 플레이트, 두 컨트롤, 시계, 알림)을 `shown` 위치에 놓는다. */
@@ -886,7 +895,7 @@ export class HudLayer {
    * opacity exists. Hover brings it back to full and swaps in the brighter
    * plate.
    */
-  _updateButtons() {
+  _updateButtons(dt) {
     this.exit.userData.want = true;
     this.recenter.userData.want = true;
     const ui = this.config.ui;
@@ -913,7 +922,28 @@ export class HudLayer {
       h.plate.userData.base = base;
     }
 
-    const key = `${this.hovered ?? '-'}|${ui.textureScale}`;
+    /**
+     * ── 두 아이콘 버튼의 움직임 ─────────────────────────────────────────────
+     * 텍스처 교체만 있었다. 포인터가 닿으면 그림이 **순간이동**하듯 바뀌고,
+     * 누르면 아무 일도 일어나지 않았다 — 눌린 것을 알려 주는 것은 그 뒤에 일어나는
+     * 일(카메라가 돌아온다, 화면이 어두워진다)뿐이었다.
+     *
+     * `motion.js` 의 배율 한 줄을 얹는다. 닿으면 커지고 누르면 원래보다 작아진다.
+     * 판 크기(`this._icon`)에 곱하는 것이라 히트 쿼드는 건드리지 않는다 — 커진
+     * 버튼을 겨냥해 놓쳤다가 원래 크기로 돌아온 자리에 눌리는 일이 없어야 한다.
+     */
+    const size = this._icon ?? SIZE.buttonIcon.w;
+    for (const b of [
+      { mesh: this.exit, id: 'exit' },
+      { mesh: this.recenter, id: 'recenter' },
+    ]) {
+      const st = (this._motion[b.id] ??= controlState());
+      stepControl(st, { hovered: this.hovered === b.id, pressed: this._pressed === b.id }, dt);
+      const k = controlScale(st);
+      b.mesh.scale.set(size * k, size * k, 1);
+    }
+
+    const key = `${this.hovered ?? '-'}|${ui.textureScale}|${size}`;
     if (key === this._buttonKey) return;
     this._buttonKey = key;
     this.exit.material.uniforms.uMap.value = iconButtonTexture(

@@ -2050,6 +2050,8 @@ async function boot(canvas) {
     // plates every frame — so it must run on the far side of the clear rather
     // than a frame behind it, holding a texture that has just been disposed.
     victory.update(dt);
+    // 모달의 등장. `render()` 에는 dt 가 없으므로 여기서 민다.
+    modal.update(dt);
     // Cards are usable only while a shot is: not while the turn is being played
     // out, not during a goal hold, not while an effect is on screen, not once
     // the match is over.

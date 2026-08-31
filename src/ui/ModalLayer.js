@@ -3,7 +3,8 @@ import { FRAME as SHARED_FRAME, frameCamera, frameScale, refitFrameCamera } from
 import { HudMaterials } from './HudMaterial.js';
 import { buttonTexture, modalTexture, slotTexture } from './hudTextures.js';
 import { PALETTE, toRgb } from '../core/palette.js';
-import { SIZE, SPACE, TYPE } from '../core/tokens.js';
+import { MOTION, SIZE, SPACE, TYPE } from '../core/tokens.js';
+import { approach, easeOut, overshoot } from './motion.js';
 import { FONT_FAMILY } from './fonts.js';
 
 /**
@@ -62,6 +63,8 @@ const BUTTON_GAP = SPACE.sm;
 /** Between the field and the button row. */
 const BUTTON_DROP = SPACE.sm;
 const FIELD_HEIGHT = SIZE.buttonSecondary.h;
+/** 가림막의 최종 불투명도. 등장 동안 0 에서 여기까지 짙어진다. */
+const VEIL_ALPHA = 0.52;
 
 export class ModalLayer {
   /**
@@ -100,7 +103,7 @@ export class ModalLayer {
      * 검정이 없기 때문이고(팔레트 감사 규칙 1), 색이 있는 막은 유리 아래에 물이
      * 있는 것처럼 보이기 때문이다.
      */
-    this.veil = new Mesh(this._quad, this.materials.createSolid(0.52));
+    this.veil = new Mesh(this._quad, this.materials.createSolid(VEIL_ALPHA));
     // `toRgb` 는 0..255 를 준다. 셰이더는 0..1 이다.
     const veilRgb = toRgb(PALETTE.accent.skyDeep).map((c) => c / 255);
     this.veil.material.uniforms.uTint.value.set(veilRgb[0], veilRgb[1], veilRgb[2]);
@@ -219,6 +222,8 @@ export class ModalLayer {
     this.hovered = null;
     this._error = '';
     this._recheck(spec.field ? (spec.field.initial ?? '') : '');
+    // 등장 진행도. 0 에서 시작해 `update` 가 민다.
+    this._enter = 0;
     this._layout();
     if (spec.field) this._mountInput(spec.field);
     this._attach();
@@ -302,6 +307,8 @@ export class ModalLayer {
     });
     const panelH = tex.userData?.height ?? 80;
     this.panel.material.uniforms.uMap.value = tex;
+    this._panelW = PANEL_WIDTH;
+    this._panelH = panelH;
     this.panel.scale.set(PANEL_WIDTH, panelH, 1);
     this.panel.position.set(0, 0, 0);
 
@@ -599,6 +606,32 @@ export class ModalLayer {
     // input does, because it is positioned in CSS pixels off the canvas rect.
     refitFrameCamera(this.camera);
     if (this._input) this._placeInput();
+  }
+
+  /**
+   * 등장. 판이 살짝 작은 데서 올라오고 가림막이 함께 짙어진다.
+   *
+   * ── 왜 등장이 필요한가 ────────────────────────────────────────────────────
+   * 예전에는 즉시였다. 모달은 화면에서 가장 갑작스러운 것이고 — 뒤의 모든 것을
+   * 막는다 — 갑작스러운 것이 갑자기 나타나면 무엇이 일어났는지 읽을 시간이 없다.
+   * 0.24초(`MOTION.panel`) 짜리 오버슛 하나면 눈이 판을 따라가고, 따라간 눈은
+   * 이미 판 위에 있다.
+   *
+   * 사라지는 것에는 대칭이 없다. 모달이 닫히는 것은 답을 골랐다는 뜻이고, 답을
+   * 고른 뒤에 화면이 0.24초 더 붙잡고 있으면 그건 응답이 느린 것으로 느껴진다.
+   */
+  update(dt) {
+    if (!this.open) return;
+    const before = this._enter ?? 1;
+    this._enter = approach(before, 1, dt, MOTION.panel);
+    if (before === this._enter) return;
+
+    const k = overshoot(this._enter);
+    this.panel.scale.set(this._panelW * k, this._panelH * k, 1);
+    for (const b of this.buttons) b.mesh.material.uniforms.uOpacity.value = k;
+    this.field.material.uniforms.uOpacity.value = k;
+    this.panel.material.uniforms.uOpacity.value = k;
+    this.veil.material.uniforms.uOpacity.value = VEIL_ALPHA * easeOut(this._enter);
   }
 
   render(renderer) {

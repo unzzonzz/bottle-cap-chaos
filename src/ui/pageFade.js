@@ -1,3 +1,5 @@
+import { MOTION } from '../core/tokens.js';
+
 /**
  * The black fade, shared by every way OUT of somewhere.
  *
@@ -57,8 +59,15 @@
  * finished fading and called `location.assign`.
  */
 
-/** Matches the transition duration in styles.css. Do not change one alone. */
-const FADE_MS = 180;
+/**
+ * Matches the transition duration in styles.css. Do not change one alone.
+ *
+ * `MOTION.screen` 은 왕복(나가고 들어오는) 시간이므로 절반이 한 방향이다. 토큰에서
+ * 끌어오는 이유는 180 이라는 숫자가 세 곳에 적혀 있었기 때문이다: 여기, 토큰,
+ * 그리고 `styles.css` 의 transition. 그 중 CSS 는 여전히 손으로 맞춰야 하고 —
+ * 스타일시트는 모듈을 읽지 못한다 — 그 사실이 아래 주석에 적혀 있다.
+ */
+const FADE_MS = (MOTION.screen / 2) * 1000;
 
 /**
  * How long the screen stays fully black between the two halves.

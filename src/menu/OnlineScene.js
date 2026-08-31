@@ -5,6 +5,7 @@ import { OnlineSession, SESSION_PHASE } from '../net/OnlineSession.js';
 import { defaultServerUrl } from '../net/Transport.js';
 import { ERR, isValidCode, normaliseCode } from '../net/protocol.js';
 import { PLATE_TEXEL_SCALE, solveColumn } from './columnLayout.js';
+import { hoverPlates } from '../ui/motion.js';
 
 /**
  * Finding somebody to play.
@@ -404,7 +405,26 @@ export class OnlineScene {
    * on every call and nothing caches them. A per-frame rebuild here would leak a
    * texture every frame for as long as somebody sat in the queue.
    */
-  update() {
+  update(dt) {
+    // 호버 배율은 대기열과 무관하게 매 프레임 움직인다. 아래의 조기 반환은
+    // **텍스처 재생성**을 초당 한 번으로 묶는 것이지 움직임을 묶는 것이 아니다.
+    if (this._box) {
+      const rows = this.items.map((it) => ({
+        id: it.id,
+        mesh: it.mesh,
+        w: it.size?.width ?? this._box.plate.width,
+        h: it.size?.height ?? this._box.plate.height,
+      }));
+      // 상태 줄은 읽는 것이지 누르는 것이 아니므로 호버에 반응하지 않는다.
+      hoverPlates(
+        rows.filter((r) => r.id !== 'status'),
+        this._hovered,
+        dt,
+        this._u,
+        (this._motion ??= {}),
+      );
+    }
+
     if (this.session.phase !== SESSION_PHASE.QUEUED) return;
     const now = Math.floor(Date.now() / 1000);
     if (now === this._lastTick) return;

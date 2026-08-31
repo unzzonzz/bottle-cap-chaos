@@ -5,6 +5,7 @@ import { toMarkTexture } from '../marks/markTextures.js';
 import { PALETTE } from '../core/palette.js';
 import { PLATE_TEXEL_SCALE, solveColumn } from './columnLayout.js';
 import { gelButton, roundRectPath } from '../ui/glass.js';
+import { hoverPlates } from '../ui/motion.js';
 
 /**
  * 설정 — a heading, the things it holds, and a way back.
@@ -472,7 +473,24 @@ export class SettingsScene {
     this.refresh();
   }
 
-  update() {}
+  /**
+   * 호버 배율. 텍스처 교체는 `refresh` 가 하고, 여기는 **움직임**만 한다.
+   *
+   * 둘을 나누는 이유는 빈도다. 텍스처는 라벨이 바뀔 때만 다시 구워야 하고 —
+   * 매 프레임 구우면 캔버스 호출 수십 번이다 — 배율은 매 프레임 조금씩 움직여야
+   * 한다.
+   */
+  update(dt) {
+    const box = this._box;
+    if (!box) return;
+    const rows = this.items.map((it) => ({
+      id: it.id,
+      mesh: it.mesh,
+      w: box.plate.width,
+      h: box.rows.find((r) => r.id === it.id)?.h ?? box.plate.height,
+    }));
+    hoverPlates(rows, this._hovered, dt, this._u, (this._motion ??= {}));
+  }
 
   dispose() {
     this._off?.();

@@ -7,6 +7,7 @@ import { PLAYER_COLORS } from '../render/playerColors.js';
 import { PALETTE } from '../core/palette.js';
 import { FRAME } from '../core/frame.js';
 import { PLATE_TEXEL_SCALE, solveColumn } from './columnLayout.js';
+import { hoverPlates } from '../ui/motion.js';
 
 /**
  * 상대 선택 — two caps facing each other, and who is behind the far one.
@@ -380,7 +381,18 @@ export class OpponentScene {
     return false;
   }
 
-  update() {}
+  /** 호버 배율. `refresh` 는 텍스처를, 여기는 움직임을 맡는다. */
+  update(dt) {
+    const box = this._box;
+    if (!box) return;
+    const rows = this.items.map((it) => ({
+      id: it.id,
+      mesh: it.mesh,
+      w: it.size?.width ?? box.plate.width,
+      h: it.size?.height ?? box.plate.height,
+    }));
+    hoverPlates(rows, this._hovered, dt, this._u, (this._motion ??= {}));
+  }
 
   dispose() {
     for (const item of this.items) {

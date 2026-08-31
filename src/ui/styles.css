@@ -236,7 +236,11 @@ input::placeholder {
   background: var(--bcc-fade);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.18s linear;
+  /* `--bcc-fade-ms` 는 `cssPalette.js` 가 `MOTION.screen` 의 절반으로 채운다.
+     폴백이 있는 유일한 `var()` 인 이유는, 이 규칙이 그 스크립트가 도는 것보다
+     먼저 필요할 수 있기 때문이다 — 페이지에 도착한 문서가 첫 프레임에 페이드인을
+     시작한다. 폴백 값과 토큰이 어긋나면 그 한 번만 어긋나고 이후로는 맞는다. */
+  transition: opacity var(--bcc-fade-ms, 180ms) linear;
 }
 
 .page-fade.is-on {
