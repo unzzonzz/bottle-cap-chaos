@@ -1,13 +1,15 @@
 import { CanvasTexture, ClampToEdgeWrapping, LinearFilter, LinearMipmapLinearFilter, RepeatWrapping, SRGBColorSpace } from 'three';
 import { PALETTE, withAlpha } from '../core/palette.js';
-import { ELEVATION, RADIUS, SPACE, TYPE } from '../core/tokens.js';
+import { ELEVATION, RADIUS, ROLE, SPACE, TYPE } from '../core/tokens.js';
+import { drawIcon } from '../ui/icons.js';
 import {
   applyTracking,
   fitText,
   fontSpec,
   gelButton,
   glassPanel,
-  skinFor,
+  roleButton,
+  roleSkin,
 } from '../ui/glass.js';
 
 /**
@@ -643,7 +645,7 @@ export function burstSheet() {
  * 사라지면 왼쪽에 이유 없는 여백만 남는다.
  *
  * @param {string} label
- * @param {'idle'|'hover'|'pressed'|'selected'|'disabled'|'dimmed'} state
+ * @param {string|{role?: string, state?: string, selected?: boolean}} state
  */
 export function menuPlateTexture(label, state, { width = 256, height = 52, scale = 1 } = {}) {
   /**
@@ -658,103 +660,67 @@ export function menuPlateTexture(label, state, { width = 256, height = 52, scale
   ctx.scale(scale, scale);
 
   /**
-   * `dimmed` 는 판정이 빠진 `disabled` 다.
+   * `state` 는 문자열이거나 `{ role, state, selected }` 다.
    *
-   * ── 두 문장이 한 껍데기를 입고 있었다 ─────────────────────────────────
-   * `disabled` 는 오른쪽에 "준비 중"을 찍는다. 그건 **기능이 아직 없다**는 말이고,
-   * AI 없는 모드에는 맞지만 지금 이 순간만 못 누르는 줄에는 틀리다. 온라인 화면은
-   * 이미 대기열에 들어간 동안 방 만들기 / 코드로 참가 / 랜덤 매칭 셋을 흐리는데,
-   * 셋 다 자기가 미완성 기능이라고 말하고 있었다.
-   *
-   * 같은 색, 도장 없음. 어느 문장인지는 호출부가 고른다.
+   * 부록 B 가 요구한 확장이다. 문자열도 계속 받는 이유는 호출부가 여덟 곳이고
+   * 그 중 대부분이 역할을 하나만 쓰기 때문이다 — 전부 고치는 것보다 기본값이
+   * 옳은 편이 낫다. 문자열이면 CHOICE 로 본다: 이 함수가 그리는 것은 메뉴 열의
+   * 판이고, 열에 있는 것은 정의상 고르는 것이다.
    */
+  const spec = typeof state === 'string' ? { state } : (state ?? {});
+  const role = spec.role ?? ROLE.CHOICE;
+  const selected = !!spec.selected;
+  const SKIN_STATE = { active: 'pressed', dimmed: 'disabled', idle: 'idle', hover: 'hover' };
+  const skinState = SKIN_STATE[spec.state] ?? spec.state ?? 'idle';
+
   /**
-   * 호출부의 상태 이름을 `skinFor` 의 어휘로 옮긴다.
+   * "준비 중" 도장. `disabled` 일 때만.
    *
-   * 메뉴는 `active` 와 `dimmed` 라는 이름을 쓰고 `skinFor` 는 `pressed` 와
-   * `disabled` 를 안다. 이 표가 없으면 둘 다 `default` 로 떨어져 idle 로 그려진다 —
-   * 눌러도 반응이 없고 흐려져야 할 줄이 멀쩡해 보이는데, 어느 쪽도 오류를 내지
-   * 않으므로 화면을 봐야만 안다.
+   * ── `dimmed` 는 판정이 빠진 `disabled` 다 ─────────────────────────────
+   * `disabled` 는 오른쪽에 도장을 찍는다. 그건 **기능이 아직 없다**는 말이고, AI
+   * 없는 모드에는 맞지만 지금 이 순간만 못 누르는 줄에는 틀리다. 온라인 화면은
+   * 이미 대기열에 들어간 동안 세 줄을 흐리는데, 셋 다 자기가 미완성 기능이라고
+   * 말하고 있었다. 같은 색, 도장 없음. 어느 문장인지는 호출부가 고른다.
    */
-  const SKIN_STATE = { active: 'pressed', dimmed: 'disabled' };
-  const skinState = SKIN_STATE[state] ?? state;
-  const skin = skinFor(skinState, PALETTE.accent.sky);
+  const stamp = spec.state === 'disabled' ? '준비 중' : '';
+  /**
+   * 좌우 여백은 알약이므로 높이에 비례한다.
+   *
+   * `SPACE.lg * 2` 고정은 256 폭 판에서 28% 지만 168 폭 판에서는 43% 다 — 실제로
+   * "마스터 볼륨   70%" 가 "마스터 볼륨   7..." 이 됐다. 둥근 끝이 먹는 공간은
+   * 폭이 아니라 **높이**를 따라간다.
+   */
+  const pad = Math.max(SPACE.sm, height * 0.45);
+
+  let stampW = 0;
+  if (stamp) {
+    const probe = makeCanvas(8, 8);
+    probe.ctx.font = fontSpec(TYPE.caption);
+    applyTracking(probe.ctx, TYPE.caption.tracking);
+    stampW = probe.ctx.measureText(stamp).width + SPACE.md;
+  }
 
   /**
    * 모서리는 **끝까지** 둥글다. `RADIUS.panel`(20) 이었다.
    *
-   * ── 20 은 큰 화면에서 애매해진다 ────────────────────────────────────────
-   * 이 판은 가로로 길다 — 저술 크기가 256x52 이고, 화면이 커지면 그 비율 그대로
-   * 커진다. 고정 반경은 판이 커질수록 **상대적으로** 작아지므로, 작은 창에서
-   * 둥글어 보이던 것이 큰 창에서는 모서리만 살짝 깎인 사각형이 된다. 둥근 것도
-   * 각진 것도 아닌 상태이고, 그게 애매함의 정체다.
-   *
-   * `RADIUS.pill` 은 9999 이고 `roundRectPath` 가 `min(r, w/2, h/2)` 로 죈다 —
-   * 즉 언제나 높이의 절반이다. 판이 얼마나 커지든 양 끝이 반원인 알약이고, 비율이
-   * 바뀌지 않으므로 어느 크기에서도 같은 물건으로 보인다.
-   *
-   * 제목판(`titleTexture`)은 그대로 `RADIUS.panel` 이다. 누를 수 없는 것과 누를 수
-   * 있는 것이 다른 모양이어야 하고, 이제 그 구분이 반경 하나로 선다.
+   * 이 판은 256x52 비율 그대로 커지므로 고정 반경은 판이 커질수록 상대적으로
+   * 작아진다 — 작은 창에서 둥글던 것이 큰 창에서는 모서리만 살짝 깎인 사각형이
+   * 된다. `RADIUS.pill` 은 `roundRectPath` 가 높이의 절반으로 죄므로 어느
+   * 크기에서도 같은 비율이다.
    */
-  gelButton(ctx, {
+  roleButton(ctx, {
     x: 0,
     y: 0,
     w: width,
     h: height,
     radius: RADIUS.pill,
+    role,
     state: skinState,
-    accent: PALETTE.accent.sky,
+    selected,
+    label,
+    // 도장이 오른쪽을 먹으므로 라벨은 남은 왼쪽에서 가운데를 잡는다.
+    labelWidth: width - stampW,
   });
-
-  /**
-   * 라벨은 판에 **맞춰** 줄어든다.
-   *
-   * ── 형제 함수에 있던 것과 같은 결함 ──────────────────────────────────
-   * `titleTexture` 의 주석에 "BOTTLE CAP CHAOS" 가 화면에 "BOTTLE CAP CHA" 로
-   * 도착했다는 기록이 있다. 이쪽에는 같은 처리가 없어서 같은 결함이 대기하고
-   * 있었다: 고정 크기 라벨이 오른쪽 가장자리 밖으로 조용히 흘러나갔고, 말줄임도
-   * 없고 뭔가 빠졌다는 표시도 없었다.
-   *
-   * 매칭 화면에서 드러났다. 상태 줄이 "상대를 찾는 중  0:12" 인데 그 줄에서
-   * 유일하게 변하는 부분인 경과 시간이 통째로 판 밖에 있었다. "시간이 다 짤려서
-   * 하나도 안보여" 로 보고됐다.
-   *
-   * `fitText` 가 크기를 줄이고, 그래도 안 되면 자른다. 판정 도장이 있는 줄은
-   * 그만큼 자리를 덜 쓴다.
-   */
-  const stamp = state === 'disabled' ? '준비 중' : '';
-  const probe = makeCanvas(8, 8);
-  applyTracking(probe.ctx, TYPE.label.tracking);
-  let stampW = 0;
-  if (stamp) {
-    probe.ctx.font = fontSpec(TYPE.caption);
-    stampW = probe.ctx.measureText(stamp).width + SPACE.md;
-  }
-  /**
-   * 좌우 여백. 알약이므로 높이에 비례한다.
-   *
-   * `SPACE.lg * 2` 를 고정으로 쓰면 640 프레임의 256 폭 판에서는 28% 지만 421
-   * 프레임의 168 폭 판에서는 43% 다 — 실제로 "마스터 볼륨   70%" 가 "마스터 볼륨
-   * 7..." 이 됐다. 둥근 끝이 먹는 공간은 폭이 아니라 **높이**를 따라가므로, 여백도
-   * 높이를 따라가는 것이 맞다.
-   */
-  const pad = Math.max(SPACE.sm, height * 0.45);
-  const room = width - pad * 2 - stampW;
-  const fitted = fitText(probe.ctx, label, TYPE.label, room);
-
-  ctx.save();
-  ctx.font = fitted.font;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  applyTracking(ctx, TYPE.label.tracking);
-  const cx = (width - stampW) / 2;
-  // 타입 밑의 1픽셀 흰 그림자. `gelButton` 이 자기 라벨에 쓰는 것과 같은 엠보스다.
-  ctx.fillStyle = withAlpha(PALETTE.ui.glossHi, 0.35);
-  ctx.fillText(fitted.text, cx, height / 2 + 1);
-  ctx.fillStyle = skin.text;
-  ctx.fillText(fitted.text, cx, height / 2);
-  applyTracking(ctx, 0);
-  ctx.restore();
 
   if (stamp) {
     applyTracking(ctx, TYPE.caption.tracking);
@@ -811,6 +777,51 @@ function wrapToFit(ctx, text, type, maxWidth, maxRows) {
 
   const fitted = fitText(ctx, text, type, maxWidth);
   return { rows: [fitted.text], font: fitted.font, size: fitted.size };
+}
+
+
+/**
+ * 아이콘 버튼 한 장. 라벨 없이 그림만.
+ *
+ * ── RETREAT 계열 시각인 이유 ────────────────────────────────────────────────
+ * 부록 B3.2 가 그렇게 정했고, 근거가 있다: 이 둘(설정·내 마크)은 게임을 시작하지
+ * 않는다. 메인 메뉴에 온 사람이 하려는 것은 모드를 고르는 것이고, 이 둘은 필요할
+ * 때만 찾는 것이다. **채워지지 않고 떠 있지 않은** 모양이 그 사실을 말한다 —
+ * 열의 세 판은 떠 있고 이 둘은 평평하다.
+ *
+ * 툴팁은 없다. 터치 기기에 호버가 없으므로 툴팁은 절반의 사용자에게 존재하지 않는
+ * 설명이고, 존재하지 않을 수 있는 설명에 의미를 맡길 수 없다. 그래서 그림이 혼자
+ * 서야 하고, `icons.js` 의 두 주석이 왜 그 그림이어야 하는지 적고 있다.
+ */
+export function iconPlateTexture(icon, state = 'idle', { size = 64, scale = 1 } = {}) {
+  const { canvas, ctx } = makeCanvas(Math.round(size * scale), Math.round(size * scale));
+  ctx.scale(scale, scale);
+
+  const SKIN_STATE = { active: 'pressed', dimmed: 'disabled' };
+  const skinState = SKIN_STATE[state] ?? state;
+  roleButton(ctx, {
+    x: 0,
+    y: 0,
+    w: size,
+    h: size,
+    radius: RADIUS.panel,
+    role: ROLE.RETREAT,
+    state: skinState,
+  });
+
+  const inner = size * 0.58;
+  drawIcon(ctx, icon, {
+    x: (size - inner) / 2,
+    y: (size - inner) / 2,
+    size: inner,
+    color: roleSkin(ROLE.RETREAT, skinState).text,
+    // 판이 이미 유리다. 광택을 두 겹으로 얹으면 아이콘의 형태보다 반사가 먼저 읽힌다.
+    gloss: false,
+  });
+
+  const tex = toTexture(canvas);
+  tex.userData = { width: size, height: size };
+  return tex;
 }
 
 /**

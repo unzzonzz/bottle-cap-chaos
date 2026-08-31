@@ -1,8 +1,11 @@
 import { Group, Mesh, PlaneGeometry, Raycaster, Vector2 } from 'three';
 import { createSpriteMaterial } from './menuMaterials.js';
-import { menuPlateTexture, titleTexture } from './menuTextures.js';
+import { iconPlateTexture, menuPlateTexture, titleTexture } from './menuTextures.js';
 import { FRAME } from '../core/frame.js';
-import { MOTION, SPACE } from '../core/tokens.js';
+import { MOTION, SIZE, SPACE } from '../core/tokens.js';
+
+/** 저술 기준 판 폭. 아이콘 버튼이 프레임 배수를 되읽는 기준이다. */
+const DEFAULT_PLATE_WIDTH = 256;
 import { approach } from '../ui/motion.js';
 
 /**
@@ -43,12 +46,33 @@ import { approach } from '../ui/motion.js';
  */
 const PLATE_TEXEL_SCALE = 2;
 
-/** Frame pixels to world units at the plates' depth. Filled in by `layout`. */
+/**
+ * 열에 서는 것: **모드뿐이다.**
+ *
+ * ── 설정이 여기 있었고, 종류가 달랐다 ──────────────────────────────────────
+ * 네 판이 같은 크기·같은 모양·같은 열에 있었는데 앞의 셋은 모드 선택이고 설정은
+ * 화면 이동이다. 설정은 게임을 시작하지 않는다. 메뉴에 온 사람은 게임을 하러 온
+ * 것이고, 셋 중 하나를 고르는 화면이 되면 선택이 3분의 1 빨라진다.
+ *
+ * 설정과 내 마크는 `TOOLS` 로 내려가 아이콘 버튼이 된다. 라우트는 그대로다 —
+ * `menuRoutes.js` 의 설정 경로는 URL 로 여전히 도달 가능해야 한다(부록 B6-5).
+ */
 const DEFAULT_ITEMS = [
   { id: 'knockout', label: '서바이벌' },
   { id: 'football', label: '축구' },
   { id: 'curling', label: '컬링' },
-  { id: 'settings', label: '설정' },
+];
+
+/**
+ * 열 밖의 것: 필요할 때만 찾는 것.
+ *
+ * 내 마크가 여기 있는 것은 설정 안에 묻혀 있었기 때문이다. 뚜껑에 새길 그림은
+ * 이 게임에서 사람들이 실제로 바꾸는 유일한 것인데, 음량 슬라이더 아래 네 번째
+ * 줄에 있었다.
+ */
+const DEFAULT_TOOLS = [
+  { id: 'settings', icon: 'settings' },
+  { id: 'marks', icon: 'marks' },
 ];
 
 export class MenuItems {
@@ -56,7 +80,7 @@ export class MenuItems {
    * @param {import('../core/GlossMaterial.js').GlossMaterials} retro
    * @param {object} tuning  the live `MENU_CONFIG.items` block
    */
-  constructor({ retro, tuning, items = DEFAULT_ITEMS }) {
+  constructor({ retro, tuning, items = DEFAULT_ITEMS, tools = DEFAULT_TOOLS }) {
     this.tuning = tuning;
     this.root = new Group();
 
@@ -85,6 +109,22 @@ export class MenuItems {
       return { ...def, mesh, material, maps, hovered: false, shift: 0 };
     });
 
+    /**
+     * 열 밖의 아이콘 버튼. 판과 **같은 목록**에 들어가야 눌린다.
+     *
+     * 별도의 레이캐스트를 만들지 않는 이유는 부록 B3.3 이 지적한 것과 같다:
+     * 판은 `asUiLayer` 때문에 레이어 1 에 있고, 기본 레이어만 보는 광선은 그것을
+     * 시험조차 하지 않는다. 목록이 하나면 그 사실을 한 번만 맞히면 된다.
+     */
+    this.tools = tools.map((def) => {
+      const maps = this._bakeTool(def.icon);
+      const material = createSpriteMaterial(retro, { map: maps.idle });
+      const mesh = new Mesh(new PlaneGeometry(1, 1), material);
+      mesh.renderOrder = 10;
+      this.root.add(mesh);
+      return { ...def, mesh, material, maps, hovered: false, isTool: true };
+    });
+
     this._ray = new Raycaster();
     /**
      * 이 레이캐스터는 **모든 레이어**를 본다.
@@ -107,7 +147,7 @@ export class MenuItems {
     /** The item under the pointer, or null. */
     this.hovered = null;
     this.enabled = true;
-    this._picks = this.items.filter((i) => !i.disabled).map((i) => i.mesh);
+    this._picks = [...this.items.filter((i) => !i.disabled), ...this.tools].map((i) => i.mesh);
   }
 
   /**
@@ -137,6 +177,26 @@ export class MenuItems {
     };
   }
 
+  /** 아이콘 버튼 한 개의 두 상태. */
+  _bakeTool(icon) {
+    const size = Math.round(SIZE.buttonIcon.w * this._toolScale());
+    return {
+      idle: iconPlateTexture(icon, 'idle', { size, scale: PLATE_TEXEL_SCALE }),
+      hover: iconPlateTexture(icon, 'hover', { size, scale: PLATE_TEXEL_SCALE }),
+    };
+  }
+
+  /**
+   * 아이콘 버튼의 프레임 배수.
+   *
+   * 판과 같은 비율로 줄어야 한다 — `bootMenu.scaleColumn` 이 `plateWidth` 를
+   * 저술값에서 줄이므로, 그 비율을 여기서 되읽는다. 따로 계산하면 좁은 프레임에서
+   * 아이콘만 크게 남는다.
+   */
+  _toolScale() {
+    return Math.min(1, this.tuning.plateWidth / DEFAULT_PLATE_WIDTH);
+  }
+
   /**
    * 판 크기가 바뀌었으면 텍스처를 다시 굽는다.
    *
@@ -163,6 +223,13 @@ export class MenuItems {
           ? next.hover
           : next.idle;
     }
+    for (const tool of this.tools) {
+      const next = this._bakeTool(tool.icon);
+      for (const tex of Object.values(tool.maps)) tex.dispose();
+      tool.maps = next;
+      tool.material.uniforms.uMap.value = tool.hovered ? next.hover : next.idle;
+    }
+
     const title = this.title.material.uniforms.uMap.value;
     const titleW = Math.round(t.plateWidth);
     this.title.material.uniforms.uMap.value = titleTexture('BOTTLE CAP CHAOS', '메인 메뉴', {
@@ -221,6 +288,33 @@ export class MenuItems {
       item.mesh.position.set(item.home.x, item.home.y, 0);
     });
 
+    /**
+     * 아이콘 버튼은 열 **아래**, 열의 오른쪽 끝에 맞춰 오른쪽에서 왼쪽으로.
+     *
+     * 열과 같은 x 중심이 아니라 오른쪽 끝에 맞추는 이유는 이 둘이 열의 항목이
+     * 아니기 때문이다. 가운데 정렬하면 네 번째·다섯 번째 항목으로 보이고, 그것이
+     * 애초에 설정을 열에서 빼낸 이유다.
+     */
+    const icon = Math.round(SIZE.buttonIcon.w * this._toolScale());
+    const gap = Math.round(SPACE.sm * this._toolScale());
+    const lastY = t.columnY + ((n - 1) / 2 - (n - 1)) * t.pitch + shift;
+    const toolY = lastY - t.plateHeight / 2 - gap - icon / 2;
+    /**
+     * 오른쪽 끝에 맞추되 **순서는 왼쪽에서 오른쪽**이다.
+     *
+     * 배열의 첫 항목이 왼쪽에 온다 — 부록의 스케치가 `⚙ 🏷` 순이고, 그게 읽는
+     * 순서다. 오른쪽 끝을 기준으로 삼는 것은 정렬이고, 순서는 그것과 별개다.
+     */
+    const rightEdge = t.columnX + t.plateWidth / 2;
+    const last = this.tools.length - 1;
+    this.tools.forEach((tool, i) => {
+      const x = rightEdge - icon / 2 - (last - i) * (icon + gap);
+      tool.home = { x: x * u, y: toolY * u };
+      tool.mesh.scale.set(icon * u, icon * u, 1);
+      tool.mesh.rotation.y = yaw;
+      tool.mesh.position.set(tool.home.x, tool.home.y, 0);
+    });
+
     this._unitsPerPixel = u;
   }
 
@@ -271,13 +365,13 @@ export class MenuItems {
     // refusing the press is worse than one that never responds.
     const hits = this._ray.intersectObjects(this._picks, false);
     const mesh = hits[0]?.object ?? null;
-    return this.items.find((i) => i.mesh === mesh) ?? null;
+    return [...this.items, ...this.tools].find((i) => i.mesh === mesh) ?? null;
   }
 
   setHover(item) {
     if (this.hovered === item) return;
     this.hovered = item;
-    for (const it of this.items) {
+    for (const it of [...this.items, ...this.tools]) {
       const on = it === item && !it.disabled;
       if (on === it.hovered) continue;
       it.hovered = on;
@@ -290,7 +384,7 @@ export class MenuItems {
     this.title.geometry.dispose();
     this.title.material.uniforms.uMap.value.dispose();
     this.title.material.dispose();
-    for (const item of this.items) {
+    for (const item of [...this.items, ...this.tools]) {
       item.mesh.geometry.dispose();
       item.material.dispose();
       for (const m of Object.values(item.maps)) m.dispose();

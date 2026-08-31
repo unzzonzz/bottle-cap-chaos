@@ -336,6 +336,8 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
     : null;
 
   let marks = null;
+  /** 내 마크에 들어온 문. `menu` 또는 `settings`. */
+  let marksOrigin = 'settings';
   let editor = null;
   let confirm = null;
   /** 상대 선택. Rebuilt on every entry so the choice cannot persist. */
@@ -1093,6 +1095,8 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
     }
 
     if (id === 'marks') {
+      // 지금 어느 화면에서 들어왔는가. 위 `onBack` 이 읽는다.
+      marksOrigin = current === 'settings' ? 'settings' : 'menu';
       if (!marks) {
         const u = unitsPerPixel();
         confirm = new ConfirmDialog({ retro, unitsPerPixel: u });
@@ -1106,7 +1110,17 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
           defaultMark: capLogoTexture().image,
           confirm,
           onOpen: (ref) => openEditor(ref),
-          onBack: () => fadeTo('settings'),
+          /**
+           * 온 곳으로 돌아간다.
+           *
+           * 예전에는 설정으로 고정이었다 — 그때 내 마크로 가는 문이 설정 안에
+           * 하나뿐이었기 때문이다. 부록 B3.2 가 메인 메뉴에 두 번째 문을 냈으므로,
+           * 어디서 왔는지가 답을 바꾼다. 설정에서 들어와 메뉴로 나가면 한 화면을
+           * 건너뛴 것이 되고, 메뉴에서 들어와 설정으로 나가면 가 본 적 없는 곳에
+           * 도착한다.
+           */
+          onBack: () => fadeTo(marksOrigin),
+          backLabel: marksOrigin === 'settings' ? '◀ 설정으로' : '◀ 메뉴로',
         });
         marks.root.add(confirm.root);
       }

@@ -538,7 +538,96 @@ function brushDot(weight) {
   };
 }
 
+/* ── 메인 메뉴의 도구 ─────────────────────────────────────────────────────── */
+
+/**
+ * 설정. 톱니바퀴.
+ *
+ * 이 하나는 그림이 관습이라 그대로 따른다 — 다른 무엇을 그려도 "설정" 으로 읽히지
+ * 않는다. 이가 여덟인 것은 스무 픽셀에서 세어지지 않으면서도 원이 아닌 최소치다:
+ * 여섯이면 별로 보이고, 열둘이면 톱니가 뭉개져 원이 된다.
+ */
+function iconSettings(ctx, size, color) {
+  setup(ctx, size, color);
+  const cx = size / 2;
+  const cy = size / 2;
+  const teeth = 8;
+  const outer = size * 0.42;
+  const inner = size * 0.32;
+  const half = Math.PI / teeth / 2.6;
+
+  ctx.beginPath();
+  for (let i = 0; i < teeth; i++) {
+    const a = (i / teeth) * Math.PI * 2 - Math.PI / 2;
+    // 이 하나: 안쪽 호를 따라오다 바깥으로 나갔다 돌아온다.
+    ctx.lineTo(cx + Math.cos(a - half * 1.9) * inner, cy + Math.sin(a - half * 1.9) * inner);
+    ctx.lineTo(cx + Math.cos(a - half) * outer, cy + Math.sin(a - half) * outer);
+    ctx.lineTo(cx + Math.cos(a + half) * outer, cy + Math.sin(a + half) * outer);
+    ctx.lineTo(cx + Math.cos(a + half * 1.9) * inner, cy + Math.sin(a + half * 1.9) * inner);
+  }
+  ctx.closePath();
+  ctx.stroke();
+
+  // 축. 채우지 않고 비운다 — 채우면 톱니가 붙은 원반이지 톱니바퀴가 아니다.
+  ctx.beginPath();
+  ctx.arc(cx, cy, size * 0.13, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+/**
+ * 내 마크. 겹쳐 놓인 뚜껑 둘.
+ *
+ * ── 두 번 틀렸고, 그 둘이 같은 실수였다 ────────────────────────────────────
+ * 처음엔 뚜껑 하나 안에 위로 볼록한 호를 그렸는데, 뚜껑 테두리도 원이라 두 곡선이
+ * 같은 방향으로 겹쳐 화살표(∧)가 됐다. 호를 대각선으로 바꿨더니 이번엔 원 안의
+ * 사선, 즉 **금지 표시**(⊘)가 됐다. 둘 다 "원 안에 획 하나"라는 같은 구성이었고,
+ * 그 구성은 이미 다른 뜻을 갖고 있다.
+ *
+ * 그래서 안에 무엇을 넣지 않는다. **뚜껑을 둘 겹친다** — "내 마크" 는 하나의
+ * 그림이 아니라 모아 둔 것이고, 겹친 둘은 어느 크기에서도 "여럿" 으로 읽히며
+ * 원 안의 획과 혼동될 구성이 아니다. 뚜껑 실루엣은 카드 뒷면(`iconCap`)과 같은
+ * 것이라, 이 게임에서 마크가 얹히는 물건이 무엇인지도 함께 말한다.
+ */
+function iconMarks(ctx, size, color) {
+  setup(ctx, size, color);
+  const teeth = 21;
+  const crown = (cx, cy, r) => {
+    ctx.beginPath();
+    for (let i = 0; i < teeth * 2; i++) {
+      const a = (i / (teeth * 2)) * Math.PI * 2 - Math.PI / 2;
+      const rr = i % 2 === 0 ? r : r * 0.86;
+      const x = cx + Math.cos(a) * rr;
+      const y = cy + Math.sin(a) * rr;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+  };
+
+  // 뒤의 것. 윤곽만.
+  crown(size * 0.62, size * 0.38, size * 0.3);
+  ctx.stroke();
+
+  /**
+   * 앞의 것. 뒤의 것을 **지우고** 나서 그린다.
+   *
+   * 지우지 않으면 두 윤곽이 교차해 그물이 되고, 그러면 겹친 둘이 아니라 하나의
+   * 복잡한 도형으로 보인다. 겹침이 읽히는 것은 앞의 것이 뒤의 것을 가릴 때다.
+   */
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-out';
+  crown(size * 0.38, size * 0.62, size * 0.34);
+  ctx.fillStyle = '#000';
+  ctx.fill();
+  ctx.restore();
+
+  crown(size * 0.38, size * 0.62, size * 0.3);
+  ctx.stroke();
+}
+
 export const ICON = {
+  settings: iconSettings,
+  marks: iconMarks,
   cap: iconCap,
   pencil: iconPencil,
   eye: iconEye,
@@ -603,22 +692,31 @@ export function drawIcon(ctx, name, { x, y, size, color, gloss = true }) {
   const fn = ICON[name];
   if (!fn) return;
 
-  if (!gloss) {
-    ctx.save();
-    ctx.translate(x, y);
-    fn(ctx, size, color);
-    ctx.restore();
-    return;
-  }
-
-  // Rounded up so a fractional frame-pixel size still gets whole texels, and
-  // floored at 8 because the gloss gradient needs somewhere to land.
+  /**
+   * 광택이 없어도 **오프스크린을 거친다.**
+   *
+   * 예전에는 무광택이면 대상 컨텍스트에 바로 그렸다. 한 줄 짧고, 아이콘이 획과
+   * 채우기만 쓰는 한 맞다.
+   *
+   * 맞지 않게 된 것은 겹친 뚜껑 두 개(`iconMarks`)를 그리면서다. 앞의 것이 뒤의
+   * 것을 가리려면 `destination-out` 으로 지워야 하는데, 대상에 바로 그리면 그
+   * 지우기가 **아이콘 아래의 판까지 뚫는다** — 실제로 버튼 한가운데에 구멍이
+   * 뚫렸다.
+   *
+   * 오프스크린은 그 합성을 아이콘 안에 가둔다. 비용은 캔버스 하나이고, 아이콘은
+   * 텍스처로 캐시되므로 한 번뿐이다.
+   */
   const edge = Math.max(8, Math.ceil(size));
   const off = document.createElement('canvas');
   off.width = edge;
   off.height = edge;
   const octx = off.getContext('2d');
   fn(octx, edge, color);
+
+  if (!gloss) {
+    ctx.drawImage(off, x, y, size, size);
+    return;
+  }
 
   octx.globalCompositeOperation = 'source-atop';
   const g = octx.createLinearGradient(0, 0, 0, edge * 0.55);

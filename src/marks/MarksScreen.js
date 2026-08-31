@@ -68,7 +68,7 @@ export class MarksScreen {
    * @param {() => void} onBack
    * @param {import('./ConfirmDialog.js').ConfirmDialog} confirm
    */
-  constructor({ retro, unitsPerPixel, book, defaultMark, onOpen, onBack, confirm }) {
+  constructor({ retro, unitsPerPixel, book, defaultMark, onOpen, onBack, confirm, backLabel = '◀ 뒤로' }) {
     const u = unitsPerPixel;
     this._u = u;
     this.book = book;
@@ -76,6 +76,8 @@ export class MarksScreen {
     this.onOpen = onOpen ?? (() => {});
     this.onBack = onBack ?? (() => {});
     this.confirm = confirm;
+    /** 뒤로가기가 무엇이라고 말하는가. `bootMenu` 가 들어온 문에서 정한다. */
+    this.backLabel = backLabel;
     this.root = new Group();
 
     /**
@@ -251,8 +253,15 @@ export class MarksScreen {
       this.backMaps.idle?.dispose();
       this.backMaps.hover?.dispose();
       const plateSize = { ...box.plate, scale: PLATE_TEXEL_SCALE };
-      this.backMaps.idle = menuPlateTexture('◀ 설정으로', 'idle', plateSize);
-      this.backMaps.hover = menuPlateTexture('◀ 설정으로', 'hover', plateSize);
+      /**
+       * 라벨이 고정 문자열이 아니다.
+       *
+       * "◀ 설정으로" 였고, 내 마크로 가는 문이 설정 안에 하나뿐일 때는 맞았다.
+       * 메인 메뉴에서도 들어올 수 있게 되면서 그 문장이 거짓이 될 수 있다 —
+       * 가 본 적 없는 곳으로 돌아간다고 말하는 버튼이다.
+       */
+      this.backMaps.idle = menuPlateTexture(this.backLabel, 'idle', plateSize);
+      this.backMaps.hover = menuPlateTexture(this.backLabel, 'hover', plateSize);
       this.back.material.uniforms.uMap.value = this.backMaps.idle;
       this.title.material.uniforms.uMap.value?.dispose();
       this.title.material.uniforms.uMap.value = titleTexture('내 마크', '뚜껑에 새길 그림', {

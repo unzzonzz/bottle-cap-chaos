@@ -259,6 +259,14 @@ export function roleButton(ctx, o) {
   const {
     x, y, w, h, label, role, state = 'idle', selected = false,
     align = 'center', radius = RADIUS.pill,
+    /**
+     * 라벨이 쓸 수 있는 폭과 그 중심. 기본은 버튼 전체.
+     *
+     * 도장이 붙는 판("준비 중")은 오른쪽 일부를 도장에 내주므로, 라벨은 남은
+     * 왼쪽에서 가운데를 잡아야 한다. 그걸 호출부가 직접 그리면 라벨을 그리는 곳이
+     * 둘이 되고, 둘이 되면 서체나 엠보스가 언젠가 갈린다.
+     */
+    labelWidth = w,
   } = o;
   const skin = roleSkin(role, state);
 
@@ -281,12 +289,12 @@ export function roleButton(ctx, o) {
   ctx.globalAlpha = skin.alpha < 1 ? 0.85 : 1;
   const type = role === ROLE.CHOICE ? TYPE.title : TYPE.label;
   const probe = ctx;
-  const fitted = fitText(probe, label, type, w - Math.max(SPACE.md, h * 0.7));
+  const fitted = fitText(probe, label, type, labelWidth - Math.max(SPACE.md, h * 0.7));
   ctx.font = fitted.font;
   ctx.textAlign = align === 'left' ? 'left' : 'center';
   ctx.textBaseline = 'middle';
   applyTracking(ctx, type.tracking);
-  const tx = align === 'left' ? x + h * 0.42 : x + w / 2;
+  const tx = align === 'left' ? x + h * 0.42 : x + labelWidth / 2;
   /**
    * 엠보스는 밝은 판에서만. 채워진 COMMIT·DESTRUCTIVE 위의 흰 글자에 흰 그림자를
    * 깔면 글자가 두꺼워 보이기만 하고 떠 보이지 않는다.
@@ -426,7 +434,7 @@ export function gelButton(ctx, o) {
   ctx.textAlign = align === 'left' ? 'left' : 'center';
   ctx.textBaseline = 'middle';
   applyTracking(ctx, TYPE.label.tracking);
-  const tx = align === 'left' ? x + h * 0.42 : x + w / 2;
+  const tx = align === 'left' ? x + h * 0.42 : x + labelWidth / 2;
   // A one-pixel white shadow UNDER the type. Emboss, not drop shadow — it lifts
   // the label off the gradient without darkening anything, which is what would
   // happen if this went the other way.
