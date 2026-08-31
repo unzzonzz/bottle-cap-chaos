@@ -1097,10 +1097,6 @@ async function boot(canvas) {
   }
   syncTextureScale();
   viewport.onResize(syncTextureScale);
-  // And once for the mode this page opened on. `rebuildAll` does it on every
-  // change after that; without this the first match of a cardless mode would
-  // hang its score off a hand that is not drawn.
-  hud.setHandParked(match.mode.cards !== false);
   // 그림자 프러스텀도 이 페이지가 열린 모드에 한 번 맞춘다. `rebuildAll` 은
   // 그 뒤의 전환에서만 돌므로, 이게 없으면 첫 매치가 기본 프러스텀으로 간다.
   lights.setExtents(match.arena.layout.extents);
@@ -1417,11 +1413,6 @@ async function boot(canvas) {
       turn: range.turnZoom,
       screenMax: range.screenZoomMax,
     });
-    // The score hangs off the opponent's parked hand, and a mode with the card
-    // system off has none — see `HudLayer.setHandParked`. Here rather than in
-    // the per-frame update because the layout is fixed and this is the one event
-    // that can change it.
-    hud.setHandParked(match.mode.cards !== false);
     /**
      * And the sound's memory of the match that no longer exists.
      *

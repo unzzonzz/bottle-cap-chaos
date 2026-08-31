@@ -1,6 +1,5 @@
 import { Mesh, PlaneGeometry, Raycaster, Scene, Vector2 } from 'three';
 import { FRAME, frameCamera, refitFrameCamera } from '../core/frame.js';
-import { CARD_ASPECT, cardScale, handExposure } from '../render/CardHand.js';
 import { controlScale, controlState, easeInOut, stepControl } from './motion.js';
 import { MATCH_STATE } from '../game/Match.js';
 import { scoreboardFor } from '../game/modes.js';
@@ -63,57 +62,15 @@ import { ROLE, SIZE, SPACE } from '../core/tokens.js';
 export const HUD_FRAME = FRAME;
 
 /**
- * How far down the frame the opponent's parked hand reaches.
+ * ── 상대 손패에 매달리던 장치는 여기 있었다 ─────────────────────────────────
+ * `parkedHandReach()` 와 `BACK_ROW_REACH` 와 `SCORE_GAP` 이 이 자리에 있었고,
+ * 셋이 함께 "점수판은 상대의 세워 둔 카드 아래에 걸린다" 를 계산했다. 점수판이
+ * 이제 다른 세 변과 같은 `MARGIN` 에 붙으므로 셋 다 읽는 곳이 없다 — `layout()`
+ * 의 `scoreTop` 주석에 그 거래의 내역이 있다.
  *
- * Not a guess. `CardHand` places the top hand at `half - expose + grip` and
- * flips it, so its lowest point is `half - expose` — the `grip` term cancels
- * exactly, which is what it is there for. With `inactiveExposure` at 48 that is
- * y = +192, and it does not move with the hand's scale or its card count.
- *
- * The score sits below it. Anything above this line is the opponent's hand.
+ * (`BACK_ROW_REACH` 는 그 전부터 이미 아무도 읽지 않는 상수였다. 근거가 "판은
+ * 상대 손패에 매달려 있다" 였으니, 남겨 두면 이제는 틀린 말이 된다.)
  */
-/**
- * How far down the frame the opponent's parked hand reaches — ASKED, not assumed.
- *
- * This was the literal `48`, a hand-copied duplicate of `cards.inactiveExposure`,
- * and the note above explains the derivation that produced it. The derivation is
- * still right; what changed is that the answer is no longer a constant, because
- * a hand with a band of its own shows more of itself than one peeking over an
- * edge. Calling the same function the hand calls is what keeps the score from
- * drifting under the cards — the exact failure the old duplicate invited.
- */
-function parkedHandReach(config) {
-  const cfg = config.cards;
-  const cardHeight = cfg.width * CARD_ASPECT;
-  // 상대 손은 절대 들어 올려지지 않으므로 배율은 언제나 `inactiveScale` 이다 —
-  // 부채꼴 전체에 걸리는 `cardScale` 을 곱해서. 이 곱을 빠뜨리면 점수판이 실제보다
-  // 짧게 뻗은 손을 가정하고, 카드가 그 아래로 내려와 숫자를 덮는다.
-  const scale = cfg.inactiveScale * cardScale(cfg);
-  return handExposure(cfg, FRAME.topBand ?? 0, cardHeight, scale).parked;
-}
-
-/**
- * The other end of the score's band: the far row of pieces.
- *
- * The plate hangs from the parked hand — as high as it can go — and this is the
- * line it must not reach DOWN to. It therefore sets the plate's maximum HEIGHT
- * rather than its position, and the plate is 42 because of it: at the 64 it
- * started as, the bottom edge came to 120 and covered all three of the
- * opponent's caps, which on a board game is the score hiding the pieces.
- *
- * The number is the worst case across the two modes at their minimum zoom,
- * measured rather than guessed:
- *
- *   knockout, before the camera became rotatable   back row reached y = 143
- *   knockout, now that it frames the turning circle          y = 101
- *   football                                        the pitch is lower still
- *
- * 143 is kept because it is the tightest of them and a plate that fits the
- * tightest case fits all of them. It is a CHECK, not a coordinate — if the
- * framing ever changes again, this is the line to re-measure against.
- */
-const BACK_ROW_REACH = 143;
-/** Breathing room between the plate and the hand above it. */
 /**
  * 배치 수치. 전부 `tokens.js` 에서 온다.
  *
@@ -126,24 +83,29 @@ const BACK_ROW_REACH = 143;
  * `SIZE`/`SPACE` 를 그대로 읽는다 — UI 를 키울 때 고칠 곳이 한 군데여야 한다.
  */
 const SCORE = { width: SIZE.scorePlate.w, height: SIZE.scorePlate.h };
-/** 카메라 리셋 버튼. 단어가 아니라 아이콘이므로 정사각. */
-/**
- * 아이콘 버튼 한 변. 좁은 프레임에서는 줄어든다.
- *
- * 토큰의 64 는 640 폭 프레임 기준이다. 세로 화면의 프레임은 312 폭이라 아이콘 두
- * 개가 폭의 41% 를 먹었고, 그 결과 턴 플레이트에 92 픽셀만 남아 "PLAYER 1" 이
- * "PLAYE" 로 잘렸다.
- *
- * 하한이 44 인 것은 손가락 때문이다. `MIN_CSS_PX_PER_FRAME_PX` 가 1.25 이므로 44
- * 프레임 픽셀은 최소 55 CSS 픽셀이고, 그건 44pt 터치 타깃 기준을 넘는다. 그 아래로는
- * 어떤 프레임 폭에서도 내려가지 않는다.
- */
-function iconSize(frameW) {
-  return Math.round(Math.max(44, Math.min(SIZE.buttonIcon.w, frameW * 0.15)));
-}
-const ICON_GAP = SPACE.sm;
 const TURN = { width: SIZE.turnPlate.w, height: SIZE.turnPlate.h };
-const SCORE_GAP = SPACE.xs;
+/**
+ * 아이콘 버튼 지름. **턴 플레이트 높이와 같은 수**이고, 정원이다.
+ *
+ * ── 프레임에 반응하던 함수였다 ──────────────────────────────────────────────
+ * `Math.round(Math.max(44, Math.min(SIZE.buttonIcon.w, frameW * 0.15)))` 였다.
+ * 토큰의 64 는 640 폭 기준인데 세로 프레임은 322 라 아이콘 둘이 폭의 41% 를 먹었고,
+ * 그 결과 **같은 줄에 있던** 턴 플레이트가 "PLAYE" 로 잘렸다 — 그 줄어드는 규칙은
+ * 순전히 그 이웃 때문에 있었다. 턴 플레이트가 좌측 하단으로 내려가면서 이웃이
+ * 없어졌으므로 규칙도 없어진다.
+ *
+ * 남는 질문은 "그럼 얼마나 큰가" 뿐이고, 답을 새로 고르는 대신 이미 화면에 있는
+ * 높이를 쓴다. 나가기·리센터와 이름표는 같은 급의 읽을거리이므로 같은 높이가
+ * 맞고, 무엇보다 숫자가 하나 줄어든다.
+ *
+ * 44 는 손가락 기준을 그대로 통과한다. `MIN_CSS_PX_PER_FRAME_PX` 가 1.25 이므로
+ * 44 프레임 픽셀은 최소 55 CSS 픽셀이고, 44pt 터치 타깃을 넘는다 — 예전 규칙의
+ * **하한**이 정확히 이 44 였다. 히트 쿼드는 여기에 `ui.hitMargin` 을 더 두른다.
+ *
+ * `SIZE.buttonIcon` 은 메뉴의 도구 버튼이 계속 읽으므로 토큰에 남는다. 경기
+ * 화면이 그 값을 쓰지 않을 뿐이다.
+ */
+const ICON = TURN.height;
 /** 턴 플레이트 아래의 온라인 턴 클럭. */
 const TIMER_HEIGHT = SIZE.clockBar.h;
 const TIMER_GAP = SPACE.xs;
@@ -301,13 +263,6 @@ export class HudLayer {
     this._turnKey = '';
     this._buttonKey = '';
     this._texScale = -1;
-    /**
-     * Whether the opponent's hand is parked along the top edge.
-     *
-     * True for every mode that uses cards, which is every mode but curling. Only
-     * `layout` reads it, and only to decide how far down the score hangs.
-     */
-    this._handParked = true;
 
     /**
      * How much of each frame edge iOS has taken, in frame pixels.
@@ -353,21 +308,6 @@ export class HudLayer {
     this.layout();
   }
 
-  /**
-   * A mode with no card system has nothing parked along the top edge.
-   *
-   * Pushed in on a mode change rather than asked for per frame, because the
-   * layout is fixed and recomputing it sixty times a second is how a HUD ends up
-   * drifting by a pixel — the reason `layout` is not called from `update`. A
-   * no-op when nothing changed, so the mode switch can call it unconditionally.
-   */
-  setHandParked(on) {
-    const next = !!on;
-    if (next === this._handParked) return;
-    this._handParked = next;
-    this.layout();
-  }
-
   _hitQuad() {
     // Visible only when the panel asks — but drawn at a real opacity when it
     // does, which the first version got wrong by creating these at 0 and then
@@ -402,13 +342,6 @@ export class HudLayer {
     const halfW = HUD_FRAME.width / 2;
     const halfH = HUD_FRAME.height / 2;
     const frameW = halfW * 2;
-    /**
-     * 아이콘 크기는 프레임에 따라 변하므로 텍스처도 그 크기로 구워야 한다.
-     * `this._icon` 에 남기는 것은 `_updateButtons` 가 나중에 같은 값을 써야 하기
-     * 때문이다 — 판 크기와 텍스처 크기가 어긋나면 아이콘이 리샘플된다.
-     */
-    const ICON = iconSize(frameW);
-    this._icon = ICON;
 
     /**
      * MARGIN, per edge, with whatever the device has taken added on.
@@ -417,46 +350,55 @@ export class HudLayer {
      * of breathing room — and the insets are a fact about the hardware. Adding
      * rather than replacing keeps the breathing room on a phone too: the exit
      * button 12 pixels from the frame edge and 12 from the notch, not flush
-     * against the notch. There is no bottom edge in this layer; the card hand
-     * owns it, and takes its own inset in `CardHand.update`.
+     * against the notch.
+     *
+     * ── 아래 가장자리도 이제 이 레이어의 것이다 ─────────────────────────────
+     * "There is no bottom edge in this layer; the card hand owns it" 라고 적혀
+     * 있었고, 턴 플레이트가 좌측 하단으로 내려오면서 사실이 아니게 됐다. 손패는
+     * 여전히 자기 몫의 inset 을 `CardHand.update` 에서 따로 먹지만, 그건 손패가
+     * 가장자리에 **걸쳐** 있기 때문이고 — 여기 붙는 판은 가장자리에서 떨어져
+     * 있어야 하므로 네 번째 여백이 필요하다.
      */
     const edgeTop = MARGIN + this._safe.top;
     const edgeRight = MARGIN + this._safe.right;
     const edgeLeft = MARGIN + this._safe.left;
+    const edgeBottom = MARGIN + this._safe.bottom;
 
     /**
-     * Top centre, hung from the parked hand and reaching down no further than
-     * it has to — see PARKED_HAND_REACH and BACK_ROW_REACH.
+     * 상단 중앙. **네 번째 가장자리**로서, 좌우와 같은 여백에 붙는다.
      *
-     * HUNG rather than centred in the gap between the two. Centring looks more
-     * balanced and is wrong: the gap is 49 pixels on one framing and 91 on
-     * another, so its middle moves with the camera and the plate would drift
-     * down over the board whenever the field got smaller. Hanging it puts it in
-     * the same place — the top of the screen — under both.
+     * ── 예전에는 가장자리가 아니라 상대 손패에 매달려 있었다 ────────────────
+     * `scoreTop` 은 `parkedHandReach() + SCORE_GAP` 만큼 내려와 있었다. 상대의
+     * 세워 둔 카드가 프레임 위에서 뻗어 내려오는 만큼을 비켜 준다는 뜻이었고,
+     * 그 자체로는 옳은 계산이었다. 값이 문제였다:
      *
-     * ── and it hangs from the MARGIN when there is no hand to hang from ──────
-     * `PARKED_HAND_REACH` is 48 pixels reserved for the opponent's tucked cards.
-     * A mode with the card system switched off does not draw them, so reserving
-     * the space puts the plate 36 pixels lower than it needs to be over a strip
-     * of empty screen — and on the curling lane those 36 pixels are exactly the
-     * back out line, the line the whole overshoot penalty is judged at. Measured
-     * at minimum zoom: the line lands at y = 170 and the plate's underside was at
-     * 147, so the plate covered it outright.
+     *     가로 640x480   48 + 8  = 56    좌우 여백은 28
+     *     세로 322x700   59 + 8  = 67    좌우 여백은 28
      *
-     * The number is a consequence of the card layer's layout, so it moves with
-     * the card layer being there. See `setHandParked`.
+     * 상단만 여백의 두 배 이상이라 HUD 전체가 아래로 처져 보였다. `edgeTop` 은
+     * 이 파일에 이미 계산돼 있었으면서 **아무도 읽지 않는 변수**였는데, 그게
+     * 이 어긋남의 흔적이다.
+     *
+     * `frame.js` 의 밴드 예산도 같은 말을 하고 있었다. `TOP_BAND_NEED` 은
+     * `screenMargin + scorePlate.h + screenMargin` 이다 — 여백 28 위에 점수판이
+     * 놓인다는 전제. 매달린 점수판은 그 밴드를 밑으로 11 픽셀 넘어가 있었다.
+     * 이제 둘이 같은 수를 말한다.
+     *
+     * ── 카드와 겹치는 것은 알고 받아들인 값이다 ─────────────────────────────
+     * 상대가 실제로 카드를 들고 있고 **동시에** 점수판이 보이는 순간(최소 줌)에는
+     * 부채꼴의 아랫단이 판의 위쪽을 덮는다 — 가로에서 20, 세로에서 31 픽셀이고,
+     * 카드 레이어가 HUD 위에 그려지기 때문이다. 세로에서는 숫자의 윗머리까지
+     * 닿는다. 실측 스크린샷을 보고 받아들인 값이지 놓친 경우가 아니다.
+     *
+     * 반대쪽 값이 더 컸다. 손패는 매치 시작에 비어 있고 필드에서 주워야 차므로
+     * 대부분의 시간 동안 그 자리는 그냥 빈 하늘이었고, 그 빈 하늘을 비켜 주느라
+     * HUD 전체가 항상 28 픽셀 내려가 있던 것이 원래의 거래였다.
+     *
+     * 되돌리려면 이 한 줄을 `halfH - Math.max(edgeTop, 상대손패도달 + SPACE.xs)`
+     * 로 바꾸면 된다. 그러면 손패가 있을 때만 내려간다 — 대신 점수판이 카드를
+     * 주울 때마다 자리를 옮긴다.
      */
-    /**
-     * The top inset applies whichever branch this takes, but for two different
-     * reasons. Hung from the parked hand, it follows because the HAND has moved
-     * down by the inset (`CardHand.update` applies the same number) and the
-     * plate hangs from the hand. Hung from the margin, it follows because it is
-     * then an edge-anchored element like any other.
-     */
-    const scoreTop =
-      halfH -
-      this._safe.top -
-      (this._handParked ? parkedHandReach(this.config) + SCORE_GAP : MARGIN);
+    const scoreTop = halfH - edgeTop;
     this.score.scale.set(this._scoreWidth ?? SCORE.width, SCORE.height, 1);
     this._scoreHome = {
       x: ui.scoreOffsetX,
@@ -465,37 +407,38 @@ export class HudLayer {
     this.score.position.set(this._scoreHome.x, this._scoreHome.y, 0);
 
     /**
-     * ── 상단은 이제 한 줄이 아니라 두 줄이다 ────────────────────────────────
+     * ── 상단은 두 줄, 그리고 턴 플레이트는 더 이상 그 중 하나가 아니다 ──────
      * 예전에는 턴 플레이트(152), 스코어(208), 나가기(104), 리센터(34)가 모두
      * 프레임 최상단 같은 줄에 있었고 640 폭 안에 넉넉히 들어갔다. 새 크기로는
-     * 240 + 300 + 64 + 64 에 여백까지 더해 640 을 넘는다 — 실제로 넷이 서로
-     * 겹쳐서 읽을 수 없었다. 요소를 크게 하면 배치가 따라와야 한다는 것이
-     * PHASE 6 의 내용이다.
+     * 240 + 300 + 64 + 64 에 여백까지 더해 640 을 넘어서 — 넷이 서로 겹쳐 읽을 수
+     * 없었고 — 그래서 스코어가 최상단 중앙을 혼자 쓰고 턴 플레이트와 두 컨트롤이
+     * 아래 줄을 나눠 쓰는 배치가 됐다.
      *
-     * 그래서 스코어가 최상단 중앙을 혼자 쓰고, 턴 플레이트와 두 컨트롤이 그 아래
-     * 줄을 나눠 쓴다. 순서가 중요도이기도 하다: 점수는 화면 밖에서도 읽혀야 하고,
-     * 누구 차례인지는 그 다음이고, 버튼은 찾을 때만 필요하다.
+     * 이제 턴 플레이트가 좌측 하단으로 내려간다. 아래 줄에 남는 것은 나가기와
+     * 리센터 둘뿐이고, 둘은 각각 프레임의 왼쪽 끝과 오른쪽 끝에 있으므로 이 줄은
+     * 사실상 **가운데가 비어 있는 줄**이다. 폭 다툼이 사라졌다는 뜻이라, 아래에서
+     * `_turnMax` 를 정하던 "두 컨트롤 사이" 라는 제약도 함께 사라진다.
      */
     /**
      * ── 아래 줄은 점수판이 실제로 보일 때만 그 자리를 비켜 준다 ─────────────
      * 점수판은 최소 줌에서만 나타난다 — `_updateScore` 를 보라 — 그래서 경기
      * 대부분의 시간 동안 화면에 없다. 그런데 자리는 계속 잡아먹고 있었고, 그
-     * 결과 800x459 창(프레임 421x316)에서 턴 플레이트가 화면의 59% 지점, 즉
-     * 한가운데보다 **아래**에 떠 있었다. 위 여백의 내역이 이랬다:
+     * 결과 800x459 창(프레임 421x316)에서 아래 줄이 화면의 59% 지점, 즉
+     * 한가운데보다 **아래**에 떠 있었다.
      *
-     *     상대 손패 48 + 간격 8 + 점수판 84 + 간격 14 + 턴 절반 22 = 186
-     *
-     * 316 높이의 절반이 158 이므로, 두 줄을 쌓는 것만으로 이미 중앙을 넘는다.
-     *
-     * 자리를 무조건 비워 두었던 이유는 튐이었다: 점수가 나타날 때 턴 플레이트가
+     * 자리를 무조건 비워 두었던 이유는 튐이었다: 점수가 나타날 때 아래 줄이
      * 순간이동하면 그게 더 나쁘다. 그래서 비우지 않고 **미끄러지게** 한다.
      * `_scoreShown` 은 이미 `scoreFadeSeconds` 에 걸쳐 0..1 로 움직이므로, 두 Y
-     * 사이를 같은 값으로 보간하면 점수가 페이드인하는 동안 턴 줄이 함께 내려온다.
-     * 튐이 아니라 한 동작이 된다.
+     * 사이를 같은 값으로 보간하면 점수가 페이드인하는 동안 아이콘 줄이 함께
+     * 내려온다. 튐이 아니라 한 동작이 된다.
+     *
+     * 반높이가 `Math.max(TURN.height, ICON)/2` 였다가 `ICON/2` 가 된 것은 줄에서
+     * 턴 플레이트가 빠졌기 때문이다. `ICON === TURN.height` 이므로 두 식은 지금도
+     * 같은 수를 내지만, 없는 것을 재는 식은 다음에 토큰을 만지는 사람에게 거짓말이
+     * 된다.
      */
-    this._rowTwoUp = scoreTop - Math.max(TURN.height, ICON) / 2;
-    this._rowTwoDown =
-      this._scoreHome.y - SCORE.height / 2 - SPACE.sm - Math.max(TURN.height, ICON) / 2;
+    this._rowTwoUp = scoreTop - ICON / 2;
+    this._rowTwoDown = this._scoreHome.y - SCORE.height / 2 - SPACE.sm - ICON / 2;
     const rowTwoY = this._rowTwoDown;
     this._rowTwoY = undefined;
 
@@ -511,16 +454,21 @@ export class HudLayer {
      */
     this._scoreWidth = Math.min(SCORE.width, frameW * 0.55);
     /**
-     * 턴 플레이트가 쓸 수 있는 폭. 양쪽 컨트롤 사이다.
+     * 턴 플레이트가 쓸 수 있는 폭. **프레임의 왼쪽 절반**이다.
      *
-     * 오른쪽은 리센터 하나, 왼쪽은 나가기 하나. 예전에는 둘 다 오른쪽에 있었고
-     * 왼쪽은 프레임 가장자리였다.
+     * 예전에는 "두 컨트롤 사이" 였다 — 같은 줄의 나가기와 리센터가 양옆에서
+     * 밀어 주는 값. 판이 좌측 하단으로 내려가면서 그 줄에서 빠졌으므로 그 제약은
+     * 없어졌고, 대신 새 이웃이 생겼다: **자기 손패**다. 손패는 아래 가장자리
+     * 한가운데에 부채꼴로 펼쳐지므로, 판이 중앙선을 넘지 않는 한 겹칠 여지가
+     * 가장 작다. 그래서 상한이 `halfW - edgeLeft` 다.
+     *
+     * 640 프레임에서는 292 라 토큰의 240 이 그대로 이기고, 322 프레임에서는
+     * 133 으로 줄어든다 — 예전 규칙이 그 폭에서 내놓던 120 과 같은 자리다.
      */
-    const controlsLeft = halfW - edgeRight - ICON - ICON_GAP;
-    const turnLeft = -halfW + edgeLeft + ICON + ICON_GAP;
+    const turnLeft = -halfW + edgeLeft;
     this._turnMax = Math.max(
       TURN.height * 2,
-      Math.min(TURN.width, controlsLeft - turnLeft - SPACE.md),
+      Math.min(TURN.width, halfW - edgeLeft),
     );
 
     /**
@@ -554,9 +502,30 @@ export class HudLayer {
     this.recenter.scale.set(ICON, ICON, 1);
     this.recenter.position.set(right, rowTwoY, 0);
 
-    // 아래 줄 왼쪽 — 나가기 다음이다.
+    /**
+     * 누구 차례인가 — **좌측 하단**. 네 여백이 전부 같은 28 이다.
+     *
+     * ── 위가 아니라 아래인 이유 ────────────────────────────────────────────
+     * 위쪽 두 줄은 경기의 **상태**다: 점수, 그리고 화면을 떠나거나 다시 잡는
+     * 두 컨트롤. "지금 내 차례" 는 상태가 아니라 **지금 손이 할 일**에 대한
+     * 것이고, 손이 있는 곳은 아래다 — 자기 카드가 아래 가장자리에 펼쳐지고,
+     * 조준 드래그가 시작되는 곳도 보드 아래쪽이다. 시선이 이미 가 있는 자리에
+     * 붙이는 편이, 화면 반대쪽 끝에서 이름표를 찾게 하는 것보다 낫다.
+     *
+     * 오른쪽이 아니라 왼쪽인 것은 나가기와 같은 이유다(부록 B1.3). 오른쪽 끝은
+     * "지금 할 수 있는 일" 의 모서리라 리센터가 이미 쓰고 있고, 읽기만 하는
+     * 이름표는 그 모서리를 뺏지 않는다.
+     *
+     * ── 손패와의 거리는 폭으로 지킨다 ───────────────────────────────────────
+     * 자기 손패는 아래 가장자리 **한가운데**에 부채꼴로 걸쳐 있다. 판은
+     * `_turnMax` 때문에 중앙선을 넘지 못하므로 부채꼴의 중심과는 만나지 않고,
+     * 부채꼴 왼쪽 끝자락과는 겹칠 수 있다 — 카드가 HUD 위에 그려지므로 그때는
+     * 카드가 이긴다. 손패는 매치 시작에 비어 있고 필드에서 주워야 차므로 그
+     * 상태가 경기의 기본값이다.
+     */
+    const turnY = -halfH + edgeBottom + TURN.height / 2;
     this.turn.scale.set(Math.min(TURN.width, this._turnMax ?? TURN.width), TURN.height, 1);
-    this.turn.position.set(turnLeft + TURN.width / 2, rowTwoY, 0);
+    this.turn.position.set(turnLeft + TURN.width / 2, turnY, 0);
     /**
      * The plate's LEFT edge, kept because the plate is no longer a fixed width.
      *
@@ -567,9 +536,16 @@ export class HudLayer {
      */
     this._turnLeft = turnLeft;
 
-    // Directly under the turn plate, the same width, so the clock reads as
-    // belonging to the name above it rather than as a separate instrument.
-    this._timerY = this.turn.position.y - TURN.height / 2 - TIMER_GAP - TIMER_HEIGHT / 2;
+    /**
+     * 클럭은 판 **바로 위**다. 예전에는 바로 아래였다.
+     *
+     * 붙어 있고 같은 폭이라는 관계는 그대로다 — 그게 바가 별개의 계기가 아니라
+     * 위/아래의 이름표에 딸린 것으로 읽히게 하는 전부다. 뒤집은 이유는 여백
+     * 하나뿐이다: 판이 아래 가장자리 28 에 앉았으므로 그 밑에는 바가 들어갈
+     * 자리가 없고, 억지로 넣으면 판이 여백에서 18 픽셀 떠오른다 — 클럭이 없는
+     * 로컬·AI 대전에서는 아무것도 없는 자리를 위해 떠 있는 셈이 된다.
+     */
+    this._timerY = turnY + TURN.height / 2 + TIMER_GAP + TIMER_HEIGHT / 2;
     this.timerTrack.scale.set(TURN.width, TIMER_HEIGHT, 1);
     this.timerTrack.position.set(this._turnLeft + TURN.width / 2, this._timerY, 0);
     this.timerFill.scale.set(TURN.width, TIMER_HEIGHT, 1);
@@ -751,19 +727,22 @@ export class HudLayer {
     this._applyRowTwo(easeInOut(this._scoreShown));
   }
 
-  /** 아래 줄(턴 플레이트, 두 컨트롤, 시계, 알림)을 `shown` 위치에 놓는다. */
+  /**
+   * 아래 줄(나가기와 리센터)을 `shown` 위치에 놓는다.
+   *
+   * ── 턴 플레이트와 클럭은 더 이상 이 줄을 타지 않는다 ───────────────────────
+   * 둘은 좌측 하단으로 내려갔고, 그쪽은 점수판이 나타나든 말든 움직일 이유가
+   * 없는 자리다. 여기 남겨 두었다면 화면 아래에 붙은 판이 위쪽 점수판의
+   * 페이드에 맞춰 위아래로 미끄러졌을 것이다 — `_timerY` 까지 같이 밀리면서.
+   */
   _applyRowTwo(shown) {
     if (this._rowTwoUp === undefined || this._rowTwoDown === undefined) return;
     const y = this._rowTwoUp + (this._rowTwoDown - this._rowTwoUp) * shown;
     if (y === this._rowTwoY) return;
     const dy = y - (this._rowTwoY ?? this._rowTwoDown);
     this._rowTwoY = y;
-    this.turn.position.y += dy;
     this.exit.position.y += dy;
     this.recenter.position.y += dy;
-    this.timerTrack.position.y += dy;
-    this.timerFill.position.y += dy;
-    this._timerY += dy;
     for (const h of this._hits) h.mesh.position.y = h.plate.position.y;
   }
 
@@ -813,7 +792,7 @@ export class HudLayer {
     this._turnKey = key;
     const tex = turnPlateTexture(text, color, {
       ...TURN,
-      // 오른쪽 컨트롤에 닿기 전까지가 이 판이 쓸 수 있는 전부다. `_layout` 참조.
+      // 프레임 왼쪽 절반까지가 이 판이 쓸 수 있는 전부다. `layout` 의 `_turnMax` 참조.
       maxWidth: this._turnMax ?? TURN.width,
       scale: this.config.ui.textureScale,
     });
@@ -823,7 +802,7 @@ export class HudLayer {
     const w = tex.userData?.width ?? TURN.width;
     this.turn.scale.set(w, TURN.height, 1);
     if (this._turnLeft !== undefined) this.turn.position.x = this._turnLeft + w / 2;
-    // The clock sits under the plate and is as wide as it is, so a long nickname
+    // The clock sits directly above the plate and is as wide as it is, so a long nickname
     // widens both together rather than leaving a bar that no longer lines up.
     this._timerWidth = w;
     if (this._timerY !== undefined) {
@@ -930,7 +909,7 @@ export class HudLayer {
      * 히트 쿼드는 따라가지 않는다. 눌러서 작아진 버튼의 판정 영역까지 같이
      * 작아지면, 가장자리를 누른 손가락이 누르는 순간 버튼 밖으로 나간다.
      */
-    const size = this._icon ?? SIZE.buttonIcon.w;
+    const size = ICON;
     for (const h of this._hits) {
       stepControl(
         h.motion,
@@ -954,7 +933,7 @@ export class HudLayer {
      * 둘을 가르는 것은 스킨이 아니라 **자리**다. 나가기는 왼쪽 위, 리센터는
      * 오른쪽 아래. 예전처럼 같은 모서리에 나란히 두면 자리도 스킨도 같아진다.
      */
-    const iconBox = { size: this._icon ?? SIZE.buttonIcon.w, scale: ui.textureScale, role: ROLE.RETREAT };
+    const iconBox = { size: ICON, scale: ui.textureScale, role: ROLE.RETREAT };
     this.exit.material.uniforms.uMap.value = iconButtonTexture(
       'exit',
       this.hovered === 'exit' ? 'hover' : 'idle',

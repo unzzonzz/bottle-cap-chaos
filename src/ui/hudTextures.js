@@ -305,9 +305,24 @@ export function iconButtonTexture(icon, state, { size, scale = 1, role = null })
   const { canvas, ctx } = makeCanvas(s2, s2);
   ctx.scale(scale, scale);
 
-  const pad = 6;
+  /**
+   * 정원이다. 모서리가 둥근 정사각형이 아니라.
+   *
+   * `RADIUS.panel`(20) 을 넘기고 있었다. 64 짜리 버튼에서 본체는 52 이고 반지름
+   * 20 은 그 절반인 26 보다 작으므로, 그려지던 것은 **모서리가 둥근 사각형**이었다.
+   * `RADIUS.pill` 은 측정값이 아니라 센티널이고 — `tokens.js` 참조 — canvas
+   * `roundRect` 가 반지름을 짧은 변의 절반으로 깎으므로, 정사각형 본체에 주면
+   * 크기가 얼마든 정원이 된다. `gelButton`/`roleButton` 의 기본값이기도 해서
+   * 사실 넘기지 않는 것과 같지만, 여기서는 **의도**라서 적어 둔다.
+   *
+   * 여백이 6 에서 5 로 내려간 것은 턴 플레이트와 나란히 재기 위해서다.
+   * `turnPlateTexture` 의 유리판이 `pad = 5` 로 들어가 있어서, 6 을 쓰면 같은 44
+   * 쿼드 안에서 원만 2 픽셀 작게 그려진다 — 쿼드는 같은데 눈에는 작아 보이는,
+   * 가장 설명하기 어려운 종류의 어긋남이다.
+   */
+  const pad = 5;
   const box = size - pad * 2;
-  const frame = { x: pad, y: pad, w: box, h: box, state, radius: RADIUS.panel };
+  const frame = { x: pad, y: pad, w: box, h: box, state, radius: RADIUS.pill };
   if (role) roleButton(ctx, { ...frame, role });
   else gelButton(ctx, frame);
 
