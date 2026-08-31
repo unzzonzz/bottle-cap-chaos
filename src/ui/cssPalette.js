@@ -42,6 +42,8 @@ export function applyCssPalette(root = document.documentElement) {
   // canvas read as the scene continuing past the frame instead of as a border.
   set('--bcc-void', PALETTE.bg.skyTop);
   set('--bcc-text', PALETTE.ui.text);
+  // 닉네임 필드의 플레이스홀더. 의사 요소라 인라인으로 쓸 수 없어서 여기 있다.
+  set('--bcc-text-muted', PALETTE.ui.textMuted);
   set('--bcc-edge', PALETTE.ui.edge);
   set('--bcc-surface', PALETTE.ui.surface);
   set('--bcc-accent', PALETTE.accent.cyan);

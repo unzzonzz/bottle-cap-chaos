@@ -1,5 +1,5 @@
 import { CanvasTexture, ClampToEdgeWrapping, LinearFilter, SRGBColorSpace } from 'three';
-import { darken, PALETTE } from '../core/palette.js';
+import { darken, PALETTE, withAlpha } from '../core/palette.js';
 import { registerTextureCache } from './fonts.js';
 import { ELEVATION, RADIUS, SIZE, SPACE, TYPE } from '../core/tokens.js';
 import {
@@ -110,8 +110,6 @@ function drawText(target, { text, x, y, font, color, align = 'left' }) {
  * "the marker bar and the border change, the ground behind the type barely
  * does" — carried onto a light scheme.
  */
-const PLATE = PALETTE.ui.surface;
-const EDGE = PALETTE.ui.edge;
 const TEXT = PALETTE.ui.text;
 
 /** The four pressable states, shared with the menu and the mark editor. */
@@ -426,31 +424,49 @@ export function notePlateTexture(text, tone, { height, scale = 1, maxWidth = 360
   const hit = cache.get(key);
   if (hit) return hit;
 
-  const u = (n) => Math.max(1, Math.round(n * scale));
-  const font = `${u(13)}px ui-monospace, Menlo, monospace`;
+  const accent = tone === 'timeout' ? PALETTE.ui.danger : PALETTE.accent.yellow;
+  const ink = tone === 'timeout' ? PALETTE.ui.dangerDeep : PALETTE.accent.yellowDeep;
 
   const probe = makeCanvas(8, 8);
-  probe.ctx.font = font;
-  const textW = Math.ceil(probe.ctx.measureText(text).width);
-  const frameW = Math.min(maxWidth, Math.round(textW / scale) + 16);
+  applyTracking(probe.ctx, TYPE.caption.tracking);
+  const pad = Math.max(SPACE.sm, height * 0.42);
+  const fitted = fitText(probe.ctx, text, TYPE.caption, maxWidth - pad * 2);
+  const frameW = Math.min(maxWidth, Math.ceil(fitted.width) + pad * 2);
 
   const w = Math.round(frameW * scale);
   const h = Math.round(height * scale);
   const { canvas, ctx } = makeCanvas(w, h);
-  const scratch = makeCanvas(w, h);
+  ctx.scale(scale, scale);
 
-  ctx.fillStyle = PLATE;
-  ctx.fillRect(0, 0, w, h);
-  ctx.fillStyle = tone === 'timeout' ? PALETTE.ui.danger : PALETTE.accent.yellow;
-  ctx.fillRect(0, 0, u(3), h);
-
-  drawText(ctx, {
-    text,
-    x: u(9),
-    y: Math.round(h / 2 + u(5)),
-    font,
-    color: tone === 'timeout' ? PALETTE.ui.dangerDeep : PALETTE.accent.yellowDeep,
+  /**
+   * 알약이고, 색조를 띤다.
+   *
+   * 예전에는 각진 판 왼쪽 가장자리에 3픽셀 색 막대였다. 그 막대가 유일하게 하던
+   * 일 — 이 줄이 어떤 종류인지 읽기 전에 말하기 — 을 색조가 대신한다. 판 전체가
+   * 옅게 물들면 3픽셀보다 멀리서 읽히고, 라운드 판에 붙은 직각 막대가 아니다.
+   */
+  glassPanel(ctx, {
+    x: 0,
+    y: 0,
+    w: frameW,
+    h: height,
+    radius: RADIUS.pill,
+    accent,
+    tint: withAlpha(accent, 0.18),
+    alpha: 1,
+    elevation: ELEVATION.raised,
   });
+
+  applyTracking(ctx, TYPE.caption.tracking);
+  drawText(ctx, {
+    text: fitted.text,
+    x: frameW / 2,
+    y: height / 2 + fitted.size * 0.36,
+    font: fitted.font,
+    color: ink,
+    align: 'center',
+  });
+  applyTracking(ctx, 0);
 
   const tex = toTexture(canvas);
   tex.userData = { width: frameW, height };
@@ -515,30 +531,49 @@ export function victoryPlateTexture(text, color, { width, height, scale = 1 }) {
   const w = Math.round(width * scale);
   const h = Math.round(height * scale);
   const { canvas, ctx } = makeCanvas(w, h);
-  const scratch = makeCanvas(w, h);
-  const u = (n) => Math.max(1, Math.round(n * scale));
+  ctx.scale(scale, scale);
 
-  ctx.fillStyle = PLATE;
-  ctx.fillRect(0, 0, w, h);
-  ctx.strokeStyle = EDGE;
-  ctx.lineWidth = u(1);
-  ctx.strokeRect(u(0.5), u(0.5), w - u(1), h - u(1));
+  /**
+   * 유리판, 강조색은 이긴 쪽의 색.
+   *
+   * 예전에는 각진 흰 판 양 끝에 두꺼운 팀 색 막대 두 개였다. 막대의 근거는 "몇
+   * 픽셀 폭이 되어도 값이 아니라 **색**으로 읽히는 쪽" 이었고, 근처의 다른 판들이
+   * 전부 같은 어휘를 쓰고 있을 때는 맞았다. 지금은 이 판만 그렇다.
+   *
+   * `gelButton` 이 아니라 `glassPanel` 인 이유는 이것이 누를 수 있는 것이 아니기
+   * 때문이다. 아래에 진짜 버튼 두 개가 있고, 그 둘과 같은 모양이면 안 된다.
+   */
+  glassPanel(ctx, {
+    x: 0,
+    y: 0,
+    w: width,
+    h: height,
+    radius: RADIUS.panel,
+    accent: color,
+    alpha: 1,
+    elevation: ELEVATION.modal,
+  });
 
-  // The team bars, full saturation, at both ends.
-  ctx.fillStyle = color;
-  ctx.fillRect(u(3), u(3), u(9), h - u(6));
-  ctx.fillRect(w - u(12), u(3), u(9), h - u(6));
-
+  /**
+   * 글자는 팀 색의 **어두운 쪽**이다.
+   *
+   * 분업은 `scorePlateTexture` 의 것과 같다: 42px 에서 읽히려면 판에서 충분히 멀어야
+   * 하고, 순수한 팀 색은 그 거리를 주지 않는다. `PALETTE.playerInk` 가 그 값이고,
+   * 여기서 블렌드로 유도하지 않는 이유는 그 블렌드가 두 입력에만 우연히 맞기
+   * 때문이다. 무승부에는 팀이 없으므로 중립색이 들어온다.
+   */
+  const probe = makeCanvas(8, 8);
+  const fitted = fitText(probe.ctx, text, TYPE.display, width - SPACE.lg * 2);
+  applyTracking(ctx, TYPE.display.tracking);
   drawText(ctx, {
-    text,
-    x: w / 2,
-    // Baseline rather than a centred box: `textBaseline` is alphabetic in
-    // `crispText`, so the descender-free Korean glyphs sit high without this.
-    y: Math.round(h / 2 + u(15)),
-    font: `bold ${u(42)}px ui-monospace, Menlo, monospace`,
+    text: fitted.text,
+    x: width / 2,
+    y: height / 2 + fitted.size * 0.36,
+    font: fitted.font,
     color: teamInk(color),
     align: 'center',
   });
+  applyTracking(ctx, 0);
 
   const tex = toTexture(canvas);
   cache.set(key, tex);

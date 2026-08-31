@@ -38,7 +38,19 @@ import { FONT_FAMILY } from './fonts.js';
  * not a circle at `RADIUS.panel` and the two would not match across devices.
  */
 export function roundRectPath(ctx, x, y, w, h, r) {
-  const radius = Math.min(r, w / 2, h / 2);
+  /**
+   * 반경은 절대 음수가 될 수 없다.
+   *
+   * `Math.min(r, w/2, h/2)` 만으로는 부족하다. 판이 저술된 것보다 작아지면 —
+   * 프레임에 맞춰 줄어들 때, 또는 안쪽 여백이 판보다 커질 때 — `w` 나 `h` 가
+   * 음수가 되고 그러면 반경도 음수가 된다. Canvas 는 거기서 `RangeError` 를 던지고,
+   * 그건 그리는 도중이라 그 프레임 전체가 사라진다. 실제로 매칭 화면의 이름판이
+   * 17 픽셀로 줄었을 때 게임 부팅이 통째로 죽었다.
+   *
+   * 0 으로 죄면 그냥 각진 사각형이 나온다 — 못생겼지만 화면은 살아 있고, 그
+   * 크기에서는 어차피 모서리가 안 보인다.
+   */
+  const radius = Math.max(0, Math.min(r, w / 2, h / 2));
   ctx.beginPath();
   if (typeof ctx.roundRect === 'function') {
     ctx.roundRect(x, y, w, h, radius);

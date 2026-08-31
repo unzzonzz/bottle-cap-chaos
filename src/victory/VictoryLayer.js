@@ -2,6 +2,7 @@ import { Color, Group, Mesh, PlaneGeometry, Raycaster, Scene, Vector2 } from 'th
 import {
   FRAME as SHARED_FRAME,
   frameCamera,
+  frameScale,
   halfDiagonal,
   refitFrameCamera,
 } from '../core/frame.js';
@@ -11,7 +12,8 @@ import { ringTexture, trailTexture } from '../render/fxTextures.js';
 import { HudMaterials } from '../ui/HudMaterial.js';
 import { buttonTexture, notePlateTexture, victoryPlateTexture } from '../ui/hudTextures.js';
 import { VICTORY_STAGE, VictoryClock } from './VictoryClock.js';
-import { PALETTE } from '../core/palette.js';
+import { PALETTE, toRgb } from '../core/palette.js';
+import { SPACE } from '../core/tokens.js';
 
 /**
  * Who won, as a thing that happens on screen.
@@ -271,8 +273,20 @@ export class VictoryLayer {
     this._quad = new PlaneGeometry(1, 1);
 
     // ── the darkened game, and the inversion over the top of it ─────────────
+    /**
+     * 어두워진 판.
+     *
+     * 순수한 검정이었다. 어두운 UI 위에서는 맞았지만 밝은 유리 위에서 같은 일을
+     * 하면 뒤가 **없어진다** — 실측해 보니 나무판과 뚜껑 여섯 개가 전부 사라지고
+     * 갈색 얼룩만 남았다. 승리 화면은 방금 무슨 일이 있었는지 보여 주는 화면이므로
+     * 판이 보여야 한다.
+     *
+     * 팔레트의 깊은 파랑이다. `ModalLayer` 의 가림막과 같은 잉크이고 같은 이유다 —
+     * 이 프로젝트에 순수한 검정은 없다(팔레트 감사 규칙 1).
+     */
     this.dim = new Mesh(this._quad, this.uiMaterials.createSolid(0));
-    this.dim.material.uniforms.uTint.value.set(0, 0, 0);
+    const dimRgb = toRgb(PALETTE.accent.skyDeep).map((v) => v / 255);
+    this.dim.material.uniforms.uTint.value.set(dimRgb[0], dimRgb[1], dimRgb[2]);
     this.dim.scale.set(VICTORY_FRAME.width + OVERHANG * 2, VICTORY_FRAME.height + OVERHANG * 2, 1);
     this.dim.renderOrder = -50;
     this.dim.visible = false;
@@ -396,7 +410,9 @@ export class VictoryLayer {
       hit.renderOrder = 25;
       hit.visible = false;
       this.scene.add(hit);
-      return { ...spec, plate, hit };
+      // `aw`/`ah` 는 저술 크기(640 프레임 기준), `width`/`height` 는 실제 크기다.
+      // `layout()` 이 `frameScale()` 을 곱해 후자를 채운다.
+      return { ...spec, aw: spec.width, ah: spec.height, plate, hit };
     });
 
     this._ray = new Raycaster();
@@ -573,8 +589,24 @@ export class VictoryLayer {
   layout() {
     const c = this.config.victory;
 
-    this.plate.scale.set(PLATE.width, PLATE.height, 1);
-    this.plate.position.set(0, c.textY, 0);
+    /**
+     * ── 판 크기와 자리는 프레임에서 나온다 ────────────────────────────────
+     * `PLATE` 는 340x72 이고 `victory.textY` 는 -110, `buttonY` 는 -178 이다. 전부
+     * 640x480 기준이라 421x316 프레임에서는 승리 판과 버튼 줄이 서로 겹쳤다 —
+     * 실측: 판의 아래 가장자리가 -146, 버튼 줄의 위 가장자리가 -162 인데 프레임
+     * 바닥이 -158 이라 둘 다 화면 밖으로 밀려 나가며 만났다.
+     *
+     * `victory.textY` / `buttonY` 는 패널이 움직이는 값이므로 없애지 않고 **배수를
+     * 곱한다**. 패널에서 -110 을 -90 으로 바꾸면 어느 프레임에서나 그만큼 위로
+     * 간다는 관계가 유지된다.
+     */
+    const k = frameScale();
+    this._plateSize = {
+      width: Math.round(Math.min(PLATE.width * k, VICTORY_FRAME.width - SPACE.md * 2)),
+      height: Math.round(PLATE.height * k),
+    };
+    this.plate.scale.set(this._plateSize.width, this._plateSize.height, 1);
+    this.plate.position.set(0, c.textY * k, 0);
 
     const pad = Math.max(0, c.hitMargin);
     /**
@@ -585,8 +617,19 @@ export class VictoryLayer {
      * position is derived back from it. See `setSafeInsets`.
      */
     const floor = -VICTORY_FRAME.height / 2 + (this._safeBottom ?? 0);
+    /**
+     * 버튼 크기도 프레임을 따라간다. 폭에는 프레임 상한이 걸린다 — 두 버튼과
+     * 간격을 합치면 저술 폭에서 330 이고, 421 프레임에서 그대로 두면 79% 다.
+     */
+    const room = VICTORY_FRAME.width - SPACE.md * 2 - BUTTON_GAP * (this._buttons.length - 1);
+    const authored = this._buttons.reduce((sum, b) => sum + b.aw, 0);
+    const wFit = Math.min(k, room / Math.max(1, authored));
+    for (const b of this._buttons) {
+      b.width = Math.round(b.aw * wFit);
+      b.height = Math.round(b.ah * k);
+    }
     const tallest = this._buttons.reduce((m, b) => Math.max(m, b.height), 0);
-    const buttonY = Math.max(c.buttonY, floor + pad + tallest / 2);
+    const buttonY = Math.max(c.buttonY * k, floor + pad + tallest / 2);
 
     const total =
       this._buttons.reduce((sum, b) => sum + b.width, 0) + BUTTON_GAP * (this._buttons.length - 1);
@@ -1135,7 +1178,15 @@ export class VictoryLayer {
     // reads as an entrance rather than as a size that then relaxes. The same
     // shape — and the same slider range — as the score's own change pulse.
     const bump = Math.sin(Math.PI * textK) * Math.max(0, c.textPulseScale);
-    this.plate.scale.set(PLATE.width * (1 + bump), PLATE.height * (1 + bump), 1);
+    /**
+     * 박동은 `layout()` 이 푼 크기에 곱한다. 저술 크기가 아니라.
+     *
+     * `PLATE.width` 를 그대로 쓰면 프레임에 맞춰 줄여 놓은 값이 매 프레임 340 으로
+     * 되돌아간다 — `HudLayer._updateScore` 에 있던 것과 같은 결함이고, 같은 이유로
+     * 화면에서는 축소가 아예 없던 것처럼 보인다.
+     */
+    const box = this._plateSize ?? PLATE;
+    this.plate.scale.set(box.width * (1 + bump), box.height * (1 + bump), 1);
 
     // The explanation rides the same envelope and takes NO bump. The beat is the
     // winner line arriving; a second thing pulsing beside it reads as two
@@ -1206,8 +1257,9 @@ export class VictoryLayer {
      */
     const text = draw ? '무승부' : (this.outcomeFor?.(this.winnerIndex) ?? `${this.winnerIndex + 1}P 승리`);
 
+    // 크기는 `layout()` 이 프레임에서 푼 값이다. `PLATE` 는 저술 크기일 뿐이다.
     this.plate.material.uniforms.uMap.value = victoryPlateTexture(text, color, {
-      ...PLATE,
+      ...(this._plateSize ?? PLATE),
       scale,
     });
 
@@ -1223,9 +1275,10 @@ export class VictoryLayer {
     if (this._note) {
       // `textY` is in the key because the note hangs off it and the panel can
       // drag it: without it, moving the winner line would leave the note behind.
-      const key = `${this._note}|${scale}|${this.config.victory.textY}`;
+      const noteH = Math.round(NOTE_HEIGHT * frameScale());
+      const key = `${this._note}|${scale}|${this.config.victory.textY}|${noteH}`;
       const tex = notePlateTexture(this._note, 'normal', {
-        height: NOTE_HEIGHT,
+        height: noteH,
         scale,
         // Nearly the frame, so a tiebreaker sentence is never truncated. The
         // in-game note's tighter ceiling is about not covering the board; there
@@ -1236,7 +1289,7 @@ export class VictoryLayer {
       if (key !== this._noteKey) {
         this._noteKey = key;
         const w = tex.userData?.width ?? 200;
-        this.note.scale.set(w, NOTE_HEIGHT, 1);
+        this.note.scale.set(w, noteH, 1);
         /**
          * ABOVE the winner line, and that is a measurement rather than a taste.
          *
@@ -1250,9 +1303,11 @@ export class VictoryLayer {
          * "1P 승리" is the reason and then the result, which is the order the
          * player wants them in — the note is not a footnote, it is why.
          */
+        const k = frameScale();
+        const plateH = this._plateSize?.height ?? PLATE.height;
         this.note.position.set(
           0,
-          this.config.victory.textY + PLATE.height / 2 + NOTE_GAP + NOTE_HEIGHT / 2,
+          this.config.victory.textY * k + plateH / 2 + NOTE_GAP * k + noteH / 2,
           0,
         );
       }

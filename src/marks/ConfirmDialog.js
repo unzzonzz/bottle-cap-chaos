@@ -3,6 +3,9 @@ import { createSpriteMaterial } from '../menu/menuMaterials.js';
 import { menuPlateTexture } from '../menu/menuTextures.js';
 import { messageTexture, solidTexture } from './markIcons.js';
 import { PALETTE } from '../core/palette.js';
+import { frameScale } from '../core/frame.js';
+import { SPACE } from '../core/tokens.js';
+import { PLATE_TEXEL_SCALE } from '../menu/columnLayout.js';
 
 /**
  * "정말?" — asked in the scene, never in a `window.confirm`.
@@ -92,7 +95,7 @@ export class ConfirmDialog {
       createSpriteMaterial(retro, {
         map: solidTexture(),
         tint: PALETTE.ui.veil,
-        opacity: 0.74,
+        opacity: 0.52,
         depthTest: false,
       }),
     );
@@ -109,23 +112,34 @@ export class ConfirmDialog {
     this.message.renderOrder = DIALOG_ORDER + 1;
     this.root.add(this.message);
 
+    /**
+     * 두 버튼. 크기는 프레임을 따라간다.
+     *
+     * 128x40 고정이었다. 640 프레임에서는 맞고 421 프레임에서는 둘이 합쳐 프레임
+     * 폭의 66% 가 된다 — 질문 판보다 버튼이 커 보이는 구도다.
+     */
+    const k = frameScale();
+    const btn = { width: Math.round(128 * k), height: Math.round(40 * k) };
+    this._btn = btn;
     this._buttons = [
-      { id: 'confirm', label: '확인', x: -70 },
-      { id: 'cancel', label: '취소', x: 70 },
+      { id: 'confirm', label: '확인', side: -1 },
+      { id: 'cancel', label: '취소', side: 1 },
     ].map((def) => {
+      const box = { ...btn, scale: PLATE_TEXEL_SCALE };
       const maps = {
-        idle: menuPlateTexture(def.label, 'idle', { width: 128, height: 40 }),
-        hover: menuPlateTexture(def.label, 'hover', { width: 128, height: 40 }),
+        idle: menuPlateTexture(def.label, 'idle', box),
+        hover: menuPlateTexture(def.label, 'hover', box),
       };
       const mesh = new Mesh(
         new PlaneGeometry(1, 1),
         createSpriteMaterial(retro, { map: maps.idle, depthTest: false }),
       );
-      mesh.scale.set(128 * u, 40 * u, 1);
-      mesh.position.set(def.x * u, -22 * u, 0);
+      const x = def.side * (btn.width / 2 + SPACE.sm * k);
+      mesh.scale.set(btn.width * u, btn.height * u, 1);
+      mesh.position.set(x * u, -(btn.height / 2 + SPACE.xs * k) * u, 0);
       mesh.renderOrder = DIALOG_ORDER + 2;
       this.root.add(mesh);
-      return { ...def, mesh, maps };
+      return { ...def, x, mesh, maps };
     });
 
     this._ray = new Raycaster();
@@ -140,9 +154,14 @@ export class ConfirmDialog {
    * all about work the player might be about to lose.
    */
   ask(text, { onConfirm, onCancel = null } = {}) {
-    const map = messageTexture(text, { width: 320, height: 46 });
+    const k = frameScale();
+    const box = { width: Math.round(320 * k), height: Math.round(46 * k) };
+    const map = messageTexture(text, box);
     this.message.material.uniforms.uMap.value = map;
-    this.message.scale.set(320 * this._u, 46 * this._u, 1);
+    this.message.scale.set(box.width * this._u, box.height * this._u, 1);
+    // 질문 판은 버튼 줄 바로 위에 앉는다. 예전에는 34 로 고정이라 421 프레임에서
+    // 버튼과 겹쳤다.
+    this.message.position.set(0, (box.height / 2 + SPACE.xs * k) * this._u, 0);
     this._onConfirm = onConfirm ?? null;
     this._onCancel = onCancel;
     this.open = true;

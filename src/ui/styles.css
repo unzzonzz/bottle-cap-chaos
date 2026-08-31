@@ -89,6 +89,18 @@ textarea {
   -webkit-touch-callout: default;
 }
 
+/* ── 닉네임 필드 ─────────────────────────────────────────────────────────────
+   테두리도 배경도 없다. 필드를 둘러싼 상자는 캔버스에 그려진 유리 홈이고
+   (`hudTextures.slotTexture`), 이 요소는 그 위에 놓인 캐럿과 IME 조합 글자일 뿐이다.
+   나머지 인라인 스타일은 `ModalLayer._mountInput` 에 있다 — 위치와 크기는 프레임에서
+   계산되므로 CSS 로 적을 수 없고, 여기 있는 것은 프레임과 무관한 것들이다.
+
+   플레이스홀더가 여기 있는 이유는 인라인으로 쓸 수 없기 때문이다. 의사 요소다. */
+input::placeholder {
+  color: var(--bcc-text-muted);
+  opacity: 1; /* Firefox 는 기본으로 0.54 를 곱한다. 팔레트가 이미 흐린 색이다. */
+}
+
 /* The canvas is letterboxed to a fixed 4:3 by Viewport, so it is centred rather
    than stretched to the window. */
 #app {
@@ -102,11 +114,19 @@ textarea {
 #view {
   display: block;
 
-  /* The drawing buffer is CSS-pixel sized (pixelRatio = 1) and the scene is
-     rendered into a 320x240 target first, so the shader owns the upscale. This
-     stops the compositor from smoothing it again on a HiDPI screen. */
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
+  /* ── `image-rendering: pixelated` 가 여기 있었다 ──────────────────────────
+     근거는 "드로잉 버퍼가 CSS 픽셀 크기(pixelRatio = 1)이고 장면이 320x240 타겟에
+     먼저 그려지므로 셰이더가 확대를 소유한다. 컴포지터가 HiDPI 에서 그것을 다시
+     부드럽게 만드는 것을 막는다" 였다.
+
+     세 전제가 모두 사실이 아니게 됐다. PHASE 1 이 저해상도 타겟을 없앴고,
+     `Viewport` 는 pixelRatio 를 2 까지 올려 잡으며, 확대를 소유하는 셰이더가 없다.
+     남은 것은 정반대의 효과다: 버퍼가 CSS 크기보다 크므로 컴포지터가 **축소**를
+     하는데, `pixelated` 는 그 축소를 nearest 로 만든다 — 레티나에서 픽셀 행을
+     통째로 버리는 것이고, `core/textures.js` 가 텍스처에 대해 길게 설명한 바로
+     그 결함을 화면 전체에 적용하는 셈이다.
+
+     기본값(auto)이 맞다. 그래서 아무것도 적지 않는다. */
 
   /* The pointer router needs the raw stream: no scrolling, no pinch-to-zoom
      handed to the browser, no double-tap gestures. */

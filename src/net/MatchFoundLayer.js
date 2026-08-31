@@ -1,10 +1,16 @@
 import { Group, Mesh, PlaneGeometry, Scene } from 'three';
-import { FRAME as SHARED_FRAME, frameCamera, refitFrameCamera } from '../core/frame.js';
+import {
+  FRAME as SHARED_FRAME,
+  frameCamera,
+  frameScale,
+  refitFrameCamera,
+} from '../core/frame.js';
 import { buildCapGeometry, CAP_DEFAULTS, CAP_GROUP } from '../cap/capGeometry.js';
 import { PLAYER_COLORS } from '../render/playerColors.js';
 import { HudMaterials } from '../ui/HudMaterial.js';
 import { turnPlateTexture } from '../ui/hudTextures.js';
 import { PALETTE } from '../core/palette.js';
+import { SIZE } from '../core/tokens.js';
 
 /**
  * 매칭 성립 — the two players, before the board.
@@ -62,10 +68,19 @@ const SPOTS = {
   },
 };
 
-/** Cap width on screen, in frame pixels. */
+/**
+ * Cap width on screen, in frame pixels — at the authored 640-wide frame.
+ *
+ * 여기 숫자들은 전부 640x480 기준이다. `_layout` 이 `frameScale()` 을 곱한다.
+ * 곱하지 않으면 421 프레임에서 뚜껑 두 개가 프레임 폭의 63% 를 차지하고, 시작
+ * 위치(-420, 320)는 프레임 밖의 두 배 거리라 등장 동작의 대부분이 화면 밖에서
+ * 일어난다 — 뚜껑이 갑자기 나타나는 것처럼 보인다.
+ */
 const CAP_WIDTH = 132;
 /** How far under a cap its name plate sits. */
 const PLATE_DROP = 96;
+/** The name plate, at the authored frame. */
+const PLATE = { width: 152, height: 26 };
 
 const easeOut = (t) => 1 - (1 - t) * (1 - t) * (1 - t);
 const easeIn = (t) => t * t;
@@ -232,8 +247,10 @@ export class MatchFoundLayer {
       // the departure accelerates into the cut rather than drifting.
       const a = easeOut(enter);
       const b = easeIn(out);
-      const x = lerp(lerp(spot.from.x, spot.at.x, a), spot.to.x, b);
-      const y = lerp(lerp(spot.from.y, spot.at.y, a), spot.to.y, b);
+      const k = frameScale();
+      const x = lerp(lerp(spot.from.x, spot.at.x, a), spot.to.x, b) * k;
+      const y = lerp(lerp(spot.from.y, spot.at.y, a), spot.to.y, b) * k;
+      seat.pivot.scale.setScalar(this._capScale * k);
 
       seat.pivot.position.set(x, y, 0);
       /**
@@ -256,7 +273,7 @@ export class MatchFoundLayer {
       this._setOpacity(seat.pivot, shown);
 
       // The name plate rides under its cap.
-      this._syncPlate(player, x, y - PLATE_DROP, shown);
+      this._syncPlate(player, x, y - PLATE_DROP * k, shown);
 
     }
   }
@@ -268,16 +285,38 @@ export class MatchFoundLayer {
       seat.plate.visible = false;
       return;
     }
-    if (this._labels[player] !== name) {
-      this._labels[player] = name;
+    const k = frameScale();
+    /**
+     * 이름판에는 바닥이 있다.
+     *
+     * 26 을 프레임 배수로 줄이면 421 프레임에서 17 이 되고, 그 안에는 17px 라벨은
+     * 커녕 유리의 안쪽 여백도 안 들어간다. 이름은 이 화면에 있는 유일한 정보이므로
+     * 줄어들다 사라지면 안 된다 — 폭만 줄이고 높이는 `SIZE.turnPlate.h` 의 절반을
+     * 바닥으로 둔다.
+     */
+    const box = {
+      width: Math.round(PLATE.width * k),
+      height: Math.max(Math.round(SIZE.turnPlate.h * 0.5), Math.round(PLATE.height * k)),
+    };
+    const key = `${name}:${box.width}x${box.height}`;
+    if (this._labels[player] !== key) {
+      this._labels[player] = key;
+      /**
+       * `width` 는 최소이고 `maxWidth` 가 상한이다.
+       *
+       * `turnPlateTexture` 는 자기가 말하는 것만큼 넓어지되 상한에서 멈춘다. 둘을
+       * 같은 값으로 주면 이름이 그 폭에 갇혀 "PLAYER 1" 이 "PLA…" 가 된다 —
+       * 실제로 그랬다. 상한은 프레임의 42% 로, 두 판이 좌우에 놓여도 겹치지 않는
+       * 폭이다.
+       */
       const tex = turnPlateTexture(name, PLAYER_COLORS[player], {
-        width: 152,
-        height: 26,
+        ...box,
+        maxWidth: Math.round(FRAME.width * 0.42),
         scale: this.config.ui?.textureScale ?? 1,
       });
       seat.plate.material.uniforms.uMap.value = tex;
-      const w = tex.userData?.width ?? 152;
-      seat.plate.scale.set(w, 26, 1);
+      const w = tex.userData?.width ?? box.width;
+      seat.plate.scale.set(w, box.height, 1);
     }
     seat.plate.position.set(x, y, 2);
     seat.plate.material.uniforms.uOpacity.value = shown;
