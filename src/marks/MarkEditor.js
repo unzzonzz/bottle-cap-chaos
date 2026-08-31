@@ -13,6 +13,8 @@ import {
   toMarkTexture,
 } from './markTextures.js';
 import { DEFAULT_MARK } from './MarkBook.js';
+import { frameScale } from '../core/frame.js';
+import { focusRing, roundRectPath } from '../ui/glass.js';
 
 /**
  * The drawing screen: a cap you paint on, and the tools to paint it with.
@@ -243,20 +245,98 @@ export class MarkEditor {
     this._lastUv = null;
     this._drag = null;
 
-    this.refresh();
+    this.layout(u);
   }
 
   // ── construction helpers ──────────────────────────────────────────────────
 
+  /**
+   * 컨트롤 하나. 저술 좌표(`ax` 등)와 실제 좌표(`x` 등)를 둘 다 들고 있다.
+   *
+   * 저술 좌표는 640x480 프레임 기준이고, 실제 좌표는 거기에 `frameScale()` 을
+   * 곱한 것이다. 둘 다 필요한 이유는 리사이즈다: 실제 좌표만 들고 있으면 배율을
+   * 다시 곱할 때 이미 곱해진 값에 또 곱하게 되어 화면이 매번 작아진다.
+   */
   _add(retro, { id, kind, map, x, y, w, h, z = 0 }) {
-    const u = this._u;
     const mesh = new Mesh(new PlaneGeometry(1, 1), createSpriteMaterial(retro, { map }));
-    mesh.scale.set(w * u, h * u, 1);
-    mesh.position.set(x * u, y * u, (50 + z) * u);
     this.root.add(mesh);
-    const control = { id, kind, mesh, x, y, w, h };
+    const control = { id, kind, mesh, ax: x, ay: y, aw: w, ah: h, az: z, x, y, w, h };
     this._controls.push(control);
     return control;
+  }
+
+  /**
+   * 편집기 전체를 지금 프레임에 맞춘다.
+   *
+   * ── 실측: 421 폭 프레임에서 편집기의 절반이 화면 밖이었다 ─────────────────
+   * 이 화면의 좌표는 전부 640x480 기준이다 — 뚜껑 폭 236, 팔레트 왼쪽 끝 -270,
+   * 도구 열 x 236, 저장 버튼 y -178. 800x459 창의 프레임은 421x316 이라 팔레트
+   * 네 열 중 두 열이 왼쪽으로 잘려 나갔고, 도구 열과 저장/뒤로 버튼은 아예 없었다.
+   * 뚜껑만 프레임의 56% 를 차지하며 남아 있었다.
+   *
+   * 전부 하나의 배수로 줄인다. 4:3 프레임에서는 가로 세로가 같은 비율로 줄므로
+   * 배치가 그대로 보존된다 — 640x480 을 축소한 그림이 된다.
+   */
+  layout(unitsPerPixel) {
+    const u = unitsPerPixel ?? this._u;
+    this._u = u;
+    const k = frameScale();
+
+    const capR = this.geometry.userData.radius ?? 1.6;
+    this.pivot.position.set(0, L.capY * k * u, 0);
+    this.pivot.scale.setScalar(((L.capWidth * k) / (capR * 2)) * u);
+
+    const panelWidth = L.capWidth * k * (this.geometry.userData.panelRadius / capR);
+    this.ring.scale.set(panelWidth * u, panelWidth * u, 1);
+    this.ring.position.set(0, L.capY * k * u, 40 * u);
+
+    for (const c of this._controls) {
+      c.x = c.ax * k;
+      c.y = c.ay * k;
+      c.w = c.aw * k;
+      c.h = c.ah * k;
+      c.mesh.scale.set(c.w * u, c.h * u, 1);
+      c.mesh.position.set(c.x * u, c.y * u, (50 + c.az) * u);
+    }
+
+    // 텍스처는 실제 크기로 굽는다. 배수가 바뀌지 않았으면 아무것도 하지 않는다.
+    if (k !== this._k) {
+      this._k = k;
+      this._rebake();
+    }
+    this.refresh();
+  }
+
+  /** 판 크기가 바뀌었을 때 컨트롤 텍스처를 다시 굽는다. */
+  _rebake() {
+    const size = Math.max(12, Math.round(L.tool * this._k));
+    for (const b of this.modeButtons ?? []) b.size = size;
+    for (const t of this.tools ?? []) t.size = size;
+    for (const sw of this.swatches ?? []) {
+      sw.mesh.material.uniforms.uMap.value = swatchTexture(sw.colour, false, sw.w);
+      sw.selected = null;
+    }
+    if (this.saveButton) {
+      this.saveButton.mesh.material.uniforms.uMap.value = saveButtonTexture('idle', {
+        width: Math.round(this.saveButton.w),
+        height: Math.round(this.saveButton.h),
+      });
+      this.saveButton.tone = null;
+    }
+    if (this.backButton) {
+      const box = {
+        width: Math.round(this.backButton.w),
+        height: Math.round(this.backButton.h),
+        scale: 2,
+      };
+      this._backMaps.idle?.dispose();
+      this._backMaps.hover?.dispose();
+      this._backMaps = {
+        idle: menuPlateTexture('◀ 목록으로', 'idle', box),
+        hover: menuPlateTexture('◀ 목록으로', 'hover', box),
+      };
+      this.backButton.mesh.material.uniforms.uMap.value = this._backMaps.idle;
+    }
   }
 
   _buildModes(retro) {
@@ -760,7 +840,9 @@ export class MarkEditor {
           : b.id === hoverId
             ? 'hover'
             : 'idle';
-      b.mesh.material.uniforms.uMap.value = iconTexture(b.icon, state, { size: L.tool });
+      b.mesh.material.uniforms.uMap.value = iconTexture(b.icon, state, {
+        size: Math.max(12, Math.round(b.w)),
+      });
     }
 
     /**
@@ -775,6 +857,7 @@ export class MarkEditor {
       s.mesh.material.uniforms.uMap.value = swatchTexture(
         s.colour,
         !this.erasing && s.colour === this.colour,
+        s.w,
       );
     }
     for (const t of this.tools) {
@@ -801,7 +884,9 @@ export class MarkEditor {
       // brief asks for explicitly.
       if (t.id === 'undo' && this._historyAt <= 0) state = 'disabled';
       if (t.id === 'redo' && this._historyAt >= this._history.length - 1) state = 'disabled';
-      t.mesh.material.uniforms.uMap.value = iconTexture(t.icon, state, { size: L.tool });
+      t.mesh.material.uniforms.uMap.value = iconTexture(t.icon, state, {
+        size: Math.max(12, Math.round(t.w)),
+      });
     }
 
     this.saveButton.mesh.visible = !this.readOnly;
@@ -866,19 +951,45 @@ export class MarkEditor {
 const swatchCache = new Map();
 
 /** A colour chip. The selected one gets the toolbar's gold edge. */
-function swatchTexture(colour, selected) {
-  const key = `${colour}:${selected}`;
+function swatchTexture(colour, selected, size = L.swatch) {
+  const edge = Math.max(8, Math.round(size));
+  const key = `${colour}:${selected}:${edge}`;
   const hit = swatchCache.get(key);
   if (hit) return hit;
+
+  /**
+   * 색 견본. 둥근 사각형에 유리 테두리.
+   *
+   * 각진 두 사각형에 필터 끔이었다. 그 파이프라인의 것이고, 이 화면에서 각진 것은
+   * 견본뿐이 됐다. 안쪽은 **평평하게** 칠한다 — 광택을 올리면 고른 색이 화면에서
+   * 다른 색으로 보이고, 색을 고르는 화면에서 그건 치명적이다. 광택은 테두리에만.
+   */
+  const scale = 3;
   const canvas = document.createElement('canvas');
-  canvas.width = L.swatch;
-  canvas.height = L.swatch;
+  canvas.width = edge * scale;
+  canvas.height = edge * scale;
   const ctx = canvas.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
+  ctx.imageSmoothingEnabled = true;
+  ctx.scale(scale, scale);
+
+  const r = edge * 0.22;
+  roundRectPath(ctx, 0, 0, edge, edge, r);
   ctx.fillStyle = selected ? PALETTE.accent.cyan : PALETTE.ui.edge;
-  ctx.fillRect(0, 0, L.swatch, L.swatch);
+  ctx.fill();
+  roundRectPath(ctx, edge * 0.12, edge * 0.12, edge * 0.76, edge * 0.76, r * 0.7);
   ctx.fillStyle = colour;
-  ctx.fillRect(3, 3, L.swatch - 6, L.swatch - 6);
+  ctx.fill();
+  if (selected) {
+    focusRing(ctx, {
+      x: 0.5,
+      y: 0.5,
+      w: edge - 1,
+      h: edge - 1,
+      radius: r,
+      accent: PALETTE.accent.cyan,
+    });
+  }
+
   const tex = toMarkTexture(canvas);
   swatchCache.set(key, tex);
   return tex;

@@ -615,67 +615,143 @@ function wrapText(ctx, text, maxWidth) {
  * caller has to scale its quad to match or the type is resampled.
  */
 export function modalTexture(
-  { title, body, width = 320, scale = 1, accent = PALETTE.accent.cyan },
+  { title, body, width = 320, scale = 1, accent = PALETTE.accent.cyan, extra = 0, k = 1 },
 ) {
-  const key = `modal:${title}:${body}:${width}:${accent}@${scale}`;
+  const key = `modal:${title}:${body}:${width}:${accent}:${extra}:${k}@${scale}`;
   const hit = cache.get(key);
   if (hit) return hit;
 
-  const u = (n) => Math.max(1, Math.round(n * scale));
-  const pad = 14;
-  const titleFont = `bold ${u(15)}px ui-monospace, Menlo, monospace`;
-  const bodyFont = `${u(12)}px ui-monospace, Menlo, monospace`;
+  /**
+   * `k` 는 프레임 배수다 — `frameScale()`. 여백과 글자가 함께 줄어든다.
+   *
+   * 하나만 줄이면 비율이 무너진다: 여백만 줄이면 글자가 판을 꽉 채우고, 글자만
+   * 줄이면 작은 글씨가 넓은 여백 안에서 헤엄친다.
+   */
+  const title2 = { ...TYPE.title, size: Math.round(TYPE.title.size * k) };
+  const body2 = { ...TYPE.body, size: Math.round(TYPE.body.size * k) };
+  const pad = Math.round(SPACE.lg * k);
 
   const probe = makeCanvas(8, 8);
-  probe.ctx.font = bodyFont;
-  const inner = (width - pad * 2) * scale;
+  probe.ctx.font = fontSpec(body2);
+  applyTracking(probe.ctx, body2.tracking);
+  const inner = width - pad * 2;
   const lines = body ? wrapText(probe.ctx, body, inner) : [];
 
-  const titleH = title ? u(22) : 0;
-  const lineH = u(17);
-  const frameH = Math.round(
-    (pad * 2 * scale + titleH + lines.length * lineH + (title && lines.length ? u(6) : 0)) / scale,
-  );
+  const titleH = title ? title2.size + Math.round(SPACE.sm * k) : 0;
+  const lineH = body2.size + Math.round(SPACE.xs * k);
+  /**
+   * `extra` 는 판이 **자기 안에** 비워 두어야 하는 아래쪽 공간이다.
+   *
+   * 입력 칸과 버튼 줄이 거기 놓인다. 예전에는 셋이 각각 떠 있는 별개의 물체였고,
+   * 어두운 스크림 위에서 판 하나 · 홈 하나 · 버튼 두 개가 서로 관계없이 흩어져
+   * 보였다. 한 장의 카드 안에 들어가면 그게 하나의 질문이 된다.
+   */
+  const frameH = Math.round(pad * 2 + titleH + lines.length * lineH + extra);
 
   const w = Math.round(width * scale);
   const h = Math.round(frameH * scale);
   const { canvas, ctx } = makeCanvas(w, h);
-  const scratch = makeCanvas(w, h);
+  ctx.scale(scale, scale);
 
-  // Border, then fill inset by two — the same two-rectangle construction every
-  // plate in this project uses, so the dialog belongs to the same set.
-  ctx.fillStyle = PALETTE.ui.edge;
-  ctx.fillRect(0, 0, w, h);
-  ctx.fillStyle = PALETTE.ui.surface;
-  ctx.fillRect(u(2), u(2), w - u(4), h - u(4));
-  // The accent bar down the left edge, as the turn plate and the note line have.
-  ctx.fillStyle = accent;
-  ctx.fillRect(u(2), u(2), u(3), h - u(4));
+  /**
+   * 모달은 유리판이다. 왼쪽 세로 색 막대는 없어졌다.
+   *
+   * 예전에는 테두리 사각형 안에 채운 사각형, 그리고 왼쪽 가장자리에 강조색 막대가
+   * 있었다. 근거는 "턴 플레이트와 알림 줄이 그렇게 하고 있으니 같은 집합에 속한다"
+   * 였는데, 그 둘이 이제 그렇게 하지 않는다. 남겨 두면 이것만 다른 집합이 된다.
+   *
+   * `ELEVATION.modal` 은 이 화면에서 가장 높이 뜨는 것이다 — 모달은 뒤의 모든 것을
+   * 막고 있으므로, 그림자도 그만큼 깊어야 뒤에 무언가가 있다는 것이 읽힌다.
+   */
+  glassPanel(ctx, {
+    x: 0,
+    y: 0,
+    w: width,
+    h: frameH,
+    radius: RADIUS.panel,
+    accent,
+    alpha: 1,
+    elevation: ELEVATION.modal,
+  });
 
-  let y = u(pad) + u(14);
+  let y = pad + title2.size * 0.82;
   if (title) {
+    applyTracking(ctx, title2.tracking);
     drawText(ctx, {
       text: title,
-      x: u(pad),
+      x: width / 2,
       y,
-      font: titleFont,
+      font: fontSpec(title2),
       color: PALETTE.ui.text,
+      align: 'center',
     });
+    applyTracking(ctx, 0);
     y += titleH;
   }
+  applyTracking(ctx, body2.tracking);
   for (const line of lines) {
     drawText(ctx, {
       text: line,
-      x: u(pad),
+      x: width / 2,
       y,
-      font: bodyFont,
+      font: fontSpec(body2),
       color: PALETTE.ui.textMuted,
+      align: 'center',
     });
     y += lineH;
   }
+  applyTracking(ctx, 0);
 
   const tex = toTexture(canvas);
   tex.userData = { width, height: frameH };
+  cache.set(key, tex);
+  return tex;
+}
+
+/**
+ * 텍스트 입력 칸의 홈.
+ *
+ * ── 어두운 사각형에서 눌린 유리로 ──────────────────────────────────────────
+ * 예전에는 rgb(0.05, 0.07, 0.1) 짜리 어두운 quad 에 금색 테두리 quad 를 겹친
+ * 것이었다. 두 색 다 팔레트가 아니라 셰이더 uniform 에 손으로 적힌 숫자였고,
+ * 밝은 유리 모달 위에 검은 구멍이 뚫린 것처럼 보였다.
+ *
+ * 이제 `pressed` 스킨을 쓴다 — 그라디언트가 반대로 흘러 표면이 **눌린** 것으로
+ * 읽히는 스킨이고, 그게 정확히 입력 칸이 원하는 것이다. 누를 수 있는 것과
+ * 헷갈리지 않는 이유는 라벨이 없기 때문이다: 젤 버튼은 늘 글자를 달고 있다.
+ *
+ * @param {boolean} focused  포커스 링을 그릴 것인가
+ */
+export function slotTexture(width, height, { focused = false, scale = 1, accent = PALETTE.accent.cyan } = {}) {
+  const key = `slot:${width}x${height}:${focused}:${accent}@${scale}`;
+  const hit = cache.get(key);
+  if (hit) return hit;
+
+  const pad = 4;
+  const { canvas, ctx } = makeCanvas(Math.round(width * scale), Math.round(height * scale));
+  ctx.scale(scale, scale);
+  gelButton(ctx, {
+    x: pad,
+    y: pad,
+    w: width - pad * 2,
+    h: height - pad * 2,
+    radius: RADIUS.chip,
+    state: 'pressed',
+    accent,
+  });
+  if (focused) {
+    focusRing(ctx, {
+      x: pad,
+      y: pad,
+      w: width - pad * 2,
+      h: height - pad * 2,
+      radius: RADIUS.chip,
+      accent,
+    });
+  }
+
+  const tex = toTexture(canvas);
+  tex.userData = { width, height };
   cache.set(key, tex);
   return tex;
 }

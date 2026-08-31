@@ -6,7 +6,7 @@ import { createSky } from '../core/sky.js';
 import { setTextureRenderer } from '../core/textures.js';
 import { DISPLAY_ASPECT, Viewport } from '../core/Viewport.js';
 import { SceneComposer } from '../core/Composer.js';
-import { BOARD_ASPECT, FRAME, MAX_FRAME_WIDTH } from '../core/frame.js';
+import { BOARD_ASPECT, FRAME, frameScale } from '../core/frame.js';
 import { aimedLaunchDirection, Bottle, CAP_COLOR } from './Bottle.js';
 import { PALETTE, withAlpha } from '../core/palette.js';
 import { whenFontsReady } from '../ui/fonts.js';
@@ -226,7 +226,7 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
    * 배 해상도로 굽는다.
    */
   function scaleColumn() {
-    const k = Math.min(1, FRAME.width / MAX_FRAME_WIDTH);
+    const k = frameScale();
     cfg.items.plateWidth = Math.round(LANDSCAPE_POSE.plateWidth * k);
     cfg.items.plateHeight = Math.round(LANDSCAPE_POSE.plateHeight * k);
     cfg.items.pitch = Math.round(LANDSCAPE_POSE.pitch * k);

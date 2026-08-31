@@ -2146,8 +2146,22 @@ export const CONFIG = {
     trailSize: 57,
 
     // ── the hit ──────────────────────────────────────────────────────────
-    /** Whole frames of full-screen colour inversion. The brief asks for 2-3. */
-    invertFrames: 3,
+    /**
+     * 충격 순간의 전체 화면 플래시. 프레임 수와 세기.
+     *
+     * ── 색 반전에서 흰 플래시로 ──────────────────────────────────────────
+     * 예전에는 `src * (1 - dst)` 반전이었다. 강타 카드가 쓰는 것과 같은 블렌드였고,
+     * 화면이 거의 검을 때는 훌륭했다 — 어두운 판이 순간 밝아지니 번쩍인다.
+     * 지금 팔레트는 반대다. 밝은 유리와 흰 판이 대부분이라 반전하면 **어두워진다**.
+     * 번쩍임이 아니라 정전처럼 보인다.
+     *
+     * 흰 플래시는 어느 팔레트에서나 같은 방향으로 작동한다: 밝은 것은 하얗게
+     * 타고, 어두운 것은 밝아진다. 세기가 1 이 아닌 것은 완전히 흰 프레임 세 장이
+     * 이 화면에서 유일하게 아픈 것이기 때문이다 — 0.72 면 아래가 비쳐서 무엇이
+     * 번쩍였는지 보인다.
+     */
+    flashFrames: 3,
+    flashStrength: 0.72,
     /** Frame pixels of shake at the peak. Quantised to whole pixels. */
     shakeStrength: 14,
     shakeSeconds: 0.22,

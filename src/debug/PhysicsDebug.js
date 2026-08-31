@@ -1483,7 +1483,8 @@ export function bootPhysicsDebug({
   winEnter.add(config.victory, 'trailSize', 8, 120, 2).name('잔상 크기 (px)');
 
   const winHit = win.addFolder('충돌');
-  winHit.add(config.victory, 'invertFrames', 0, 8, 1).name('반전 플래시 (프레임)');
+  winHit.add(config.victory, 'flashFrames', 0, 8, 1).name('플래시 (프레임)');
+  winHit.add(config.victory, 'flashStrength', 0, 1, 0.01).name('플래시 세기');
   winHit.add(config.victory, 'shakeStrength', 0, 48, 1).name('화면 흔들림 강도 (px)');
   winHit.add(config.victory, 'shakeSeconds', 0.02, 1, 0.01).name('흔들림 지속 (s)');
   winHit.add(config.victory, 'shakeHz', 2, 60, 1).name('흔들림 주기 (Hz)');

@@ -4,6 +4,9 @@ import { menuPlateTexture, titleTexture } from '../menu/menuTextures.js';
 import { badgeTexture, iconTexture, tileTexture } from './markIcons.js';
 import { markThumbnail, toMarkTexture } from './markTextures.js';
 import { DEFAULT_MARK, SLOT_COUNT } from './MarkBook.js';
+import { FRAME } from '../core/frame.js';
+import { SPACE } from '../core/tokens.js';
+import { PLATE_TEXEL_SCALE, solveColumn } from '../menu/columnLayout.js';
 
 /**
  * 내 마크 — the grid, and the only way into the editor.
@@ -40,9 +43,8 @@ import { DEFAULT_MARK, SLOT_COUNT } from './MarkBook.js';
 
 /** Frame pixels. The whole layout, in one place. */
 const L = {
-  titleY: 168,
-  logoY: 82,
-  slotY: -30,
+  titleHeight: 72,
+  /** 640 프레임 기준의 칸 한 변. `frameScale()` 이 곱해진다. */
   tile: 76,
   /**
    * Wide enough for the badges to hang BELOW each tile without touching the
@@ -50,7 +52,6 @@ const L = {
    * a control for reading the assignment that hides the thing being assigned.
    */
   gap: 22,
-  backY: -150,
   badge: { w: 32, h: 18 },
   /** How far under the tile the badge row sits. */
   badgeDrop: 12,
@@ -77,35 +78,37 @@ export class MarksScreen {
     this.confirm = confirm;
     this.root = new Group();
 
+    /**
+     * 이 화면의 크기와 자리. `layout()` 이 프레임마다 다시 푼다.
+     *
+     * 예전에는 titleY 168 / logoY 82 / slotY -30 / backY -150 이 고정이었고, 480
+     * 프레임에서만 들어갔다. 316 프레임에서는 제목이 위로, 뒤로 가기가 아래로
+     * 잘렸고 칸 다섯 개가 좌우로 넘쳤다. 나머지 메뉴 화면들과 같은 해법을 쓴다 —
+     * `columnLayout.solveColumn`.
+     */
+    this._box = null;
+
     this.title = new Mesh(
       new PlaneGeometry(1, 1),
-      createSpriteMaterial(retro, { map: titleTexture('내 마크', '뚜껑에 새길 그림') }),
+      createSpriteMaterial(retro, { map: null }),
     );
-    this.title.scale.set(256 * u, 80 * u, 1);
-    this.title.position.set(0, L.titleY * u, 0);
     this.root.add(this.title);
 
     /** @type {Array<ReturnType<MarksScreen['_buildTile']>>} */
     this.tiles = [];
     // The logo, alone above the row it is not part of.
-    this.tiles.push(this._buildTile(retro, { ref: DEFAULT_MARK, x: 0, y: L.logoY, accent: true }));
-    const span = SLOT_COUNT * L.tile + (SLOT_COUNT - 1) * L.gap;
+    this.tiles.push(this._buildTile(retro, { ref: DEFAULT_MARK, accent: true }));
     for (let i = 0; i < SLOT_COUNT; i++) {
-      const x = -span / 2 + L.tile / 2 + i * (L.tile + L.gap);
-      this.tiles.push(this._buildTile(retro, { ref: i, x, y: L.slotY, accent: false }));
+      this.tiles.push(this._buildTile(retro, { ref: i, accent: false }));
     }
 
-    this.backMaps = {
-      idle: menuPlateTexture('◀ 설정으로', 'idle'),
-      hover: menuPlateTexture('◀ 설정으로', 'hover'),
-    };
+    this.backMaps = { idle: null, hover: null };
     this.back = new Mesh(
       new PlaneGeometry(1, 1),
-      createSpriteMaterial(retro, { map: this.backMaps.idle }),
+      createSpriteMaterial(retro, { map: null }),
     );
-    this.back.scale.set(256 * u, 52 * u, 1);
-    this.back.position.set(0, L.backY * u, 0);
     this.root.add(this.back);
+    this.layout(u);
 
     this._ray = new Raycaster();
     this._ndc = new Vector2();
@@ -114,15 +117,8 @@ export class MarksScreen {
     this.refresh();
   }
 
-  _buildTile(retro, { ref, x, y, accent }) {
-    const u = this._u;
-    const maps = {
-      idle: tileTexture('idle', { size: L.tile, accent }),
-      hover: tileTexture('hover', { size: L.tile, accent }),
-    };
-    const plate = new Mesh(new PlaneGeometry(1, 1), createSpriteMaterial(retro, { map: maps.idle }));
-    plate.scale.set(L.tile * u, L.tile * u, 1);
-    plate.position.set(x * u, y * u, 0);
+  _buildTile(retro, { ref, accent }) {
+    const plate = new Mesh(new PlaneGeometry(1, 1), createSpriteMaterial(retro, { map: null }));
     this.root.add(plate);
 
     // The thumbnail is redrawn in place rather than swapped, so nothing above
@@ -132,45 +128,137 @@ export class MarksScreen {
       new PlaneGeometry(1, 1),
       createSpriteMaterial(retro, { map: toMarkTexture(thumbCanvas) }),
     );
-    thumb.scale.set(62 * u, 62 * u, 1);
-    thumb.position.set(x * u, y * u, 1 * u);
     this.root.add(thumb);
 
     const plus = new Mesh(
       new PlaneGeometry(1, 1),
-      createSpriteMaterial(retro, { map: iconTexture('plus', 'idle', { size: 28, plate: false }) }),
+      createSpriteMaterial(retro, { map: null }),
     );
-    plus.scale.set(28 * u, 28 * u, 1);
-    plus.position.set(x * u, y * u, 2 * u);
     this.root.add(plus);
 
     const trash = new Mesh(
       new PlaneGeometry(1, 1),
-      createSpriteMaterial(retro, { map: iconTexture('trash', 'hover', { size: L.trash, plate: true }) }),
+      createSpriteMaterial(retro, { map: null }),
     );
-    trash.scale.set(L.trash * u, L.trash * u, 1);
-    trash.position.set((x + L.tile / 2 - 13) * u, (y + L.tile / 2 - 13) * u, 3 * u);
     trash.visible = false;
     this.root.add(trash);
 
     const badges = [0, 1].map((player) => {
       const mesh = new Mesh(
         new PlaneGeometry(1, 1),
-        createSpriteMaterial(retro, { map: badgeTexture(player, false, L.badge) }),
-      );
-      mesh.scale.set(L.badge.w * u, L.badge.h * u, 1);
-      // Under the tile, not on it: the thumbnail is the thing being chosen and
-      // must stay entirely visible while choosing.
-      mesh.position.set(
-        (x + (player === 0 ? -L.badge.w / 2 - 1 : L.badge.w / 2 + 1)) * u,
-        (y - L.tile / 2 - L.badgeDrop) * u,
-        3 * u,
+        createSpriteMaterial(retro, { map: null }),
       );
       this.root.add(mesh);
       return { player, mesh, on: null };
     });
 
-    return { ref, x, y, accent, plate, maps, thumb, thumbCanvas, plus, trash, badges };
+    return { ref, accent, plate, maps: { idle: null, hover: null }, thumb, thumbCanvas, plus, trash, badges };
+  }
+
+  /**
+   * 제목 · 로고 칸 · 슬롯 줄 · 뒤로 가기를 한 열로 쌓고, 칸 크기를 프레임에 맞춘다.
+   *
+   * 슬롯 줄은 가로로도 넘칠 수 있다 — 다섯 칸에 간격까지 486 프레임 픽셀이라
+   * 421 프레임에서는 양 끝이 화면 밖이었다. 세로로 푼 높이와 가로로 들어가는 폭 중
+   * 작은 쪽을 칸 한 변으로 쓴다.
+   */
+  layout(unitsPerPixel) {
+    const u = unitsPerPixel ?? this._u;
+    this._u = u;
+
+    const box = solveColumn([
+      { id: '#title', h: L.titleHeight },
+      { id: '#logo', h: L.tile + L.badgeDrop + L.badge.h },
+      { id: '#slots', h: L.tile + L.badgeDrop + L.badge.h },
+      { id: '#back' },
+    ]);
+    this._box = box;
+    const at = (id) => box.rows.find((r) => r.id === id);
+
+    // 칸 한 변: 줄 높이가 허락하는 것과 프레임 폭이 허락하는 것 중 작은 쪽.
+    const rowH = at('#slots').h;
+    const gap = Math.round(L.gap * box.k);
+    const wide = (FRAME.width - SPACE.md * 2 - (SLOT_COUNT - 1) * gap) / SLOT_COUNT;
+    const badgeH = Math.round(L.badge.h * box.k);
+    const drop = Math.round(L.badgeDrop * box.k);
+    const tile = Math.max(24, Math.min(wide, rowH - drop - badgeH));
+    const badge = { w: Math.round(L.badge.w * box.k), h: badgeH };
+    const trashSize = Math.round(L.trash * box.k);
+    this._tile = tile;
+    this._badge = badge;
+    this._trash = trashSize;
+
+    const titleRow = at('#title');
+    this.title.scale.set(box.plate.width * u, titleRow.h * u, 1);
+    this.title.position.set(0, titleRow.y * u, 0);
+
+    const backRow = at('#back');
+    this.back.scale.set(box.plate.width * u, backRow.h * u, 1);
+    this.back.position.set(0, backRow.y * u, 0);
+
+    const span = SLOT_COUNT * tile + (SLOT_COUNT - 1) * gap;
+    this.tiles.forEach((t, i) => {
+      const logo = i === 0;
+      const row = at(logo ? '#logo' : '#slots');
+      // 칸의 중심은 배지 줄만큼 위로 올라간다 — 슬롯의 높이에는 배지가 포함된다.
+      const cy = row.y + (drop + badge.h) / 2;
+      const x = logo ? 0 : -span / 2 + tile / 2 + (i - 1) * (tile + gap);
+      t.x = x;
+      t.y = cy;
+      t.plate.scale.set(tile * u, tile * u, 1);
+      t.plate.position.set(x * u, cy * u, 0);
+      t.thumb.scale.set(tile * 0.82 * u, tile * 0.82 * u, 1);
+      t.thumb.position.set(x * u, cy * u, 1 * u);
+      t.plus.scale.set(tile * 0.36 * u, tile * 0.36 * u, 1);
+      t.plus.position.set(x * u, cy * u, 2 * u);
+      t.trash.scale.set(trashSize * u, trashSize * u, 1);
+      t.trash.position.set(
+        (x + tile / 2 - trashSize / 2) * u,
+        (cy + tile / 2 - trashSize / 2) * u,
+        3 * u,
+      );
+      for (const b of t.badges) {
+        b.mesh.scale.set(badge.w * u, badge.h * u, 1);
+        b.mesh.position.set(
+          (x + (b.player === 0 ? -badge.w / 2 - 1 : badge.w / 2 + 1)) * u,
+          (cy - tile / 2 - drop) * u,
+          3 * u,
+        );
+      }
+    });
+
+    const key = `${Math.round(tile)}:${box.plate.width}x${box.plate.height}`;
+    if (key !== this._sizeKey) {
+      this._sizeKey = key;
+      for (const t of this.tiles) {
+        t.maps.idle?.dispose();
+        t.maps.hover?.dispose();
+        t.maps.idle = tileTexture('idle', { size: Math.round(tile), accent: t.accent });
+        t.maps.hover = tileTexture('hover', { size: Math.round(tile), accent: t.accent });
+        t.plus.material.uniforms.uMap.value = iconTexture('plus', 'idle', {
+          size: Math.round(tile * 0.36),
+          plate: false,
+        });
+        t.trash.material.uniforms.uMap.value = iconTexture('trash', 'hover', {
+          size: trashSize,
+          plate: true,
+        });
+        for (const b of t.badges) b.on = null;
+      }
+      this.backMaps.idle?.dispose();
+      this.backMaps.hover?.dispose();
+      const plateSize = { ...box.plate, scale: PLATE_TEXEL_SCALE };
+      this.backMaps.idle = menuPlateTexture('◀ 설정으로', 'idle', plateSize);
+      this.backMaps.hover = menuPlateTexture('◀ 설정으로', 'hover', plateSize);
+      this.back.material.uniforms.uMap.value = this.backMaps.idle;
+      this.title.material.uniforms.uMap.value?.dispose();
+      this.title.material.uniforms.uMap.value = titleTexture('내 마크', '뚜껑에 새길 그림', {
+        width: box.plate.width,
+        height: titleRow.h,
+        scale: PLATE_TEXEL_SCALE,
+      });
+    }
+    this.refresh();
   }
 
   // ── state ─────────────────────────────────────────────────────────────────
@@ -193,7 +281,7 @@ export class MarksScreen {
         // `activate` too; this is the half the player can see.
         if (badge.on !== on) {
           badge.on = on;
-          badge.mesh.material.uniforms.uMap.value = badgeTexture(badge.player, on, L.badge);
+          badge.mesh.material.uniforms.uMap.value = badgeTexture(badge.player, on, this._badge ?? L.badge);
         }
         badge.mesh.visible = filled;
       }

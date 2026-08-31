@@ -1,8 +1,10 @@
 import { Mesh, PlaneGeometry, Raycaster, Scene, Vector2 } from 'three';
-import { FRAME as SHARED_FRAME, frameCamera, refitFrameCamera } from '../core/frame.js';
+import { FRAME as SHARED_FRAME, frameCamera, frameScale, refitFrameCamera } from '../core/frame.js';
 import { HudMaterials } from './HudMaterial.js';
-import { buttonTexture, modalTexture } from './hudTextures.js';
-import { PALETTE } from '../core/palette.js';
+import { buttonTexture, modalTexture, slotTexture } from './hudTextures.js';
+import { PALETTE, toRgb } from '../core/palette.js';
+import { SIZE, SPACE, TYPE } from '../core/tokens.js';
+import { FONT_FAMILY } from './fonts.js';
 
 /**
  * Every modal question in the game, drawn as geometry.
@@ -44,13 +46,22 @@ import { PALETTE } from '../core/palette.js';
 /** The layout box, in frame pixels. The shared, live one — see core/frame.js. */
 const FRAME = SHARED_FRAME;
 
-const PANEL_WIDTH = 320;
-const BUTTON = { width: 120, height: 32 };
-const BUTTON_GAP = 8;
-/** Between the panel's bottom edge and the button row. */
-const BUTTON_DROP = 10;
-/** The text field's box, when there is one. */
-const FIELD = { width: PANEL_WIDTH - 28, height: 30 };
+/**
+ * 모달의 폭. 토큰이 상한이고, 좁은 프레임에서는 프레임이 이긴다.
+ *
+ * `SIZE.modal.w` 는 440 이고 640 프레임 기준이다. 800x459 창의 프레임은 421 이라
+ * 그대로 쓰면 좌우가 화면 밖으로 나간다. 함수인 것은 창이 바뀌면 답도 바뀌기
+ * 때문이다 — `_layout` 이 매번 다시 묻는다.
+ */
+function panelWidth() {
+  return Math.min(SIZE.modal.w, FRAME.width - SPACE.md * 2);
+}
+/** 저술 크기. 실제 크기는 `frameScale()` 을 곱한 것이고 `_layout` 이 푼다. */
+const BUTTON = { width: SIZE.buttonSecondary.w, height: SIZE.buttonSecondary.h };
+const BUTTON_GAP = SPACE.sm;
+/** Between the field and the button row. */
+const BUTTON_DROP = SPACE.sm;
+const FIELD_HEIGHT = SIZE.buttonSecondary.h;
 
 export class ModalLayer {
   /**
@@ -77,8 +88,22 @@ export class ModalLayer {
      * a flat dim: a mapped quad would be one more texture to hold for a
      * rectangle of one colour.
      */
-    this.veil = new Mesh(this._quad, this.materials.createSolid(0.78));
-    this.veil.material.uniforms.uTint.value.set(0.03, 0.04, 0.055);
+    /**
+     * 0.78 짜리 거의 검은 막이었다. 그 뒤의 화면이 사실상 사라졌다.
+     *
+     * 어두운 UI 위에서는 맞았다 — 이미 어두운 것을 조금 더 어둡게 하는 것은
+     * 가라앉히는 일이다. 밝은 유리 위에서 같은 일을 하면 뒤가 **없어진다**, 그리고
+     * 모달은 뒤를 지우는 것이 아니라 앞을 세우는 것이다. 뒤가 보여야 어디로
+     * 돌아가는지 알 수 있고, 유리 판이 무언가 위에 떠 있다는 것도 그때만 읽힌다.
+     *
+     * 잉크는 팔레트의 깊은 파랑이다. 검정이 아닌 이유는 이 프로젝트에 순수한
+     * 검정이 없기 때문이고(팔레트 감사 규칙 1), 색이 있는 막은 유리 아래에 물이
+     * 있는 것처럼 보이기 때문이다.
+     */
+    this.veil = new Mesh(this._quad, this.materials.createSolid(0.52));
+    // `toRgb` 는 0..255 를 준다. 셰이더는 0..1 이다.
+    const veilRgb = toRgb(PALETTE.accent.skyDeep).map((c) => c / 255);
+    this.veil.material.uniforms.uTint.value.set(veilRgb[0], veilRgb[1], veilRgb[2]);
     this.veil.scale.set(FRAME.width, FRAME.height, 1);
     this.veil.renderOrder = 100;
     this.scene.add(this.veil);
@@ -98,16 +123,17 @@ export class ModalLayer {
     });
 
     /** The field's frame — drawn here; only the glyphs are DOM. */
-    this.field = new Mesh(this._quad, this.materials.createSolid(1));
-    this.field.material.uniforms.uTint.value.set(0.05, 0.07, 0.1);
+    /**
+     * 입력 칸의 홈. 하나의 텍스처 쿼드다.
+     *
+     * 예전에는 어두운 quad + 금색 테두리 quad 두 장이었다. 셰이더 uniform 에 손으로
+     * 적힌 RGB 두 개였고 팔레트를 거치지 않았다 — 그래서 배경이 밝아진 뒤에도
+     * 그대로 검었다. `slotTexture` 의 주석에 자세히 있다.
+     */
+    this.field = new Mesh(this._quad, this.materials.create(null));
     this.field.renderOrder = 102;
     this.field.visible = false;
     this.scene.add(this.field);
-    this.fieldEdge = new Mesh(this._quad, this.materials.createSolid(1));
-    this.fieldEdge.material.uniforms.uTint.value.set(0.85, 0.71, 0.36);
-    this.fieldEdge.renderOrder = 101;
-    this.fieldEdge.visible = false;
-    this.scene.add(this.fieldEdge);
 
     this._ray = new Raycaster();
     this._ndc = new Vector2();
@@ -246,46 +272,73 @@ export class ModalLayer {
     if (!spec) return;
     const scale = this.config.ui?.textureScale ?? 1;
 
+    const k = frameScale();
+    const PANEL_WIDTH = panelWidth();
+    const btnH = Math.round(BUTTON.height * k);
+    const drop = Math.round(BUTTON_DROP * k);
+    const gap = Math.round(BUTTON_GAP * k);
+    const padIn = Math.round(SPACE.lg * k);
+    const FIELD = { width: PANEL_WIDTH - padIn * 2, height: Math.round(FIELD_HEIGHT * k) };
+    this._field = FIELD;
     const body = [spec.body, this._error].filter(Boolean).join('\n');
+
+    /**
+     * 판은 입력 칸과 버튼 줄까지 담는다.
+     *
+     * 예전에는 판 · 홈 · 버튼이 각각 떠 있었고, 어두운 스크림 위에서 서로 관계없는
+     * 네 물체로 보였다. 판이 셋을 다 담으면 그게 하나의 질문으로 읽힌다.
+     */
+    const fieldH = spec.field ? FIELD.height + Math.round(SPACE.md * k) : 0;
+    const extra = fieldH + drop + btnH;
+
     const tex = modalTexture({
       title: spec.title,
       body,
       width: PANEL_WIDTH,
       scale,
+      extra,
+      k,
       accent: this._error ? PALETTE.ui.danger : spec.accent,
     });
     const panelH = tex.userData?.height ?? 80;
     this.panel.material.uniforms.uMap.value = tex;
     this.panel.scale.set(PANEL_WIDTH, panelH, 1);
+    this.panel.position.set(0, 0, 0);
 
-    // The whole stack is centred on the frame: panel, then the field, then the
-    // button row, measured as one block so it does not drift as the text grows.
-    const fieldH = spec.field ? FIELD.height + 10 : 0;
-    const stackH = panelH + fieldH + BUTTON_DROP + BUTTON.height;
-    const top = stackH / 2;
+    // 판 안쪽 아래에서 위로 쌓는다: 버튼 줄이 가장 아래, 그 위가 입력 칸.
+    const inner = -panelH / 2 + padIn;
+    const rowY = inner + btnH / 2;
+    let y = inner + btnH + drop;
 
-    const panelY = top - panelH / 2;
-    this.panel.position.set(0, panelY, 0);
-
-    let y = panelY - panelH / 2;
     if (spec.field) {
-      y -= 10 + FIELD.height / 2;
+      const fy = y + FIELD.height / 2;
       this.field.scale.set(FIELD.width, FIELD.height, 1);
-      this.field.position.set(0, y, 1);
-      this.fieldEdge.scale.set(FIELD.width + 4, FIELD.height + 4, 1);
-      this.fieldEdge.position.set(0, y, 0.5);
+      this.field.position.set(0, fy, 1);
+      this.field.material.uniforms.uMap.value = slotTexture(FIELD.width, FIELD.height, {
+        focused: true,
+        scale,
+        accent: this._error ? PALETTE.ui.danger : PALETTE.accent.cyan,
+      });
       this.field.visible = true;
-      this.fieldEdge.visible = true;
-      this._fieldY = y;
-      y -= FIELD.height / 2;
+      this._fieldY = fy;
+      y = fy + FIELD.height / 2;
     } else {
       this.field.visible = false;
-      this.fieldEdge.visible = false;
     }
 
     const row = spec.buttons;
-    const span = row.length * BUTTON.width + (row.length - 1) * BUTTON_GAP;
-    const rowY = y - BUTTON_DROP - BUTTON.height / 2;
+    /**
+     * 버튼 폭은 판 안에 들어가야 한다.
+     *
+     * 토큰의 160 짜리 버튼 두 개는 간격까지 336 이라 440 짜리 판에는 들어가지만
+     * 421 프레임에서 판이 377 로 줄면 넘친다. 판을 기준으로 나눠 가지면 판이
+     * 얼마가 되든 안에 있다.
+     */
+    const btnW = Math.min(
+      Math.round(BUTTON.width * k),
+      Math.floor((PANEL_WIDTH - padIn * 2 - (row.length - 1) * gap) / Math.max(1, row.length)),
+    );
+    const span = row.length * btnW + (row.length - 1) * gap;
     this.buttons.forEach((b, i) => {
       const def = row[i];
       if (!def) {
@@ -300,15 +353,19 @@ export class ModalLayer {
       // — 취소, 확인 on a plain message — is always live.
       b.disabled = !!def.submit && !this._valid;
       b.baseTone = b.disabled ? 'disabled' : (def.tone ?? 'idle');
-      const x = -span / 2 + BUTTON.width / 2 + i * (BUTTON.width + BUTTON_GAP);
+      const x = -span / 2 + btnW / 2 + i * (btnW + gap);
+      b.mesh.scale.set(btnW, btnH, 1);
       b.mesh.position.set(x, rowY, 1);
       b.mesh.visible = true;
       const tone = !b.disabled && this.hovered === def.id ? 'hover' : b.baseTone;
-      if (b.label !== def.label || b.tone !== tone) {
+      if (b.label !== def.label || b.tone !== tone || b.width !== btnW || b.height !== btnH) {
         b.label = def.label;
         b.tone = tone;
+        b.width = btnW;
+        b.height = btnH;
         b.mesh.material.uniforms.uMap.value = buttonTexture(def.label, tone, {
-          ...BUTTON,
+          width: btnW,
+          height: btnH,
           scale,
         });
       }
@@ -384,16 +441,26 @@ export class ModalLayer {
     if (rect.width < 1) return;
     const sx = rect.width / FRAME.width;
     const sy = rect.height / FRAME.height;
-    const w = (FIELD.width - 12) * sx;
-    const h = FIELD.height * sy;
+    const field = this._field ?? { width: panelWidth() - SPACE.lg * 2, height: FIELD_HEIGHT };
+    const w = (field.width - SPACE.md) * sx;
+    const h = field.height * sy;
     el.style.left = `${rect.left + rect.width / 2 - w / 2}px`;
     el.style.top = `${rect.top + (FRAME.height / 2 - this._fieldY) * sy - h / 2}px`;
     el.style.width = `${w}px`;
     el.style.height = `${h}px`;
     // Sized to the frame, so the typed text is the size the panel around it was
     // drawn for however large the window is.
-    el.style.fontSize = `${Math.max(9, Math.round(15 * sy))}px`;
-    el.style.font = `${Math.max(9, Math.round(15 * sy))}px ui-monospace, Menlo, monospace`;
+    /**
+     * 화면의 나머지와 같은 서체.
+     *
+     * `ui-monospace` 였다. 이 프로젝트에서 남아 있던 마지막 시스템 폰트 참조이자,
+     * 사용자가 자기 닉네임을 타이핑하는 유일한 곳이었다 — 입력하는 동안에는
+     * 고정폭이고 확정하면 `BCC Sans` 로 바뀌니, 같은 글자가 두 번 다르게 보였다.
+     *
+     * 크기는 프레임에 맞춘다. `TYPE.body` 는 프레임 픽셀이고 `sy` 가 CSS 로 옮긴다.
+     */
+    const px = Math.max(11, Math.round(TYPE.body.size * sy));
+    el.style.font = `${TYPE.body.weight} ${px}px ${FONT_FAMILY}`;
   }
 
   _unmountInput() {

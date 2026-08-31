@@ -1,4 +1,4 @@
-import { FRAME, MAX_FRAME_WIDTH } from '../core/frame.js';
+import { FRAME } from '../core/frame.js';
 import { SPACE } from '../core/tokens.js';
 
 /**

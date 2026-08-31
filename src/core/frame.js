@@ -338,6 +338,28 @@ export function resolveFrame(windowW, windowH) {
  */
 export const FRAME = resolveFrame(MAX_FRAME_WIDTH, Math.round(MAX_FRAME_WIDTH / BOARD_ASPECT));
 
+/**
+ * 저술 크기를 지금 프레임에 맞추는 배수. 1 이 상한이다.
+ *
+ * ── 왜 필요한가 ─────────────────────────────────────────────────────────────
+ * `tokens.js` 의 SIZE / SPACE / TYPE 는 640 폭 프레임을 기준으로 골랐다. 그런데
+ * `resolveFrame` 은 창이 작으면 프레임을 좁게 잡는다 — 그게 폰에서 UI 가 커 보이게
+ * 하는 장치다. 그 결과 800x459 창(프레임 421x316)에서는 토큰이 프레임의 훨씬 큰
+ * 비율을 차지하고, 여러 개가 쌓이는 곳에서는 그냥 넘친다: 모달은 프레임 높이를
+ * 정확히 100% 먹었고, 설정 화면은 제목과 마지막 두 줄이 화면 밖이었다.
+ *
+ * 1 을 넘지 않는 이유는 640 이 **최대** 프레임 폭이기 때문이다. 더 큰 창에서는
+ * 프레임이 640 에 머물고 캔버스만 커지므로, 저술 크기가 그대로 맞다.
+ *
+ * 여기 있는 이유는 `tokens.js` 에 둘 수 없기 때문이다 — 이 파일이 tokens 를
+ * 읽으므로 반대 방향 import 는 순환이 된다. `MIN_CSS_PX_PER_FRAME_PX` 의 주석에
+ * 그 사고의 전말이 있다.
+ */
+export function frameScale() {
+  return Math.min(1, FRAME.width / MAX_FRAME_WIDTH);
+}
+
+
 /** Recompute `FRAME` in place. Returns true when the shape actually moved. */
 export function updateFrame(windowW, windowH) {
   const next = resolveFrame(windowW, windowH);

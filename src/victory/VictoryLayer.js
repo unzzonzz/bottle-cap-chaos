@@ -66,9 +66,9 @@ export const VICTORY_FRAME = SHARED_FRAME;
  *
  * The vertex snap moves every corner by up to half a low-res pixel and it is
  * free to move one INWARD, which on the dimming quad would leave a bright line
- * down one edge of the screen and on the inversion quad would leave a strip of
- * un-inverted picture. `CapWipe.coverSafety` exists for exactly this and this is
- * the flat-quad version of it.
+ * down one edge of the screen and on the flash quad would leave an unlit strip.
+ * `CapWipe.coverSafety` exists for exactly this and this is the flat-quad
+ * version of it.
  */
 const OVERHANG = 6;
 
@@ -279,18 +279,27 @@ export class VictoryLayer {
     this.scene.add(this.dim);
 
     /**
-     * Last of all, over the caps and the type and the dimmed board alike.
+     * 충격의 플래시. 뚜껑도 글자도 어두워진 판도 전부 덮고, 맨 마지막에.
      *
-     * `createInvert` is the card system's own full-frame flip — `src * (1 - dst)`
-     * with src white — so this is the identical blend operation 강타 uses, on a
-     * frame that happens to have a victory screen in it. Nothing about it is new
-     * and nothing about it reads back the target.
+     * ── 색 반전이 아니라 흰 플래시인 이유 ──────────────────────────────────
+     * 예전에는 `createInvert` 였다. 강타 카드가 쓰는 것과 **같은** 블렌드 —
+     * `src * (1 - dst)`, src 는 흰색 — 라는 것이 그 선택의 근거였고, 화면이 거의
+     * 검던 시절에는 옳았다.
+     *
+     * 지금은 틀렸다. 이 화면의 대부분은 흰 유리판과 밝은 하늘이고, 반전하면
+     * **어두워진다**. 번쩍이는 것이 아니라 잠깐 정전된 것처럼 보인다. 실제로
+     * 지시서가 이 플래시를 다시 설계하라고 지목한 것이 그 이유다.
+     *
+     * 흰 quad 는 어느 팔레트에서나 같은 방향으로 작동한다. 알파는 1 이 아니라
+     * `victory.flashStrength` 인데, 완전히 흰 프레임 세 장은 이 화면에서 유일하게
+     * 아픈 것이기 때문이다 — 아래가 비쳐야 무엇이 번쩍였는지 보인다.
      */
-    this.invert = new Mesh(this._quad, this.fxMaterials.createInvert());
-    this.invert.scale.copy(this.dim.scale);
-    this.invert.renderOrder = 1000;
-    this.invert.visible = false;
-    this.scene.add(this.invert);
+    this.flash = new Mesh(this._quad, this.uiMaterials.createSolid(0));
+    this.flash.material.uniforms.uTint.value.set(1, 1, 1);
+    this.flash.scale.copy(this.dim.scale);
+    this.flash.renderOrder = 1000;
+    this.flash.visible = false;
+    this.scene.add(this.flash);
 
     /**
      * Everything the shake moves.
@@ -431,7 +440,7 @@ export class VictoryLayer {
     /** How far the background has darkened, 0..1 of `bgOpacity`. */
     this._dimShown = 0;
     /** Frames of inversion still owed. Counted DOWN in frames, never in seconds. */
-    this._invertLeft = 0;
+    this._flashLeft = 0;
     /** Four hard entries derived from the winner's colour. Tints the trail. */
     this._palette = [];
 
@@ -653,7 +662,7 @@ export class VictoryLayer {
 
     this._now = 0;
     this._sinceImpact = 0;
-    this._invertLeft = 0;
+    this._flashLeft = 0;
     this._dimShown = 0;
     this._vel.set(0, 0);
     this.hovered = null;
@@ -703,7 +712,7 @@ export class VictoryLayer {
       this.config.victory.shakeSeconds,
       this.config.victory.ringSeconds,
     ) + 1;
-    this._invertLeft = 0;
+    this._flashLeft = 0;
     this._syncToStage(0);
     return true;
   }
@@ -718,7 +727,7 @@ export class VictoryLayer {
     this.winner.reset();
     this.loser.reset();
     this.dim.visible = false;
-    this.invert.visible = false;
+    this.flash.visible = false;
     this.ring.visible = false;
     this.plate.visible = false;
     this.note.visible = false;
@@ -794,7 +803,7 @@ export class VictoryLayer {
    */
   _onImpact() {
     this._sinceImpact = 0;
-    this._invertLeft = Math.max(0, Math.round(this.config.victory.invertFrames));
+    this._flashLeft = Math.max(0, Math.round(this.config.victory.flashFrames));
     // Where it stops on the far side, before the spring takes it back.
     const c = this.config.victory;
     this._settleFrom.set(
@@ -811,7 +820,7 @@ export class VictoryLayer {
     this._updateSprites();
     this._updateShake();
     this._updateType();
-    this._updateInvert();
+    this._updateFlash();
     this._refreshTextures();
   }
 
@@ -1146,10 +1155,23 @@ export class VictoryLayer {
     }
   }
 
-  _updateInvert() {
-    // Whole frames, counted down. Visible while any are owed.
-    this.invert.visible = this._invertLeft > 0;
-    if (this._invertLeft > 0) this._invertLeft--;
+  _updateFlash() {
+    /**
+     * 프레임 단위로 세어 내린다. 시간이 아니라 프레임인 이유는 `_onImpact` 에
+     * 적혀 있다: 세 프레임짜리 창은 프레임 레이트에 따라 아예 안 보일 수 있다.
+     *
+     * 남은 프레임 수에 비례해 옅어진다. 세 장 모두 같은 세기면 플래시가 툭 끊기는데,
+     * 옅어지면 짧은 잔상이 되어 링이 열리는 동작으로 이어진다.
+     */
+    const owed = this._flashLeft;
+    this.flash.visible = owed > 0;
+    if (owed > 0) {
+      const total = Math.max(1, Math.round(this.config.victory.flashFrames));
+      const k = owed / total;
+      this.flash.material.uniforms.uOpacity.value =
+        Math.max(0, Math.min(1, this.config.victory.flashStrength)) * k;
+      this._flashLeft--;
+    }
   }
 
   /**

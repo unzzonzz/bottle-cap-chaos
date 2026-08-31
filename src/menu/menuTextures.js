@@ -730,15 +730,39 @@ export function titleTexture(text, sub, { width = 256, height = 80, scale = 1 } 
    */
   const probe = makeCanvas(8, 8);
   const room = width - Math.max(SPACE.sm, height * 0.22) * 2;
-  const lines = wrapToFit(probe.ctx, text, TYPE.title, room, 2);
+
+  /**
+   * 판 높이에 맞춰 글자를 줄인다.
+   *
+   * ── 실측 ────────────────────────────────────────────────────────────────
+   * `columnLayout` 이 세로가 모자라면 슬롯 높이를 깎는다. 제목 슬롯도 예외가 아니라
+   * 72 가 48 이 되는 일이 있는데, 그 안에 26px 제목과 15px 부제를 그리면 부제가
+   * 판 아래로 흘러나간다 — 마크 화면에서 "뚜껑에 새길 그림" 이 반만 보였다.
+   *
+   * 폭에 대해서는 접고, 높이에 대해서는 줄인다. 접을 축이 하나뿐이기 때문이다.
+   */
+  const fitK = (() => {
+    const probeLines = wrapToFit(probe.ctx, text, TYPE.title, room, 2);
+    const rows = probeLines.rows.length;
+    const need =
+      rows * TYPE.title.size +
+      (rows - 1) * Math.round(TYPE.title.size * 0.18) +
+      (sub ? TYPE.caption.size + SPACE.xs : 0) +
+      SPACE.sm * 2;
+    return Math.max(0.55, Math.min(1, height / Math.max(1, need)));
+  })();
+  const titleType = { ...TYPE.title, size: Math.round(TYPE.title.size * fitK) };
+  const subType = { ...TYPE.caption, size: Math.round(TYPE.caption.size * fitK) };
+
+  const lines = wrapToFit(probe.ctx, text, titleType, room, 2);
 
   const headSize = lines.size;
   const gap = Math.round(headSize * 0.18);
   const headBlock = lines.rows.length * headSize + (lines.rows.length - 1) * gap;
-  const subH = sub ? TYPE.caption.size + SPACE.xs : 0;
+  const subH = sub ? subType.size + SPACE.xs : 0;
   let y = Math.round((height - headBlock - subH) / 2 + headSize * 0.82);
 
-  applyTracking(ctx, TYPE.title.tracking);
+  applyTracking(ctx, titleType.tracking);
   for (const row of lines.rows) {
     drawText(ctx, {
       text: row,
@@ -753,8 +777,8 @@ export function titleTexture(text, sub, { width = 256, height = 80, scale = 1 } 
   applyTracking(ctx, 0);
 
   if (sub) {
-    const line = fitText(probe.ctx, sub, TYPE.caption, room);
-    applyTracking(ctx, TYPE.caption.tracking);
+    const line = fitText(probe.ctx, sub, subType, room);
+    applyTracking(ctx, subType.tracking);
     drawText(ctx, {
       text: line.text,
       x: width / 2,
