@@ -295,17 +295,57 @@ export class Mixer {
     this._sum = ctx.createGain();
     this._sum.gain.value = 1;
 
+    /**
+     * 공간. 이 게임의 예순 개 소리를 한 곳에 있게 만드는 장치.
+     *
+     * ── 비트 크러셔가 하던 일을 물려받는다 ─────────────────────────────────
+     * 이 파일의 머리말이 크러셔의 근거를 이렇게 적었다: "화면이 채널당 5비트로
+     * 양자화되고 320x240 프레임버퍼에 맞춘 4x4 격자로 디더된다. 지시서는 그것의
+     * 오디오 등가물을 요구하고, 그건 옳다 — 따로 설계된 예순 개의 소리를 한 기계의
+     * 것으로 만드는 유일한 장치다."
+     *
+     * 그 화면이 없다. 지금 화면은 유리와 물과 빛이고, 그것들의 오디오 등가물은
+     * 양자화 잡음이 아니라 **공간**이다 — 짧고 밝은 잔향. 유리잔 안에서 나는 소리는
+     * 어디서 나든 같은 방에서 난다.
+     *
+     * 보내기는 카테고리마다 다르다. UI 클릭에 잔향을 먹이면 화면이 헐거워지고,
+     * 충돌음에 안 먹이면 판이 진공에 있는 것으로 들린다. 표는 `config.audio.space`.
+     */
+    this._space = ctx.createConvolver();
+    this._space.normalize = true;
+    this._space.buffer = this._makeImpulse(ctx);
+    this._spaceIn = ctx.createGain();
+    this._spaceIn.gain.value = 1;
+    this._spaceIn.connect(this._space);
+
+    /** @type {Record<string, GainNode>} 카테고리별 보내기 양. */
+    this.sends = {};
+
     for (const name of CATEGORIES) {
       const g = ctx.createGain();
       g.gain.value = 1;
       g.connect(this._sum);
       this.buses[name] = g;
+
+      const send = ctx.createGain();
+      send.gain.value = 0;
+      g.connect(send);
+      send.connect(this._spaceIn);
+      this.sends[name] = send;
     }
 
     // The chain, with the worklet's slot left empty until it loads. Reconnected
     // in `_insertHold` rather than built twice.
     this._sum.connect(this._shaper);
     this._shaper.connect(this.master);
+    /**
+     * 잔향은 크러셔를 거치지 않고 마스터로 바로 간다.
+     *
+     * 크러셔가 유니티일 때는 차이가 없지만, 패널에서 다시 켰을 때 잔향까지 부수면
+     * 꼬리가 지저분해진다 — 꼬리는 이미 잔향이 만든 것이라 거기에 양자화를 얹으면
+     * 두 효과가 서로를 갉아먹는다.
+     */
+    this._space.connect(this.master);
     this.master.connect(this._limiter);
     this._limiter.connect(ctx.destination);
 
@@ -326,6 +366,58 @@ export class Mixer {
    * Seeded from the audio stream, so it is not `Math.random` and it is not the
    * game's — see `audioRng`.
    */
+  /**
+   * 잔향의 임펄스 응답. 절차적으로 만든다 — 이 프로젝트에 오디오 파일은 없다.
+   *
+   * ── 지수 감쇠 잡음이지만, 그냥 잡음은 아니다 ────────────────────────────
+   * 기본형은 지수적으로 잦아드는 백색 잡음이다. 그것만으로도 방은 되지만 **유리
+   * 방**은 안 된다 — 유리와 물의 잔향은 저역이 빨리 죽고 고역이 오래 남는다.
+   * 벽이 딱딱해서 고역을 덜 먹기 때문이다. 그래서 대역별로 감쇠율을 다르게 준다:
+   * 저역은 `decay` 의 두 배 속도로, 고역은 절반 속도로 사라진다.
+   *
+   * 초기 반사도 없다. 방의 크기를 말하는 것은 꼬리가 아니라 첫 몇 밀리초의 성긴
+   * 반사이므로, 앞쪽 8% 에 몇 개의 뾰족한 점을 심는다. 그게 없으면 잔향이 방이
+   * 아니라 그냥 번짐으로 들린다.
+   *
+   * 좌우가 다른 잡음인 것은 넓이 때문이다. 같은 잡음을 양쪽에 넣으면 잔향이
+   * 가운데 한 점에서 나고, 그건 방이 아니라 스피커다.
+   */
+  _makeImpulse(ctx) {
+    const c = this.config.space ?? {};
+    const seconds = Math.max(0.05, Math.min(2, c.seconds ?? 0.42));
+    const len = Math.max(1, Math.floor(ctx.sampleRate * seconds));
+    const buf = ctx.createBuffer(2, len, ctx.sampleRate);
+    // 로컬 생성기. 공유 스트림을 여기서 수만 번 돌리면 그 뒤의 모든 피치 흔들림이
+    // 기기의 샘플레이트에 의존하게 된다 — `_makeNoise` 가 같은 이유로 그렇게 한다.
+    let seed = 0x9e3779b9;
+    const rand = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return (seed / 0xffffffff) * 2 - 1;
+    };
+
+    const decay = Math.max(0.5, c.decay ?? 3.2);
+    const early = Math.floor(len * 0.08);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = buf.getChannelData(ch);
+      // 대역별 감쇠를 한 번의 통과로: 저역은 1극 저역통과의 출력, 고역은 그 나머지.
+      let lp = 0;
+      for (let i = 0; i < len; i++) {
+        const t = i / len;
+        const n = rand();
+        lp += (n - lp) * 0.22;
+        const lowPart = lp * Math.pow(1 - t, decay * 2);
+        const highPart = (n - lp) * Math.pow(1 - t, decay * 0.5);
+        d[i] = (lowPart + highPart) * 0.7;
+      }
+      // 초기 반사. 앞쪽에 성긴 점 몇 개.
+      for (let k = 0; k < 5; k++) {
+        const at = Math.floor((0.12 + k * 0.19 + ch * 0.05) * early);
+        if (at < len) d[at] += (1 - k * 0.16) * (ch === 0 ? 0.5 : 0.44);
+      }
+    }
+    return buf;
+  }
+
   _makeNoise(ctx) {
     const seconds = 2;
     const len = Math.max(1, Math.floor(ctx.sampleRate * seconds));
@@ -392,6 +484,18 @@ export class Mixer {
     for (const name of CATEGORIES) {
       const bus = this.buses[name];
       if (bus) bus.gain.value = Math.max(0, c.category?.[name] ?? 1);
+    }
+
+    /**
+     * 보내기. 카테고리 표에 없는 이름은 0 — 소리 없이 마른 채로 남는다.
+     *
+     * `mix` 는 전체 배수라, 패널에서 하나만 움직여 공간을 통째로 끄고 켤 수 있다.
+     */
+    const space = c.space ?? {};
+    const mix = Math.max(0, space.mix ?? 0);
+    for (const name of CATEGORIES) {
+      const send = this.sends[name];
+      if (send) send.gain.value = mix * Math.max(0, space.category?.[name] ?? 0);
     }
 
     const bits = Math.max(1, Math.min(16, Math.round(c.crushBits ?? 16)));

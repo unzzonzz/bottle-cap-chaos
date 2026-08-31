@@ -2265,23 +2265,60 @@ export const CONFIG = {
 
     // ── the tone ───────────────────────────────────────────────────────────
     /**
+     * 공간. 예순 개의 소리를 한 곳에 있게 만드는 장치.
+     *
+     * ── 크러셔가 하던 일을 물려받았다 ─────────────────────────────────────
+     * 아래 `crushBits` 주석이 원래 근거를 적어 두었다: 5비트 색 양자화기의 오디오
+     * 절반. 그 양자화기가 없다. 지금 화면은 유리와 물과 빛이고, 그 등가물은
+     * 양자화 잡음이 아니라 짧고 밝은 잔향이다 — 유리잔 안에서 나는 소리는 어디서
+     * 나든 같은 방에서 난다.
+     *
+     * 카테고리마다 다른 이유: UI 클릭에 잔향을 먹이면 화면이 헐거워지고, 충돌음에
+     * 안 먹이면 판이 진공에 있는 것으로 들린다. 브러시는 손 아래에서 연속으로
+     * 울리는 유일한 소리라 0 이다 — 거기에 꼬리를 붙이면 지시서가 말한 "과하면
+     * 극도로 피로하다" 가 그대로 일어난다.
+     */
+    space: {
+      /** 임펄스 길이. 방 하나만큼, 홀이 아니라. */
+      seconds: 0.42,
+      /** 꼬리의 감쇠 지수. 클수록 빨리 죽는다. */
+      decay: 3.2,
+      /** 전체 보내기 배수. 0 이면 공간이 통째로 꺼진다. */
+      mix: 1,
+      category: {
+        ambient: 0.22,
+        impact: 0.3,
+        draw: 0,
+        ui: 0.12,
+        orb: 0.34,
+        card: 0.26,
+        stinger: 0.4,
+      },
+    },
+
+    /**
      * Bit depth of the global crusher, in bits. 16 switches it off entirely.
      *
-     * The audio half of the 5-bit colour quantiser — see `RetroPass`. 7 is the
-     * band where the grain is plainly there on a noise burst without turning a
-     * quiet UI blip into a buzz; below 5 everything develops a permanent fizz
-     * on its decay tail, which is authentic and is also exhausting.
+     * ── 7 이었고, 16 이 됐다 ─────────────────────────────────────────────
+     * 원래 근거: "5비트 색 양자화기의 오디오 절반 — `RetroPass` 참조. 7 은 잡음
+     * 버스트에서 결이 분명히 들리면서 조용한 UI 블립이 버즈가 되지는 않는 대역이다."
+     *
+     * `RetroPass` 는 PHASE 1 에 삭제됐다. 양자화기도, 디더 격자도, 저해상도
+     * 프레임버퍼도 없다. 화면이 유리가 된 마당에 소리만 콘솔로 남으면 그 둘이 서로
+     * 다른 게임의 것으로 들린다.
+     *
+     * 장치는 남긴다. 코드도 워클릿도 실재하고 패널의 다이얼로 살아 있으므로,
+     * 지우는 대신 유니티로 둔다 — 16 에서 `_shaper.curve` 는 `null` 이고 이것은
+     * 진짜 무처리다(감쇠도 지연도 없다).
      */
-    crushBits: 7,
+    crushBits: 16,
     /**
      * Sample-and-hold rate, in Hz. At or above the device rate it does nothing.
      *
-     * Needs the AudioWorklet — see `Mixer`. Where it is unavailable the bit
-     * crush still runs and this is ignored. 16 kHz is roughly a mid-90s console
-     * sampler and takes the top off the noise bursts, which is most of what
-     * makes them read as an era rather than as a modern game being dirtied up.
+     * 16000 이었다. 위와 같은 이유로 유니티다 — 48 kHz 는 어떤 기기에서도
+     * `holdFrames = 1`, 즉 아무것도 붙잡지 않는다.
      */
-    crushRateHz: 16000,
+    crushRateHz: 48000,
 
     // ── the physical mapping ──────────────────────────────────────────────
     /**

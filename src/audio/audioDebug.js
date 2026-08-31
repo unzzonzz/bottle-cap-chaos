@@ -128,6 +128,22 @@ export function addAudioFolder(gui, { audio, config, settings }) {
     )
     .name('↺ 저장된 설정 지우기');
 
+  // ── the space ────────────────────────────────────────────────────────────
+  /**
+   * 공간이 톤보다 위에 있는 이유는 이제 이쪽이 전역 톤이기 때문이다.
+   * 크러셔는 유니티로 남겨 둔 옛 장치이고, 소리를 한 기계의 것으로 만드는 것은
+   * 잔향이다 — `config.audio.space` 주석 참조.
+   */
+  const space = folder.addFolder('공간 (전역)');
+  space.add(config.space, 'mix', 0, 1.5, 0.01).name('보내기 배율').onChange(() => audio?.applyConfig());
+  for (const name of Object.keys(config.space.category)) {
+    space
+      .add(config.space.category, name, 0, 1, 0.01)
+      .name(name)
+      .onChange(() => audio?.applyConfig());
+  }
+  space.open();
+
   // ── the tone ─────────────────────────────────────────────────────────────
   const tone = folder.addFolder('톤 (전역)');
   tone.add(config, 'masterTrim', 0, 1.5, 0.01).name('마스터 트림');

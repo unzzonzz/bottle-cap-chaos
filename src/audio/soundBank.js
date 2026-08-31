@@ -19,7 +19,8 @@ import { CATEGORY } from './categories.js';
  *           separates a struck cap from a puff of air, and it is the single most
  *           load-bearing number in this file.
  *
- * Everything then goes through the global bit crusher and sample-rate hold, so
+ * Everything then goes through the global chain — a space, and a bit crusher that
+ * is at unity by default (see `config.audio`) — so
  * the family resemblance is applied to the output as well as designed into the
  * input — the same logic as the render chain's 5-bit quantiser, and for the same
  * reason: it is easier to make things belong together by damaging them
@@ -137,29 +138,25 @@ function low(from, to = from, sweep = 0.09) {
 /**
  * The ceiling every bare blip sits under, in Hz.
  *
- * ── the crusher needs to be fed something it can crush cleanly ─────────────
- * A square wave's harmonics run all the way to Nyquist. The global chain then
- * quantises to seven bits and holds at 16 kHz, so everything above 8 kHz folds
- * back as INHARMONIC content and the quantisation noise rides the decay tail —
- * and a short bright blip put through that arrives as a tone with a broadband
- * transient stapled to it. Measured on the settings click: spectral flatness
- * 0.27 against 0.14 for the same sound with the crusher bypassed, which is to
- * say half of what you hear is noise. The player heard it as a snare, which is
- * exactly what a short broadband transient is.
+ * ── 2600 이었고, 그 근거는 크러셔였다 ───────────────────────────────────────
+ * 원래 계산: 사각파의 배음은 나이퀴스트까지 간다. 전역 체인이 7비트로 양자화하고
+ * 16 kHz 로 붙잡으므로 8 kHz 위가 전부 **비조화** 성분으로 접혀 돌아오고,
+ * 양자화 잡음이 감쇠 꼬리를 탄다 — 짧고 밝은 블립이 브로드밴드 트랜지언트를
+ * 달고 도착한다. 설정 클릭에서 실측한 스펙트럴 플랫니스가 0.27 대 0.14 였고,
+ * 사용자는 그것을 "스네어" 로 들었다.
  *
- * The crusher is not the problem and must not be turned down — it is the device
- * that makes sixty sounds one machine. What has to change is what it is given.
- * Cutting the blips at 2.6 kHz removes the harmonics that would alias while
- * leaving the fundamental and its third, which is where a blip's character
- * lives: measured, flatness drops to 0.18 and the energy above 6 kHz falls from
- * 38% to 22%, and the sound gets LOUDER rather than duller because the level no
- * longer leaks into inaudible fold-back.
+ * 크러셔가 유니티가 됐다(`config.audio.crushBits`). 접힘도 양자화 잡음도 없으므로
+ * 2.6 kHz 천장이 막고 있던 것은 이제 아무것도 아니고, 남은 것은 부작용뿐이다 —
+ * 기본파와 3배음만 남은 블립은 유리가 아니라 나무 소리다. 유리와 물이 유리와 물로
+ * 들리는 것은 그 위의 배음들이다.
  *
- * Applied only to the bare tonal blips. The impacts and the stingers keep their
- * full bandwidth — grit is the point there, and they already carry filters of
- * their own that shape it deliberately.
+ * 7200 은 그 배음이 살아나면서도 여전히 상한이 있는 자리다. 완전히 열지 않는
+ * 이유는 사각파의 고차 배음이 그대로 남으면 새 잔향의 꼬리에 실려 쉭쉭거리기
+ * 때문이다 — 크러셔의 접힘 대신 잔향이 그것을 드러낸다.
+ *
+ * 여전히 맨 톤 블립에만 적용된다. 충돌음과 스팅어는 대역폭을 다 쓴다.
  */
-const BLIP_CEILING = 2600;
+const BLIP_CEILING = 7200;
 
 /** A high-pass. Air, paper, shimmer. */
 function high(from, to = from, sweep = 0.09) {
