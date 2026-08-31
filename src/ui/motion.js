@@ -44,69 +44,12 @@ export function approach(value, target, dt, seconds) {
 }
 
 /**
- * 눌리고 놓이는 컨트롤의 진행도 한 쌍을 한 번에 밀어 준다.
+ * ── 호버·프레스 진행도를 밀던 것들이 여기 있었다 ────────────────────────────
+ * `controlState` / `stepControl` / `controlScale` / `hoverPlates` 넷이 있었고,
+ * 넷 다 없어졌다. 버튼이 상호작용에 반응하지 않기로 했으므로 — `glass.skinFor` 의
+ * 호버 분기에 그 결정과 근거가 적혀 있다 — 밀 진행도가 없다.
  *
- * 호버와 프레스가 서로 다른 시간을 쓰는 것이 요점이다. 누르는 것은 즉각이어야
- * 하고(`MOTION.press`, 0.07초) 놓는 것은 그보다 느긋해야 한다(`MOTION.release`,
- * 0.18초) — 손가락보다 빨리 돌아오는 버튼은 눌린 적이 없는 것처럼 보인다.
- *
- * @param {{hover: number, press: number}} state  제자리에서 갱신된다
+ * 남은 것은 곡선 셋과 `approach` 다. 그쪽은 여전히 쓰인다: 모달의 등장, HUD 아래
+ * 줄의 미끄러짐, 메뉴 열의 호버 진행도(값을 읽는 곳은 없지만 열이 호버를 안다는
+ * 사실은 남는다).
  */
-export function stepControl(state, { hovered, pressed }, dt) {
-  state.hover = approach(state.hover, hovered ? 1 : 0, dt, MOTION.hover);
-  state.press = approach(
-    state.press,
-    pressed ? 1 : 0,
-    dt,
-    pressed ? MOTION.press : MOTION.release,
-  );
-  return state;
-}
-
-/** 새 컨트롤의 진행도. 둘 다 꺼진 상태에서 시작한다. */
-export function controlState() {
-  return { hover: 0, press: 0 };
-}
-
-/**
- * 호버와 프레스를 하나의 배율로.
- *
- * ── 커지고, 눌리면 다시 작아진다 ────────────────────────────────────────────
- * Wii 의 버튼은 포인터가 오면 조금 커지고 누르면 원래보다 조금 작아진다. 두
- * 방향이 다 있어야 "닿았다"와 "눌렀다"가 구별된다 — 커지기만 하면 누르는 순간
- * 아무 일도 안 일어나고, 작아지기만 하면 닿은 것을 알 수 없다.
- *
- * 값이 작은 것은 의도다. 판이 8% 커지면 옆의 판과 간격이 눈에 띄게 달라지고,
- * 그러면 한 줄이 정렬을 잃은 것처럼 보인다. 4% 는 느껴지되 줄을 흔들지 않는다.
- */
-export function controlScale(state, { hover = 0.04, press = 0.03 } = {}) {
-  return 1 + easeOut(state.hover) * hover - easeOut(state.press) * (hover + press);
-}
-
-/**
- * 한 화면의 판들에 호버 배율을 먹인다.
- *
- * ── 왜 화면마다 쓰지 않고 여기 있나 ─────────────────────────────────────────
- * 설정 · 상대 선택 · 온라인 · 내 마크 네 화면이 전부 같은 모양의 목록이고, 전부
- * 호버에 텍스처만 갈아 끼우고 있었다. 네 곳에 같은 열 줄을 쓰면 그 중 하나가
- * 언젠가 다르게 움직인다. 목록이 하나면 그럴 곳이 없다.
- *
- * 진행도는 `states` 에 id 로 담긴다 — 화면이 들고 있고, 화면이 사라지면 같이
- * 사라진다. 항목이 조건부로 없어지는 화면들이라 배열 인덱스가 아니라 id 여야 한다.
- *
- * @param {Array<{id: string, mesh: object, w: number, h: number}>} items
- *   `w`/`h` 는 프레임 픽셀. 화면 단위 변환은 `unit` 이 한다.
- * @param {string|null} hovered
- * @param {number} dt
- * @param {number} unit  프레임 픽셀당 월드 단위 (`unitsPerPixel`)
- * @param {Record<string, {hover: number, press: number}>} states  제자리 갱신
- */
-export function hoverPlates(items, hovered, dt, unit, states) {
-  for (const it of items) {
-    if (!it?.mesh || !(it.w > 0)) continue;
-    const st = (states[it.id] ??= controlState());
-    stepControl(st, { hovered: hovered === it.id, pressed: false }, dt);
-    const k = controlScale(st);
-    it.mesh.scale.set(it.w * unit * k, it.h * unit * k, 1);
-  }
-}

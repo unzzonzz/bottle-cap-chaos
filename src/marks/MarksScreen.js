@@ -7,7 +7,6 @@ import { DEFAULT_MARK, SLOT_COUNT } from './MarkBook.js';
 import { FRAME } from '../core/frame.js';
 import { SPACE } from '../core/tokens.js';
 import { PLATE_TEXEL_SCALE, solveColumn } from '../menu/columnLayout.js';
-import { controlScale, controlState, hoverPlates, stepControl } from '../ui/motion.js';
 
 /**
  * 내 마크 — the grid, and the only way into the editor.
@@ -430,49 +429,13 @@ export class MarksScreen {
   }
 
   /**
-   * 칸과 뒤로 가기의 호버 배율.
+   * 이 화면도 프레임마다 할 일이 없다.
    *
-   * 칸은 그림이 들어가는 액자이므로 판만 키우면 안 된다 — 썸네일과 `+` 와 배지가
-   * 함께 커져야 하나의 물건으로 보인다. 그래서 `hoverPlates` 를 쓰지 않고 직접
-   * 민다: 액자 하나에 딸린 것이 넷이다.
+   * 칸의 호버 배율을 밀던 자리다. 특히 이 화면에서는 없는 편이 맞다 — 칸이
+   * 커지면 그 안의 **그림**이 커지는데, 마크를 고르는 화면에서 그림 크기가 포인터에
+   * 따라 변하면 비교가 안 된다. 액자 텍스처 교체는 `setHover` 가 그대로 한다.
    */
-  update(dt) {
-    const box = this._box;
-    if (!box) return;
-    const u = this._u;
-    const tile = this._tile ?? L.tile;
-    const states = (this._motion ??= {});
-
-    /**
-     * `_hover` 는 문자열이 아니라 히트 객체다 — `{ kind, ref }`.
-     *
-     * `kind` 가 tile / trash / badge 이면 그 셋 다 어떤 칸 **위에** 있다는 뜻이고,
-     * 칸은 그 셋 중 무엇에 닿았든 반응해야 한다. `setHover` 가 텍스처를 고를 때
-     * 쓰는 것과 같은 판단이라 여기서도 같게 쓴다.
-     */
-    const h = this._hover;
-    const overRef =
-      h && (h.kind === 'tile' || h.kind === 'trash' || h.kind === 'badge') ? h.ref : null;
-
-    this.tiles.forEach((t, i) => {
-      const id = `tile:${i}`;
-      const st = (states[id] ??= controlState());
-      stepControl(st, { hovered: overRef === t.ref, pressed: false }, dt);
-      const k = controlScale(st);
-      t.plate.scale.set(tile * u * k, tile * u * k, 1);
-      t.thumb.scale.set(tile * 0.82 * u * k, tile * 0.82 * u * k, 1);
-      t.plus.scale.set(tile * 0.36 * u * k, tile * 0.36 * u * k, 1);
-    });
-
-    const backRow = box.rows.find((r) => r.id === '#back');
-    hoverPlates(
-      [{ id: 'back', mesh: this.back, w: box.plate.width, h: backRow?.h ?? box.plate.height }],
-      h?.kind === 'back' ? 'back' : null,
-      dt,
-      u,
-      states,
-    );
-  }
+  update() {}
 
   dispose() {
     this._unsubscribe?.();

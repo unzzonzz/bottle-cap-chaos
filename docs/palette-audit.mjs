@@ -91,7 +91,6 @@ const checks = [
   ['A5.3  brand cap vs player[0]', contrast(P.menu.capBrand, P.player[0]), 1.6],
   ['A5.3  brand cap vs player[1]', contrast(P.menu.capBrand, P.player[1]), 1.6],
   ['A5.3  brand cap vs neutral cap (chroma apart)', Math.abs(chroma(P.menu.capBrand) - chroma(P.menu.capDefault)) * 10, 3.0],
-  ['      board.grid under board.wood (DARKER)', lum(P.board.wood) > lum(P.board.grid) ? contrast(P.board.grid, P.board.wood) : 0, 1.3],
 ];
 let soft = 0;
 for (const [name, got, want] of checks) {

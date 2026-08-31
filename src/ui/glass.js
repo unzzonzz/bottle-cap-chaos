@@ -114,19 +114,31 @@ export function skinFor(state = 'idle', accent = PALETTE.accent.cyan) {
     alpha: 1,
   };
   switch (state) {
+    /**
+     * ── 호버와 프레스는 **아무것도 바꾸지 않는다** ──────────────────────────
+     * 셋을 차례로 뺐고, 결국 전부 뺐다:
+     *
+     *   테두리   호버가 `edge: accent` 였다. 목록을 훑으면 줄마다 파란 상자가
+     *            켜졌다 꺼진다.
+     *   크기     닿으면 4% 커지고 누르면 3% 작아졌다. 알약이 세로로 쌓인 목록에서
+     *            하나가 커지면 위아래 간격이 달라져 줄이 정렬을 잃은 것처럼 보인다.
+     *   광택·그림자  호버가 광택을 0.85에서 0.95로, 아래 반사를 0.2에서 0.3으로
+     *            올렸고, 프레스는 그라디언트를 뒤집고 그림자를 평평하게 했다.
+     *
+     * 마지막 것까지 뺀 것은 사용자의 판단이고, 이 화면 구성에서 근거가 있다: 판이
+     * 이미 유리이고 광택을 갖고 있어서, 거기에 **또** 광택을 얹으면 반응이 아니라
+     * 재질이 흔들리는 것으로 보인다.
+     *
+     * 남는 피드백은 커서다 — `styles.css` 의 `#view.is-over-item` 등. 캔버스 안의
+     * 판은 자기 커서를 가질 수 없으므로 그쪽이 원래부터 그 일을 하고 있었다.
+     *
+     * `selected` 와 `disabled` 는 남는다. 그 둘은 상호작용의 **효과**가 아니라
+     * 컨트롤의 **상태**다 — 고른 도구, 고른 색, 지금은 누를 수 없는 줄. 손을 떼면
+     * 사라지는 것과 그대로 있는 것은 다른 것이고, 후자는 말해야 한다.
+     */
     case 'hover':
-      return { ...base, glossAlpha: 0.95, edge: accent, bounceAlpha: 0.3 };
     case 'pressed':
-      // The gradient runs the other way, so the surface reads as pushed IN, and
-      // the shadow goes flat because a pressed control is not floating.
-      return {
-        ...base,
-        flip: true,
-        glossAlpha: 0.6,
-        edge: accent,
-        elevation: ELEVATION.flat,
-        bounceAlpha: 0.1,
-      };
+      return base;
     case 'selected':
       return { ...base, edge: accent, glossAlpha: 0.9, bounceAlpha: 0.34 };
     case 'disabled':

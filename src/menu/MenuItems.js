@@ -3,7 +3,7 @@ import { createSpriteMaterial } from './menuMaterials.js';
 import { menuPlateTexture, titleTexture } from './menuTextures.js';
 import { FRAME } from '../core/frame.js';
 import { MOTION, SPACE } from '../core/tokens.js';
-import { approach, easeOut } from '../ui/motion.js';
+import { approach } from '../ui/motion.js';
 
 /**
  * The four items, as flat plates standing in the scene.
@@ -233,25 +233,17 @@ export class MenuItems {
     const u = this._unitsPerPixel ?? 1;
     for (const item of this.items) {
       /**
-       * ── 호버는 앞으로 나오고, 동시에 조금 커진다 ─────────────────────────
-       * 앞으로 나오는 것만 있었다. 카메라가 거의 정면이라 z 로 나오는 것은 화면에서
-       * 거의 안 보이고, 남는 것은 x 로 밀리는 것뿐이었다 — 판이 오른쪽으로 조금
-       * 미끄러진다는 뜻이고, "닿았다" 보다는 "밀렸다" 로 읽힌다.
+       * ── 호버는 아무것도 하지 않는다 ──────────────────────────────────────
+       * 판이 `hoverShift` 만큼 앞으로(그리고 오른쪽으로) 나왔다. 사용자가 상호작용
+       * 효과를 전부 빼 달라고 했고, 이 이동도 그 하나다.
        *
-       * 배율이 그 일을 대신한다. 화면의 어느 축에서 보든 커지는 것은 커지는 것이다.
-       * 밀림은 남겨 둔다 — 둘이 함께 있어야 판이 열에서 **떼어져** 앞으로 나온
-       * 것으로 보이고, 그게 Wii 의 메뉴가 하는 일이다.
-       *
-       * 진행도는 선형으로 두고 읽을 때 곡선을 씌운다. `motion.approach` 의 주석에
-       * 왜 그 순서여야 하는지 적혀 있다.
+       * `shift` 는 계속 민다. 값을 읽는 곳이 없어졌지만 진행도 자체는 이 열이
+       * 호버를 안다는 사실이고, 되돌리려면 여기 한 줄이면 된다 — `hoverShift` 도
+       * `menuConfig` 에 그대로 있다. 지운 것은 **적용**이지 개념이 아니다.
        */
       item.shift = approach(item.shift, item.hovered ? 1 : 0, dt, MOTION.hover);
-      const k = easeOut(item.shift);
-
-      const push = k * t.hoverShift;
-      item.mesh.position.set(item.home.x + push, item.home.y, push * 1.4);
-      const grow = 1 + k * 0.045;
-      item.mesh.scale.set(t.plateWidth * u * grow, t.plateHeight * u * grow, 1);
+      item.mesh.position.set(item.home.x, item.home.y, 0);
+      item.mesh.scale.set(t.plateWidth * u, t.plateHeight * u, 1);
       item.material.uniforms.uOpacity.value = fade;
     }
     this.title.material.uniforms.uOpacity.value = fade;

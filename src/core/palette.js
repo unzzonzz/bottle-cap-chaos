@@ -200,10 +200,10 @@ export const PALETTE = {
    * line is nearly the board's own value, so it inverted to a deep navy. The
    * measured figure is in the audit.
    *
-   * `grid` is darker than the board, which is not what its value suggests it
-   * needs to be: the grid is drawn with an UNLIT line material while the board
-   * is a lit surface, so a line at the board's own value comes out brighter than
-   * the board and the subtle scale reference reads as a loud white lattice.
+   * `grid` 는 사라졌다. 판 위에 네 뚜껑 너비마다 그은 성긴 격자의 색이었고, 그
+   * 격자의 근거는 "검은 판 위의 와이어프레임 뚜껑에는 움직임을 견줄 것이 없다"
+   * 였다. 판이 나뭇결이 된 뒤로 견줄 것은 판 자체에 있다. `ArenaView._buildBoard`
+   * 에 그 기록이 있다.
    */
   board: {
     wood: '#dcb27a',
@@ -214,7 +214,6 @@ export const PALETTE = {
     edgeGlow: '#7fd8f0',
     /** Speckle in the grain. Lighter than `wood`, or it does nothing. */
     fleck: '#ecd0a4',
-    grid: '#a8834f',
     apron: '#8a6c48',
     tint: PAPER,
   },

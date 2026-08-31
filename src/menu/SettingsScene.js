@@ -5,7 +5,6 @@ import { toMarkTexture } from '../marks/markTextures.js';
 import { PALETTE } from '../core/palette.js';
 import { PLATE_TEXEL_SCALE, solveColumn } from './columnLayout.js';
 import { gelButton, roundRectPath } from '../ui/glass.js';
-import { hoverPlates } from '../ui/motion.js';
 
 /**
  * 설정 — a heading, the things it holds, and a way back.
@@ -477,23 +476,15 @@ export class SettingsScene {
   }
 
   /**
-   * 호버 배율. 텍스처 교체는 `refresh` 가 하고, 여기는 **움직임**만 한다.
+   * 이 화면은 프레임마다 할 일이 없다.
    *
-   * 둘을 나누는 이유는 빈도다. 텍스처는 라벨이 바뀔 때만 다시 구워야 하고 —
-   * 매 프레임 구우면 캔버스 호출 수십 번이다 — 배율은 매 프레임 조금씩 움직여야
-   * 한다.
+   * 호버 배율을 밀던 자리다. 버튼이 상호작용에 반응하지 않기로 했으므로 밀 것이
+   * 없어졌다 — `glass.skinFor` 의 호버 분기에 근거가 있다. 텍스처 교체는 여전히
+   * `refresh` 가 하고, 그건 라벨이 바뀔 때만 일어난다.
+   *
+   * 빈 함수로 남는 이유는 `bootMenu` 가 화면 종류를 가리지 않고 부르기 때문이다.
    */
-  update(dt) {
-    const box = this._box;
-    if (!box) return;
-    const rows = this.items.map((it) => ({
-      id: it.id,
-      mesh: it.mesh,
-      w: box.plate.width,
-      h: box.rows.find((r) => r.id === it.id)?.h ?? box.plate.height,
-    }));
-    hoverPlates(rows, this._hovered, dt, this._u, (this._motion ??= {}));
-  }
+  update() {}
 
   dispose() {
     this._off?.();

@@ -387,11 +387,29 @@ export function buildLiquidGeometry(profile) {
   }
 
   const g = assemble({ pos, nor, uv, col, index });
-  // Where the slosh writes. Centre first, then the ring, in column order.
+  /**
+   * 액면을 쓰는 쪽이 알아야 하는 것들.
+   *
+   * ── 링이 **둘** 이라는 것이 요점이다 ──────────────────────────────────────
+   * 액면은 부채꼴이다: 가운데 점 하나(`surfaceCentre`)와 테두리 링 하나
+   * (`surfaceRim`). 그런데 옆벽의 맨 윗줄도 같은 자리에 같은 각도로 같은 반지름의
+   * 링을 하나 갖고 있다 — `revolve` 가 만든 것이고, 부채꼴과는 별개의 정점들이다.
+   *
+   * 살짝 출렁일 때는 그 사실이 드러나지 않았다. 진폭이 작고 유리가 가려서다.
+   * 기울어진 병에서 액면을 수평으로 만들면 진폭이 훨씬 커지고, 둘 중 하나만
+   * 움직이면 벽 끝이 액면 위로 삐져나오거나 그 사이가 벌어진다. 그래서 두 링의
+   * 위치를 함께 내보낸다.
+   *
+   * `wrap: false` 이므로 한 줄의 정점 수는 정확히 `cols` 다 — 이음매 중복이 없다.
+   */
   g.userData.surfaceCentre = surfaceCentre;
   g.userData.surfaceRim = surfaceRim;
   g.userData.surfaceCols = cols;
   g.userData.surfaceY = fill * MM;
+  /** 옆벽 맨 윗줄의 첫 정점. 부채꼴 링과 같은 각도, 같은 반지름. */
+  g.userData.wallTopRim = (rows.length - 1) * cols;
+  /** 그 링의 반지름, 월드 단위. 수평면 계산이 각 컬럼의 x/z 를 여기서 얻는다. */
+  g.userData.surfaceRadius = surfaceR * MM;
   return g;
 }
 

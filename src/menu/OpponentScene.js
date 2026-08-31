@@ -7,7 +7,6 @@ import { PLAYER_COLORS } from '../render/playerColors.js';
 import { PALETTE } from '../core/palette.js';
 import { FRAME } from '../core/frame.js';
 import { PLATE_TEXEL_SCALE, solveColumn } from './columnLayout.js';
-import { hoverPlates } from '../ui/motion.js';
 
 /**
  * 상대 선택 — two caps facing each other, and who is behind the far one.
@@ -384,18 +383,16 @@ export class OpponentScene {
     return false;
   }
 
-  /** 호버 배율. `refresh` 는 텍스처를, 여기는 움직임을 맡는다. */
-  update(dt) {
-    const box = this._box;
-    if (!box) return;
-    const rows = this.items.map((it) => ({
-      id: it.id,
-      mesh: it.mesh,
-      w: it.size?.width ?? box.plate.width,
-      h: it.size?.height ?? box.plate.height,
-    }));
-    hoverPlates(rows, this._hovered, dt, this._u, (this._motion ??= {}));
-  }
+  /**
+   * 이 화면은 프레임마다 할 일이 없다.
+   *
+   * 호버 배율을 밀던 자리다. 버튼이 상호작용에 반응하지 않기로 했으므로 밀 것이
+   * 없어졌다 — `glass.skinFor` 의 호버 분기에 근거가 있다. 텍스처 교체는 여전히
+   * `refresh` 가 하고, 그건 라벨이 바뀔 때만 일어난다.
+   *
+   * 빈 함수로 남는 이유는 `bootMenu` 가 화면 종류를 가리지 않고 부르기 때문이다.
+   */
+  update() {}
 
   dispose() {
     for (const item of this.items) {

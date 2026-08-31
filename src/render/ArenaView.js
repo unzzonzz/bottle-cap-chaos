@@ -106,7 +106,6 @@ const APRON_EDGE_COLOR = PALETTE.board.apron;
  * these lines existed to provide, so all they still have to do is mark scale.
  * At the old brightness they sat on top of the mat rather than in it.
  */
-const GRID_COLOR = PALETTE.board.grid;
 
 /**
  * The ball's two panel colours.
@@ -440,20 +439,16 @@ export class ArenaView {
       g.add(new LineSegments(outerGeo, this.apronMaterial));
     }
 
-    // A coarse grid, purely so distance and speed are readable when the caps are
-    // wireframes on a black board and there is nothing else to judge motion
-    // against. One line every four cap widths.
-    const step = CAP_DEFAULTS.capDiameter * MM * 4;
-    const grid = [];
-    for (let v = -h + step; v < h - 1e-3; v += step) {
-      grid.push(-h, 0.01, v, h, 0.01, v);
-      grid.push(v, 0.01, -h, v, 0.01, h);
-    }
-    const gridGeo = new BufferGeometry();
-    gridGeo.setAttribute('position', new Float32BufferAttribute(grid, 3));
-    this.gridMaterial = new LineBasicMaterial({ color: GRID_COLOR, fog: false });
-    g.add(new LineSegments(gridGeo, this.gridMaterial));
-
+    /**
+     * ── 격자가 여기 있었고, 그 이유가 사라졌다 ────────────────────────────
+     * 네 뚜껑 너비마다 한 줄씩 긋던 성긴 격자였다. 주석이 근거를 이렇게 적어
+     * 두었다: "순전히 거리와 속도를 읽기 위해서다. 뚜껑이 검은 판 위의 와이어프레임
+     * 이고 움직임을 견줄 것이 달리 없을 때."
+     *
+     * 판은 검지 않고 뚜껑은 와이어프레임이 아니다. 나뭇결이 방향과 거리를 모두
+     * 갖고 있으므로 움직임을 견줄 것이 판 자체에 있고, 그 위에 그은 선은 판에서
+     * 나온 것이 아니라 판 위에 얹힌 것으로 보인다.
+     */
     return g;
   }
 
@@ -643,7 +638,6 @@ export class ArenaView {
       this.field.traverse((o) => o.geometry?.dispose());
       this.boardMaterial.dispose();
       this.edgeMaterial.dispose();
-      this.gridMaterial.dispose();
       this.apronMaterial?.dispose();
     }
     this.field = null;
