@@ -329,7 +329,7 @@ export class ModalLayer {
     this.panel.material.uniforms.uMap.value = tex;
     this._panelW = PANEL_WIDTH;
     this._panelH = panelH;
-    this.panel.scale.set(PANEL_WIDTH, panelH, 1);
+    // 배율은 `_applyEnter` 가 넣는다. 여기서는 텍스처와 쉬는 크기만 정한다.
     this.panel.position.set(0, 0, 0);
 
     // 판 안쪽 아래에서 위로 쌓는다: 버튼 줄이 가장 아래, 그 위가 입력 칸.
@@ -339,8 +339,9 @@ export class ModalLayer {
 
     if (spec.field) {
       const fy = y + FIELD.height / 2;
-      this.field.scale.set(FIELD.width, FIELD.height, 1);
-      this.field.position.set(0, fy, 1);
+      // 쉬는 자리만 적어 둔다. 실제 배율·위치는 `_applyEnter` 가 등장 곡선과 함께
+      // 넣는다 — 판만 커지고 안의 것들은 처음부터 제 크기였던 것이 이 분리가 없어서였다.
+      this._fieldHome = { w: FIELD.width, h: FIELD.height, y: fy };
       this.field.material.uniforms.uMap.value = slotTexture(FIELD.width, FIELD.height, {
         focused: true,
         scale,
@@ -351,6 +352,7 @@ export class ModalLayer {
       y = fy + FIELD.height / 2;
     } else {
       this.field.visible = false;
+      this._fieldHome = null;
     }
 
     const row = spec.buttons;
@@ -371,6 +373,7 @@ export class ModalLayer {
       if (!def) {
         b.mesh.visible = false;
         b.id = null;
+        b.home = null;
         return;
       }
       b.id = def.id;
@@ -382,8 +385,7 @@ export class ModalLayer {
       b.baseTone = b.disabled ? 'disabled' : (def.tone ?? 'idle');
       b.role = def.role ?? null;
       const x = -span / 2 + btnW / 2 + i * (btnW + gap);
-      b.mesh.scale.set(btnW, btnH, 1);
-      b.mesh.position.set(x, rowY, 1);
+      b.home = { w: btnW, h: btnH, x, y: rowY };
       b.mesh.visible = true;
       const tone = !b.disabled && this.hovered === def.id ? 'hover' : b.baseTone;
       const stale =
@@ -404,7 +406,44 @@ export class ModalLayer {
       }
     });
 
+    this._applyEnter(overshoot(this._enter ?? 1));
+
     if (this._input) this._placeInput();
+  }
+
+  /**
+   * 등장 곡선을 판과 **판 안의 모든 것**에 넣는다.
+   *
+   * ── 예전에는 판만 커졌다 ────────────────────────────────────────────────────
+   * `update` 가 `panel.scale` 에만 `k` 를 곱하고, 버튼과 입력 칸에는 `uOpacity` 만
+   * 줬다. 그래서 판이 0 에서 자라 오르는 0.24 초 동안 버튼 두 개는 처음부터 제
+   * 크기·제 자리에 앉아 있었고 — 작은 판보다 크게 — 판 밖으로 삐져나와 있었다.
+   * 판이 커지는 게 아니라 판만 따로 노는 것으로 보인 이유가 그것이다.
+   *
+   * 원점 기준 배율이라 **위치도 같이** 곱한다. 크기만 곱하면 버튼이 제자리에서
+   * 작아졌다 커질 뿐, 판과 함께 모여들었다 퍼지지 않는다. 모달은 전부 원점을
+   * 중심으로 배치돼 있으므로(판이 (0,0)) 이 곱 하나가 곧 원점 기준 스케일이다.
+   *
+   * `_layout` 끝에서도 부르는 것은 스냅 때문이다. 타이핑이 유효성을 바꾸거나
+   * 호버가 바뀌면 등장 도중에도 `_layout` 이 돌고, 그때 쉬는 크기를 그대로 넣으면
+   * 한 프레임 튄다.
+   *
+   * 글자가 리샘플되는 것은 등장 동안만이고, 판 자신이 이미 그렇게 하고 있다.
+   */
+  _applyEnter(k) {
+    if (this._panelW === undefined) return;
+    this.panel.scale.set(this._panelW * k, this._panelH * k, 1);
+    for (const b of this.buttons) {
+      if (!b.home) continue;
+      b.mesh.scale.set(b.home.w * k, b.home.h * k, 1);
+      b.mesh.position.set(b.home.x * k, b.home.y * k, 1);
+    }
+    const f = this._fieldHome;
+    if (f) {
+      this.field.scale.set(f.w * k, f.h * k, 1);
+      this.field.position.set(0, f.y * k, 1);
+      this.field.visible = true;
+    }
   }
 
   // ── the one DOM element ──────────────────────────────────────────────────
@@ -438,6 +477,8 @@ export class ModalLayer {
       letterSpacing: '0.08em',
       zIndex: '30',
       caretColor: PALETTE.accent.cyan,
+      // 등장 곡선과 함께 떠오른다. `update` 가 민다.
+      opacity: '0',
     });
     el.addEventListener('input', () => {
       /**
@@ -653,11 +694,21 @@ export class ModalLayer {
     if (before === this._enter) return;
 
     const k = overshoot(this._enter);
-    this.panel.scale.set(this._panelW * k, this._panelH * k, 1);
+    this._applyEnter(k);
     for (const b of this.buttons) b.mesh.material.uniforms.uOpacity.value = k;
     this.field.material.uniforms.uOpacity.value = k;
     this.panel.material.uniforms.uOpacity.value = k;
     this.veil.material.uniforms.uOpacity.value = VEIL_ALPHA * easeOut(this._enter);
+    /**
+     * DOM 입력만은 **크기가 아니라 불투명도**로 따라온다.
+     *
+     * 그려지는 홈은 판과 함께 자라지만, 그 위의 `<input>` 은 제자리·제 크기로
+     * 남는다. 배율을 넣지 않는 이유는 포커스다 — `_mountInput` 이 붙자마자
+     * `focus()` 를 부르는데 그 순간 `_enter` 는 0 이고, 0x0 짜리 요소에 포커스를
+     * 주면 iOS 가 키보드를 올려 주지 않는다. 커서 하나와 글자 몇 개가 자라는 홈
+     * 위로 **떠오르는** 것으로 충분하고, 그동안 칸은 대개 비어 있다.
+     */
+    if (this._input) this._input.style.opacity = String(easeOut(this._enter));
   }
 
   render(renderer) {
