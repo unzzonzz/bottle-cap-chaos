@@ -1008,24 +1008,45 @@ function ringTexture(boundary) {
   const key = String(boundary);
   const hit = ringCache.get(key);
   if (hit) return hit;
-  const size = 128;
+  /**
+   * 경계선. 획 하나로 그린 원이다.
+   *
+   * 예전에는 128x128 픽셀을 전부 돌면서 중심까지의 거리가 `r ± 1` 인 텍셀만
+   * 칠했다 — "두 텍셀 폭, 하드 엣지. 감쇠 없음: 부드러운 링은 그라디언트다".
+   * nearest 확대를 전제한 계산이고, 그 전제가 사라진 지금 화면에서는 계단진
+   * 점선처럼 보인다. 실제로 편집기 스크린샷에서 원이 아니라 점들의 고리였다.
+   *
+   * `arc` 한 번이면 어느 크기에서도 원이다. 파선인 것은 이것이 **경계**이지
+   * 그림의 일부가 아니라는 것을 말하기 위해서다 — 실선 원은 사용자가 그린 것으로
+   * 오해될 수 있고, 그건 지울 수 없는 원을 그린 것처럼 보이는 일이다.
+   */
+  const size = 256;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
+  ctx.imageSmoothingEnabled = true;
   const half = size / 2;
   const r = half * Math.max(0.05, Math.min(1, boundary));
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const d = Math.hypot(x + 0.5 - half, y + 0.5 - half);
-      // Two texels wide, hard-edged. No falloff — a soft ring is a gradient.
-      if (d >= r - 1 && d <= r + 1) {
-        ctx.fillStyle = PALETTE.ui.textMuted;
-        ctx.fillRect(x, y, 1, 1);
-      }
-    }
-  }
+
+  /**
+   * 밝은 색이어야 한다. 이 쿼드는 **가산** 블렌드로 그려진다.
+   *
+   * 예전 코드는 `ui.textMuted` 를 썼고 그건 어두운 청회색이다. 텍셀을 하드 엣지로
+   * 찍을 때는 알파가 1 이라 그래도 보였지만, 안티에일리어스된 획은 가장자리 알파가
+   * 낮고 가산 블렌드에서는 더한 양이 그만큼 줄어든다. 가산으로 그릴 것은 더할 빛이
+   * 있는 색이어야 한다.
+   */
+  ctx.save();
+  ctx.setLineDash([size * 0.035, size * 0.028]);
+  ctx.lineCap = 'round';
+  ctx.lineWidth = size * 0.018;
+  ctx.strokeStyle = PALETTE.accent.cyanPale;
+  ctx.beginPath();
+  ctx.arc(half, half, r, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+
   const tex = toMarkTexture(canvas);
   ringCache.set(key, tex);
   return tex;
