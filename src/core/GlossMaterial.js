@@ -115,14 +115,14 @@ export class GlossMaterials {
      */
     this.shared = {
       /**
-       * Multiplies every material's environment reflection.
+       * 재질마다의 환경 반사 배수.
        *
-       * Above 1 because until PHASE 3 puts real lights in the scene, this
-       * environment is the ONLY thing lighting anything, and a dome balanced for
-       * "reflections on top of a key light" is too dim to be the key light.
-       * Expect this to come back toward 1 when the rig lands.
+       * PHASE 2 에서는 1.35 였다. 그때는 환경맵이 유일한 광원이라 노출 다이얼을
+       * 겸했기 때문이다. PHASE 3 이 키·반구광·림을 씬에 넣었으므로 환경맵은
+       * 원래 역할 — 금속과 클리어코트가 비추는 대상 — 로 돌아간다. 1.35 를
+       * 그대로 두면 이제 전체가 과노출된다.
        */
-      envIntensity: 1.35,
+      envIntensity: 1.0,
       /** The cool edge light. See `RIM_MAIN`. */
       rimStrength: 0.35,
       /** Scales each material's own clearcoat. 0 kills the wet layer entirely. */

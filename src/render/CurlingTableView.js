@@ -196,6 +196,8 @@ export class CurlingTableView {
     this._materials.push(mat);
 
     this.slab = new Mesh(geo, mat);
+    // 테이블은 받기만 한다.
+    this.slab.receiveShadow = true;
     this.root.add(this.slab);
   }
 

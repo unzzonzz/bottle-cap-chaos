@@ -246,7 +246,16 @@ export function createGlassMaterial(retro, { map, face = 'front', color = PALETT
     depthTest: true,
     transparent: true,
   });
-  glass.envMapIntensity = retro?.shared?.envIntensity ?? 1;
+  /**
+   * 환경 반사를 전역값보다 높게 준다.
+   *
+   * 투과 재질이 화면에 내놓는 것의 대부분은 굴절된 환경이다. PHASE 3 이 실제
+   * 광원을 넣으면서 환경 돔의 확산 성분을 0.34 로 크게 낮췄는데 — 안 그러면
+   * 보드가 하얗게 탄다 — 그 값이 유리에도 그대로 걸리자 병이 회청색으로
+   * 무거워졌다. 불투명한 표면에 맞춘 노출을 유리에 쓰면 안 된다는 뜻이고,
+   * 그래서 여기만 되돌린다.
+   */
+  glass.envMapIntensity = (retro?.shared?.envIntensity ?? 1) * 2.2;
   glass.envMap = retro?._environment ?? null;
   return glass;
 }

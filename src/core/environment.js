@@ -51,6 +51,7 @@ const FRAG = /* glsl */ `
   uniform vec3 uSunDir;
   uniform float uSunSize;
   uniform float uSunGain;
+  uniform float uBaseGain;
   varying vec3 vDir;
 
   void main() {
@@ -68,7 +69,7 @@ const FRAG = /* glsl */ `
     float cosA = dot(d, normalize(uSunDir));
     float sun = pow(clamp(cosA, 0.0, 1.0), uSunSize);
 
-    gl_FragColor = vec4(base + uSunColor * sun * uSunGain, 1.0);
+    gl_FragColor = vec4(base * uBaseGain + uSunColor * sun * uSunGain, 1.0);
   }
 `;
 
@@ -114,6 +115,20 @@ export function buildEnvironment(renderer) {
       // where the light is, which reads as a rendering fault rather than as a
       // choice.
       uSunDir: { value: new Vector3(-0.55, 0.72, 0.42).normalize() },
+      /**
+       * 돔의 확산 성분. 태양과 분리되어 있고, 그 분리가 요점이다.
+       *
+       * ── PHASE 3 에서 화면이 하얗게 날아간 원인 ──────────────────────────
+       * 환경맵은 반사만 주는 게 아니라 확산광에도 기여한다. 실제 광원이 없던
+       * PHASE 2 에서는 그게 유일한 조명이라 밝아야 했지만, 키·반구광·림이
+       * 들어오자 그대로 더해져서 보드의 조도가 albedo 를 넘겼다 —
+       * 0.52 * (키 1.5*0.72 + 반구 0.55 + 환경 1.0) = 1.37, 즉 흰색을 넘는다.
+       *
+       * 광원 강도만 낮추면 금속이 비출 것이 없어져 같이 죽는다. 실제 하늘에서
+       * 에너지의 대부분은 태양에 있으므로, 돔의 바탕만 낮추고 태양 blob 은
+       * 그대로 둔다. 확산 기여는 내려가고 스페큘러 하이라이트는 남는다.
+       */
+      uBaseGain: { value: 0.34 },
       // Tight. A broad sun is an ambient term with extra steps.
       uSunSize: { value: 220 },
       // Above 1 on purpose: this is the HDR headroom the bloom threshold spends.

@@ -1,6 +1,8 @@
 import { Color, Group, Mesh, PerspectiveCamera, PlaneGeometry, Scene, Vector3 } from 'three';
 import { GlossMaterials } from '../core/GlossMaterial.js';
 import { buildEnvironment } from '../core/environment.js';
+import { createLightRig } from '../core/lighting.js';
+import { createSky } from '../core/sky.js';
 import { DISPLAY_ASPECT, Viewport } from '../core/Viewport.js';
 import { SceneComposer } from '../core/Composer.js';
 import { BOARD_ASPECT, FRAME } from '../core/frame.js';
@@ -142,7 +144,17 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
   whenFontsReady();
 
   const scene = new Scene();
-  scene.background = new Color(PALETTE.bg.skyTop);
+  /**
+   * 게임 페이지와 같은 하늘과 같은 조명 리그.
+   *
+   * 캡 와이프가 두 document 사이를 잇는데, 양쪽 조명이 다르면 전환 직후 병뚜껑의
+   * 밝기가 튄다. 같은 모듈을 쓰는 게 두 화면이 같은 장면이라는 유일한 보장이다.
+   *
+   * 메뉴에는 필드가 없으므로 그림자 프러스텀은 병 하나를 덮을 만큼만 준다.
+   */
+  const sky = createSky(scene);
+  const lights = createLightRig(scene);
+  lights.setExtents({ x: 26, z: 26 });
 
   const camera = new PerspectiveCamera(cfg.camera.fov, DISPLAY_ASPECT, 1, 400);
 
@@ -233,6 +245,18 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
   // other is placed by a world position every frame. Parenting either would add
   // the float to it twice.
   const menuRoot = new Group();
+  /**
+   * 병은 그림자를 던지고 바닥은 받는다.
+   *
+   * `bottle.shadow` 는 손으로 그린 타원 스프라이트인데, 그걸 지우지 않는 이유는
+   * 병이 공중에 떠 있기 때문이다 — 실제 그림자는 바닥의 광원 반대편에 생기지만
+   * 이 연출의 그림자는 "병이 떠 있다"를 말하려고 병 바로 아래에 있다. 둘은 다른
+   * 일을 한다.
+   */
+  bottle.root.traverse((o) => {
+    if (o.isMesh) o.castShadow = true;
+  });
+  floor.receiveShadow = true;
   menuRoot.add(floor, bottle.root, bottle.shadow, bottle.burst, asUiLayer(items.root));
   scene.add(menuRoot);
 
@@ -1167,6 +1191,8 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
     // rather than by the shake envelope, so it is fully aimed before the cap
     // goes rather than only as far round as the last wobble left it.
     bottle.update(dt, { shake, aim: transition.running ? 1 : 0, camera });
+    // 배경의 광점. 렌더 클럭이고 게임 상태를 읽지도 쓰지도 않는다.
+    sky.update(dt, camera);
     // The burst is a billboard and the camera is very nearly fixed, but "very
     // nearly" is what leaves a sprite visibly edge-on when the camera shakes.
     bottle.burst.quaternion.copy(camera.quaternion);

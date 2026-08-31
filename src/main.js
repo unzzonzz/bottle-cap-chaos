@@ -1,6 +1,8 @@
 import { Color, Scene, Vector3 } from 'three';
 import { GlossMaterials } from './core/GlossMaterial.js';
 import { buildEnvironment } from './core/environment.js';
+import { createLightRig } from './core/lighting.js';
+import { createSky } from './core/sky.js';
 import { Viewport } from './core/Viewport.js';
 import { SceneComposer } from './core/Composer.js';
 import { initRapier } from './physics/rapier.js';
@@ -246,7 +248,15 @@ async function boot(canvas) {
   const retro = new GlossMaterials({ resolution: viewport.resolution });
 
   const scene = new Scene();
-  scene.background = new Color(PALETTE.bg.skyTop);
+  /**
+   * `scene.background` 는 쓰지 않는다 — 하늘은 메시다.
+   *
+   * 배경 텍스처는 화면 공간에 고정되어 카메라가 돌아도 따라오지 않는다. 알까기
+   * 카메라는 회전하고 팬하므로 붙박이 하늘은 회전을 오히려 안 보이게 만든다.
+   * `core/sky.js` 참조.
+   */
+  const sky = createSky(scene);
+  const lights = createLightRig(scene);
 
   viewport.onResize(({ resolution }) => retro.setResolution(resolution));
 
@@ -1036,6 +1046,9 @@ async function boot(canvas) {
   // change after that; without this the first match of a cardless mode would
   // hang its score off a hand that is not drawn.
   hud.setHandParked(match.mode.cards !== false);
+  // 그림자 프러스텀도 이 페이지가 열린 모드에 한 번 맞춘다. `rebuildAll` 은
+  // 그 뒤의 전환에서만 돌므로, 이게 없으면 첫 매치가 기본 프러스텀으로 간다.
+  lights.setExtents(match.arena.layout.extents);
 
   /**
    * Who won, and the screen that says so.
@@ -1327,6 +1340,14 @@ async function boot(canvas) {
       viewport.refit();
     }
     gameCamera.setExtents(ext);
+    /**
+     * 그림자 카메라도 같은 필드에 맞춘다.
+     *
+     * 여기서 빼먹으면 커링 레인에 맞춘 프러스텀이 알까기 보드에 그대로 남아
+     * 2048 텍셀의 대부분이 빈 공간에 쓰인다. 모드를 바꿀 때마다 그림자가
+     * 뭉개지는데, 원인이 그림자 코드가 아니라 이 한 줄의 부재라 찾기 어렵다.
+     */
+    lights.setExtents(ext);
     // After the extents, because the range is re-clamped against the new fit and
     // clamping against the old one would put the zoom somewhere neither mode
     // allows for a frame.
@@ -1890,6 +1911,9 @@ async function boot(canvas) {
     // hash, and a field that happened to be spinning must not change how many
     // physics steps a turn takes.
     gameCamera.update(dt);
+    // 배경의 광점. 렌더 클럭이고, 게임 상태를 읽지도 쓰지도 않는다 —
+    // `MatchAudio` 가 읽기 전용인 것과 같은 이유다.
+    sky.update(dt, gameCamera.camera);
 
     updateAim();
 
@@ -2395,6 +2419,9 @@ async function boot(canvas) {
   // A handle for poking at the sim from the console while tuning, and for
   // driving frames by hand when verifying.
   window.__cap = {
+    lights,
+    sky,
+    composer,
     match, physics, view, colliderView, overlay, input, router, preview, CONFIG,
     gameCamera, camTracker, viewport, tick, rebuildAll, modeByKey, cards, cardFx,
     // The seats, and the switch between them. `tick` can be driven by hand

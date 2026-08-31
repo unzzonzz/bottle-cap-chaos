@@ -114,7 +114,10 @@ export class Bottle {
       color: PALETTE.liquid.core,
       gloss: 0.5,
       clearcoat: 0.15,
-      envIntensity: 0.6,
+      // 유리와 같은 이유로 전역값보다 높다 — 액체도 환경을 통해 보인다. 다만
+      // 유리만큼은 아니다: 액체는 굴절이 아니라 확산이 대부분이라 과하면 다시
+      // 스스로 빛나기 시작한다.
+      envIntensity: 1.5,
       vertexColors: true,
     });
     /**

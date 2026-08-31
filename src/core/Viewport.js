@@ -1,4 +1,5 @@
 import {
+  Color,
   ColorManagement,
   NoToneMapping,
   PCFSoftShadowMap,
@@ -7,6 +8,7 @@ import {
   WebGLRenderer,
 } from 'three';
 import { BOARD_ASPECT, FRAME, MAX_FRAME_WIDTH, updateFrame } from './frame.js';
+import { PALETTE } from './palette.js';
 
 /**
  * Colour management ON.
@@ -85,6 +87,16 @@ export class Viewport {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = PCFSoftShadowMap;
     this.renderer.autoClear = true;
+    /**
+     * 지워지는 색이 검정이 아니다.
+     *
+     * 안전망이다. 하늘은 `core/sky.js` 의 돔이 그리는데, 그게 어떤 이유로든
+     * 안 그려지면 — 카메라 far 밖으로 나갔다든가 — 남는 건 clear color 다.
+     * 기본값은 검정이고, 그러면 "검정이 화면 어디에도 지배적이지 않다"는 조항이
+     * 조용히 깨진다. 실제로 메뉴에서 그렇게 됐다. 지워지는 색을 하늘색으로 두면
+     * 최악의 경우가 단색 하늘이지 검은 화면이 아니다.
+     */
+    this.renderer.setClearColor(new Color(PALETTE.bg.skyMid), 1);
 
     /** Drawing-buffer size in DEVICE pixels — CSS size times the pixel ratio. */
     this.resolution = new Vector2(1, 1);

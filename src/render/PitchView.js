@@ -176,6 +176,7 @@ export class PitchView {
     });
     this._materials.push(mat);
     this.runoff = new Mesh(geo, mat);
+    this.runoff.receiveShadow = true;
     // Below the pitch slab, which sits at -0.01. Both below the markings.
     this.runoff.position.y = -0.02;
     this.root.add(this.runoff);
@@ -266,6 +267,8 @@ export class PitchView {
     this._materials.push(...mats);
 
     this.turf = new Mesh(geo, mats);
+    // 지면은 받기만 한다. 뚜껑과 공의 접지 그림자가 앉는 면이다.
+    this.turf.receiveShadow = true;
     // A hair below zero so the markings at y = 0.03 are unambiguously above it.
     this.turf.position.y = -0.01;
     this.root.add(this.turf);

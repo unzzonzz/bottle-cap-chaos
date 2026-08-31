@@ -231,6 +231,15 @@ export class ArenaView {
   _buildBodies(arena) {
     for (let i = 0; i < arena.capCount; i++) {
       const mesh = new Mesh(this.capGeometry, this._materials[arena.capOwner[i] % 2]);
+      /**
+       * 뚜껑은 그림자를 던지고 또 받는다.
+       *
+       * 받는 쪽이 중요하다 — 뚜껑끼리 겹쳐 있을 때 위의 것이 아래에 그림자를
+       * 드리우지 않으면 두 개가 같은 높이에 있는 것처럼 보인다. 알까기에서
+       * 그건 판정에 관한 정보다.
+       */
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
       // NOT recentred. The viewer parks the cap on its mid-height because that
       // is what it orbits about; a physics body's origin is its own hem, which
       // is exactly how capGeometry builds it, so the mesh goes on unshifted.
@@ -245,6 +254,8 @@ export class ArenaView {
       // the vertex-snap shader works in.
       this.ballGeometry = buildBallGeometry(arena.ballRadius);
       this.ball = new Mesh(this.ballGeometry, this.ballMaterials);
+      this.ball.castShadow = true;
+      this.ball.receiveShadow = true;
       this.root.add(this.ball);
     }
   }
@@ -374,6 +385,8 @@ export class ArenaView {
       preset: 'lacqueredWood',
     });
     this.boardMesh = new Mesh(geo, this.boardMaterial);
+    // 보드는 받기만 한다. 접지 그림자가 앉는 면이다.
+    this.boardMesh.receiveShadow = true;
     this.boardMesh.position.y = -boardThickness * 0.01;
     g.add(this.boardMesh);
 
