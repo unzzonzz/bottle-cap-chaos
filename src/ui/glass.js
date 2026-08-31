@@ -1,5 +1,5 @@
 import { PALETTE, mix, toRgb, withAlpha } from '../core/palette.js';
-import { ELEVATION, RADIUS, TYPE } from '../core/tokens.js';
+import { ELEVATION, PANEL, RADIUS, ROLE, SPACE, TYPE } from '../core/tokens.js';
 import { FONT_FAMILY } from './fonts.js';
 
 /**
@@ -112,6 +112,16 @@ export function skinFor(state = 'idle', accent = PALETTE.accent.cyan) {
     accent,
     flip: false,
     alpha: 1,
+    /**
+     * 바탕 채우기에만 걸리는 알파. 테두리와 글자는 이것을 받지 않는다.
+     *
+     * `alpha` 로는 안 된다 — 그건 몸통 전체에 걸려서 테두리와 글자까지 흐려지고,
+     * RETREAT 는 **채워지지 않되 테두리는 또렷해야** 하는 버튼이다.
+     * 색에 `rgba()` 를 넣는 것도 안 된다: `drawGelBody` 가 `mix()` 로 중간 정지점을
+     * 만드는데 `mix` 는 16진 문자열만 읽는다. 실제로 그렇게 했다가 RETREAT 가
+     * 새까맣게 나왔다.
+     */
+    fillAlpha: 1,
   };
   switch (state) {
     /**
@@ -160,6 +170,137 @@ export function skinFor(state = 'idle', accent = PALETTE.accent.cyan) {
   }
 }
 
+
+/* ── roles ───────────────────────────────────────────────────────────────── */
+
+/**
+ * 역할이 스킨에 얹는 변형.
+ *
+ * ── 레시피를 역할마다 다시 쓰지 않는다 ─────────────────────────────────────
+ * `drawGelBody` 의 여섯 단계가 이 프로젝트의 버튼이고, 역할은 그 위의 **차이**다.
+ * 역할마다 그리기를 새로 쓰면 여섯 단계가 네 벌이 되고, 그 중 하나가 언젠가
+ * 다르게 움직인다.
+ *
+ * 핵심은 RETREAT 다: **채워지지 않고 그림자가 없다.** 나머지 셋은 떠 있고 이것만
+ * 평평하다. 그 하나로 "이건 앞으로, 저건 뒤로" 가 색을 읽기 전에 읽힌다.
+ *
+ * @param {string} role  `ROLE` 의 값
+ * @param {string} state `skinFor` 의 상태
+ */
+export function roleSkin(role, state = 'idle') {
+  const accentFor = {
+    [ROLE.CHOICE]: PALETTE.accent.cyan,
+    [ROLE.COMMIT]: PALETTE.accent.cyan,
+    [ROLE.RETREAT]: PALETTE.ui.edgeStrong,
+    [ROLE.DESTRUCTIVE]: PALETTE.accent.orange,
+  };
+  const base = skinFor(state, accentFor[role] ?? PALETTE.accent.cyan);
+  if (state === 'disabled') return base;
+
+  switch (role) {
+    case ROLE.COMMIT:
+      return {
+        ...base,
+        top: PALETTE.accent.cyanPale,
+        bottom: PALETTE.accent.cyan,
+        edge: PALETTE.accent.cyanDeep,
+        text: PALETTE.ui.textOnAccent,
+        glossAlpha: 0.9,
+        bounceAlpha: 0,
+      };
+    case ROLE.DESTRUCTIVE:
+      return {
+        ...base,
+        top: mix(PALETTE.accent.orange, PALETTE.ui.glossHi, 0.45),
+        bottom: PALETTE.accent.orange,
+        edge: PALETTE.accent.orangeDeep,
+        text: PALETTE.ui.textOnAccent,
+        glossAlpha: 0.9,
+        bounceAlpha: 0,
+      };
+    case ROLE.RETREAT:
+      /**
+       * 채우지 않는다. 흰색 알파 0.35 한 겹이 전부다.
+       *
+       * `top` 과 `bottom` 이 같은 값이라 `drawGelBody` 의 허리선이 만들어지지
+       * 않는다 — 그라디언트의 두 끝이 같으면 중간 정지점도 같은 색이 된다.
+       * 부록이 "허리선 없음" 이라고 적은 것을 그리기 코드를 건드리지 않고 얻는다.
+       */
+      return {
+        ...base,
+        top: PALETTE.ui.glossHi,
+        bottom: PALETTE.ui.glossHi,
+        fillAlpha: 0.35,
+        edge: PALETTE.ui.edgeOuter,
+        text: PALETTE.ui.textMuted,
+        glossAlpha: 0.4,
+        innerAlpha: 0,
+        bounceAlpha: 0,
+        elevation: ELEVATION.flat,
+      };
+    default:
+      return base;
+  }
+}
+
+/**
+ * 역할을 가진 버튼 한 장.
+ *
+ * `gelButton` 을 대체하지 않는다 — 저쪽은 역할이라는 개념이 없던 시절의 것이고
+ * 카드 뒷면·칩·타일처럼 역할이 없는 표면도 그린다. 이쪽은 **누르면 무언가가
+ * 일어나는 것**만 그린다.
+ *
+ * @param {object} o
+ * @param {string} o.role
+ * @param {string} [o.state]
+ * @param {boolean} [o.selected]  CHOICE 가 선택된 상태인가 (바깥 링)
+ */
+export function roleButton(ctx, o) {
+  const {
+    x, y, w, h, label, role, state = 'idle', selected = false,
+    align = 'center', radius = RADIUS.pill,
+  } = o;
+  const skin = roleSkin(role, state);
+
+  // RETREAT 는 테두리가 2px 다. 채워지지 않은 것이 얇은 선까지 두르면 사라진다.
+  const border = role === ROLE.RETREAT ? 2 : 1.5;
+  drawGelBody(ctx, {
+    x, y, w, h, radius, skin,
+    waist: 0.52,
+    glossFraction: 0.46,
+    glossInset: 0.1,
+    border,
+  });
+
+  if (selected) {
+    focusRing(ctx, { x, y, w, h, radius, accent: PALETTE.accent.cyan });
+  }
+
+  if (!label) return;
+  ctx.save();
+  ctx.globalAlpha = skin.alpha < 1 ? 0.85 : 1;
+  const type = role === ROLE.CHOICE ? TYPE.title : TYPE.label;
+  const probe = ctx;
+  const fitted = fitText(probe, label, type, w - Math.max(SPACE.md, h * 0.7));
+  ctx.font = fitted.font;
+  ctx.textAlign = align === 'left' ? 'left' : 'center';
+  ctx.textBaseline = 'middle';
+  applyTracking(ctx, type.tracking);
+  const tx = align === 'left' ? x + h * 0.42 : x + w / 2;
+  /**
+   * 엠보스는 밝은 판에서만. 채워진 COMMIT·DESTRUCTIVE 위의 흰 글자에 흰 그림자를
+   * 깔면 글자가 두꺼워 보이기만 하고 떠 보이지 않는다.
+   */
+  if (role === ROLE.CHOICE || role === ROLE.RETREAT) {
+    ctx.fillStyle = withAlpha(PALETTE.ui.glossHi, 0.35);
+    ctx.fillText(fitted.text, tx, y + h / 2 + 1);
+  }
+  ctx.fillStyle = skin.text;
+  ctx.fillText(fitted.text, tx, y + h / 2);
+  applyTracking(ctx, 0);
+  ctx.restore();
+}
+
 /* ── the gel button ──────────────────────────────────────────────────────── */
 
 /**
@@ -168,7 +309,7 @@ export function skinFor(state = 'idle', accent = PALETTE.accent.cyan) {
  * Split out because the panel wants the same stack with two steps changed, and
  * because the card face wants the body without a label on it.
  */
-function drawGelBody(ctx, { x, y, w, h, radius, skin, waist, glossFraction, glossInset }) {
+function drawGelBody(ctx, { x, y, w, h, radius, skin, waist, glossFraction, glossInset, border = 1.5 }) {
   ctx.save();
   ctx.globalAlpha = skin.alpha;
 
@@ -187,8 +328,12 @@ function drawGelBody(ctx, { x, y, w, h, radius, skin, waist, glossFraction, glos
   base.addColorStop(Math.min(1, waist + 0.01), mix(top, bottom, 0.62));
   base.addColorStop(1, bottom);
   roundRectPath(ctx, x, y, w, h, radius);
+  ctx.save();
+  // 채우기에만 걸리는 알파. `skin.fillAlpha` 의 주석에 왜 `alpha` 로는 안 되는지 있다.
+  ctx.globalAlpha = skin.alpha * (skin.fillAlpha ?? 1);
   ctx.fillStyle = base;
   ctx.fill();
+  ctx.restore();
 
   clearShadow(ctx);
 
@@ -239,8 +384,8 @@ function drawGelBody(ctx, { x, y, w, h, radius, skin, waist, glossFraction, glos
 
   // 6. Outer border, last, so nothing above has softened it.
   ctx.strokeStyle = skin.edge;
-  ctx.lineWidth = 1.5;
-  roundRectPath(ctx, x + 0.75, y + 0.75, w - 1.5, h - 1.5, radius);
+  ctx.lineWidth = border;
+  roundRectPath(ctx, x + border / 2, y + border / 2, w - border, h - border, radius);
   ctx.stroke();
 
   ctx.restore();
@@ -453,4 +598,142 @@ export function fitText(ctx, text, type, maxWidth) {
  */
 export function applyTracking(ctx, tracking) {
   if ('letterSpacing' in ctx) ctx.letterSpacing = `${tracking || 0}px`;
+}
+
+/* ── the dialog skeleton ─────────────────────────────────────────────────── */
+
+/**
+ * 다이얼로그 패널 한 장: 제목 탭 · 몸통 · 푸터 구분선.
+ *
+ * ── 구분선이 이 함수의 존재 이유다 ─────────────────────────────────────────
+ * 부록 B 가 "푸터 구분선은 생략 불가" 라고 적은 근거는 실측 가능한 것이다:
+ * 여백만으로는 구역이 갈리지 않는다. 선택지 **사이에도** 여백이 있으므로, 마지막
+ * 선택지와 뒤로가기 사이의 여백은 그저 조금 넓은 여백이고, 그러면 뒤로가기가
+ * 목록의 마지막 항목처럼 보인다. 조사해 보니 이 프로젝트의 네 화면이 정확히 그
+ * 상태였다.
+ *
+ * ── 제목 탭은 패널의 **모서리에 걸친다** ───────────────────────────────────
+ * 패널 안에 제목을 쓰면 그것은 첫 번째 내용이다. 모서리에 걸친 탭은 내용이
+ * 아니라 이름이고, 그 차이를 만드는 것은 탭이 패널의 상단 선을 **끊는다**는
+ * 사실이다. 그래서 여기서 상단 선을 탭 폭만큼 비워 두고 다시 그린다.
+ *
+ * @param {object} o
+ * @param {number} o.w  패널 폭
+ * @param {number} o.h  패널 높이 (탭 제외)
+ * @param {string} [o.title]
+ * @param {number} [o.footerHeight]  0 이면 구분선도 푸터도 없다
+ * @returns {{top: number, contentTop: number, contentBottom: number, footerTop: number}}
+ *   `top` 은 탭까지 포함한 전체 상단이 패널 상단으로부터 얼마나 위인가 (음수).
+ */
+export function dialogPanel(ctx, o) {
+  const {
+    w, h, title = '', footerHeight = PANEL.footerHeight,
+    accent = PALETTE.accent.cyan,
+  } = o;
+  const tabH = title ? PANEL.titleTabHeight : 0;
+
+  /**
+   * 탭 폭은 글자에 맞춘다. 고정 폭이면 짧은 제목이 상자 안에서 떠다니고 긴
+   * 제목은 잘린다 — 이 프로젝트가 판마다 반복해서 배운 것이다.
+   */
+  let tabW = 0;
+  if (title) {
+    ctx.save();
+    ctx.font = fontSpec(TYPE.label);
+    applyTracking(ctx, TYPE.label.tracking);
+    tabW = Math.min(
+      w - PANEL.titleTabInset * 2,
+      Math.ceil(ctx.measureText(title).width) + PANEL.titleTabPadX * 2,
+    );
+    ctx.restore();
+  }
+
+  const tabX = PANEL.titleTabInset;
+  const bodyY = tabH;
+
+  // ── 탭. 몸통보다 먼저 그린다: 몸통이 탭의 아랫변을 덮어 하나로 이어 준다.
+  if (title) {
+    ctx.save();
+    applyElevation(ctx, ELEVATION.raised);
+    ctx.beginPath();
+    const r = RADIUS.chip;
+    ctx.moveTo(tabX, bodyY);
+    ctx.lineTo(tabX, bodyY - tabH + r);
+    ctx.arcTo(tabX, 0, tabX + r, 0, r);
+    ctx.lineTo(tabX + tabW - r, 0);
+    ctx.arcTo(tabX + tabW, 0, tabX + tabW, r, r);
+    ctx.lineTo(tabX + tabW, bodyY);
+    ctx.closePath();
+    const g = ctx.createLinearGradient(0, 0, 0, bodyY);
+    g.addColorStop(0, PALETTE.ui.glassTop);
+    g.addColorStop(1, PALETTE.ui.glassBottom);
+    ctx.fillStyle = g;
+    ctx.fill();
+    clearShadow(ctx);
+    ctx.strokeStyle = PALETTE.ui.edgeOuter;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ── 몸통.
+  glassPanel(ctx, {
+    x: 0,
+    y: bodyY,
+    w,
+    h,
+    radius: RADIUS.panel,
+    accent,
+    alpha: 1,
+    elevation: ELEVATION.modal,
+  });
+
+  /**
+   * 탭이 걸친 자리에서 몸통의 상단 선을 지운다.
+   *
+   * 지우지 않으면 탭 아래에 선이 하나 지나가고, 그러면 탭은 패널의 일부가 아니라
+   * 패널 위에 올려 둔 다른 물건이 된다.
+   */
+  if (title) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(tabX + 1.5, bodyY - 2, tabW - 3, 4);
+    ctx.clip();
+    const g = ctx.createLinearGradient(0, bodyY - 2, 0, bodyY + 2);
+    g.addColorStop(0, PALETTE.ui.glassTop);
+    g.addColorStop(1, PALETTE.ui.glassTop);
+    ctx.fillStyle = g;
+    ctx.fillRect(tabX, bodyY - 2, tabW, 4);
+    ctx.restore();
+
+    applyTracking(ctx, TYPE.label.tracking);
+    ctx.save();
+    ctx.font = fontSpec(TYPE.label);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = PALETTE.ui.text;
+    ctx.fillText(title, tabX + tabW / 2, tabH / 2);
+    ctx.restore();
+    applyTracking(ctx, 0);
+  }
+
+  // ── 푸터 구분선.
+  const footerTop = bodyY + h - footerHeight;
+  if (footerHeight > 0) {
+    ctx.save();
+    ctx.strokeStyle = withAlpha(PALETTE.ui.edge, 0.9);
+    ctx.lineWidth = PANEL.dividerWeight;
+    ctx.beginPath();
+    ctx.moveTo(PANEL.padX, footerTop + 0.5);
+    ctx.lineTo(w - PANEL.padX, footerTop + 0.5);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  return {
+    tabHeight: tabH,
+    contentTop: bodyY + PANEL.padTop,
+    contentBottom: footerTop,
+    footerTop,
+  };
 }
