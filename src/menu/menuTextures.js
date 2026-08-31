@@ -1,5 +1,6 @@
-import { CanvasTexture, ClampToEdgeWrapping, NearestFilter, RepeatWrapping, SRGBColorSpace } from 'three';
+import { CanvasTexture, ClampToEdgeWrapping, LinearFilter, LinearMipmapLinearFilter, NearestFilter, RepeatWrapping, SRGBColorSpace } from 'three';
 import { PALETTE, withAlpha } from '../core/palette.js';
+import { FONT_FAMILY } from '../ui/fonts.js';
 
 /**
  * Every pixel the menu needs, drawn at runtime. No image files, same as
@@ -38,6 +39,30 @@ function toTexture(canvas, { wrapS = ClampToEdgeWrapping, wrapT = ClampToEdgeWra
   tex.wrapS = wrapS;
   tex.wrapT = wrapT;
   tex.anisotropy = 1;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/**
+ * A smoothly-filtered texture, for the one thing in this file that needs it.
+ *
+ * Everything else here is still `NearestFilter` because PHASE 4 owns the texture
+ * rasterisation policy and flipping half of it early would leave the menu
+ * looking like two different programs. The label is the exception on purpose:
+ * it is a 512x768 decal wrapped onto a curved surface and viewed at a glancing
+ * angle down its edges, which is the exact case nearest sampling handles worst —
+ * and its alpha edge is cut rather than blended, so a hard-sampled alpha gives a
+ * ragged oval no `alphaTest` threshold can rescue.
+ */
+function toSmoothTexture(canvas) {
+  const tex = new CanvasTexture(canvas);
+  tex.colorSpace = SRGBColorSpace;
+  tex.magFilter = LinearFilter;
+  tex.minFilter = LinearMipmapLinearFilter;
+  tex.generateMipmaps = true;
+  tex.wrapS = ClampToEdgeWrapping;
+  tex.wrapT = ClampToEdgeWrapping;
+  tex.anisotropy = 8;
   tex.needsUpdate = true;
   return tex;
 }
@@ -145,65 +170,200 @@ export function glassHighlightTexture() {
  * a card in the hand. Bold, three words, nothing thinner than a texel.
  */
 export function labelTexture() {
-  const w = 128;
-  const h = 64;
+  const w = 512;
+  const h = 768;
   const { canvas, ctx } = makeCanvas(w, h);
   const scratch = makeCanvas(w, h);
+  // The decal is drawn, not stamped: smoothing on, unlike everything else here.
+  ctx.imageSmoothingEnabled = true;
+  scratch.ctx.imageSmoothingEnabled = true;
+  ctx.clearRect(0, 0, w, h);
 
-  ctx.fillStyle = PALETTE.menu.labelRed;
-  ctx.fillRect(0, 0, w, h);
+  /**
+   * The oval's width, as a fraction of the page.
+   *
+   * The mesh is an arc of `labelSweep` degrees round a `bodyRadius` bottle, so
+   * the page maps onto an arc length of 2*pi*30*(160/360) = 83.8 mm. The oval is
+   * `labelOvalWidth` = 42 mm across, which is almost exactly half of that. Get
+   * this wrong and the oval is an ellipse of the wrong eccentricity — the one
+   * error on a label that reads instantly as "stretched".
+   */
+  const ovalW = w * 0.5;
+  const ovalH = h * 0.96;
+  const cx = w / 2;
+  const cy = h / 2;
+  const rx = ovalW / 2;
+  const ry = ovalH / 2;
 
-  // Two darker bands at the very top and bottom, so the label has an edge
-  // against the glass instead of floating on it.
-  ctx.fillStyle = PALETTE.menu.labelRedDeep;
-  ctx.fillRect(0, 0, w, 4);
-  ctx.fillRect(0, h - 4, w, 4);
-
-  // The curved rules. Drawn as stepped runs of 1px rectangles rather than as a
-  // stroked arc, so the curve is made of hard pixels and cannot be antialiased
-  // into a grey smear by the rasteriser.
-  const rule = (baseY, rise, color, thick) => {
-    ctx.fillStyle = color;
-    for (let x = 0; x < w; x++) {
-      const t = (x / (w - 1)) * 2 - 1;
-      ctx.fillRect(x, Math.round(baseY + rise * (t * t)), 1, thick);
-    }
+  const ovalPath = (sx = 0, sy = 0) => {
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx + sx, ry + sy, 0, 0, Math.PI * 2);
   };
-  rule(9, -3, PALETTE.menu.labelCreamAlt, 2);
-  rule(h - 10, 3, PALETTE.menu.labelCreamAlt, 2);
 
-  // The logo. Three lines, because "BOTTLE CAP CHAOS" on one line at this width
-  // is four texels a letter and unreadable; stacked, each word gets the full
-  // panel. The middle line is the big one.
+  // ── 1. the ground ────────────────────────────────────────────────────────
+  // A very shallow vertical gradient, lighter at the top: the bottle is lit from
+  // above and the label is under the glass, so a flat fill reads as a decal
+  // stuck on the outside.
+  const ground = ctx.createLinearGradient(0, cy - ry, 0, cy + ry);
+  ground.addColorStop(0, PALETTE.label.mintTop);
+  ground.addColorStop(1, PALETTE.label.mint);
+  ovalPath();
+  ctx.fillStyle = ground;
+  ctx.fill();
+
+  // ── 2. the printed edge ──────────────────────────────────────────────────
+  ovalPath(-3, -3);
+  ctx.strokeStyle = withAlpha(PALETTE.label.paper, 0.6);
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  // Everything below is clipped to the oval, so a band or a stroke can be
+  // specified as a plain rectangle and still finish on the curve.
+  ctx.save();
+  ovalPath();
+  ctx.clip();
+
+  // ── 3. the arched text, across the top ───────────────────────────────────
+  /**
+   * Set one glyph at a time around a circle, because canvas has no text-on-path.
+   *
+   * ── the arc is a CIRCLE above the oval, not the oval itself ──────────────
+   * The obvious thing is to walk the ellipse the label is drawn on. Tried, and
+   * wrong twice over: this oval is 128 x 368, so a circular arc at the oval's
+   * own vertical radius swings far outside its horizontal one and every glyph
+   * lands in the clipped-away margin — the text simply vanished. Following the
+   * ellipse properly is no better, because a tall ellipse curves so hard across
+   * its top that consecutive letters end up tilted 60 degrees from each other.
+   *
+   * So the arch rides a gentle circle whose apex sits near the oval's top. That
+   * is what a printed label actually does, and it is legible.
+   *
+   * Latin, and short. The reference uses vertical Japanese as a design element;
+   * vertical Hangul is awkward, so the arch carries a Latin word and the game's
+   * name is set horizontally below — which is what Korean labels do too.
+   */
+  const arch = (text, apexY, radius, size, color) => {
+    const arcCy = apexY + radius;
+    const step = (size * 0.86) / radius;
+    const start = -((text.length - 1) / 2) * step;
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.font = `700 ${size}px ${FONT_FAMILY}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    [...text].forEach((ch, i) => {
+      const a = start + i * step;
+      ctx.save();
+      ctx.translate(cx + Math.sin(a) * radius, arcCy - Math.cos(a) * radius);
+      // Upright relative to the arc, which is what makes it read as printed on
+      // a curve rather than as a fan of rotated letters.
+      ctx.rotate(a);
+      ctx.fillText(ch, 0, 0);
+      ctx.restore();
+    });
+    ctx.restore();
+  };
+  arch('CIDER', cy - ry * 0.80, rx * 1.5, 40, withAlpha(PALETTE.label.ink, 0.9));
+
+  // ── 4. the illustration: this game's own crown cap ───────────────────────
+  // The reference puts a mascot here. A mascot is somebody's trademark; the
+  // crown cap is this game's hero object and costs nothing to justify.
+  const discR = rx * 0.62;
+  ctx.beginPath();
+  ctx.arc(cx, cy - h * 0.02, discR, 0, Math.PI * 2);
+  ctx.fillStyle = PALETTE.label.paper;
+  ctx.fill();
+  drawCapMark(ctx, cx, cy - h * 0.02, discR * 0.74);
+
+  // ── 5. the name, horizontal ──────────────────────────────────────────────
   crispText(ctx, scratch, {
-    text: 'BOTTLE',
-    x: w / 2,
-    y: 28,
-    font: 'bold 14px ui-monospace, Menlo, monospace',
-    color: PALETTE.menu.labelCream,
+    text: '병뚜껑 대난투',
+    x: cx,
+    y: cy + ry * 0.52,
+    font: `700 46px ${FONT_FAMILY}`,
+    color: PALETTE.label.ink,
     align: 'center',
-    slant: 0.22,
   });
   crispText(ctx, scratch, {
-    text: 'CAP',
-    x: w / 2,
-    y: 43,
-    font: 'bold 17px ui-monospace, Menlo, monospace',
-    color: PALETTE.menu.labelCream,
+    text: 'SPARKLING · 200ml',
+    x: cx,
+    y: cy + ry * 0.60,
+    font: `600 20px ${FONT_FAMILY}`,
+    color: withAlpha(PALETTE.label.inkMuted, 0.7),
     align: 'center',
-    slant: 0.22,
-  });
-  crispText(ctx, scratch, {
-    text: 'CHAOS',
-    x: w / 2,
-    y: 54,
-    font: 'bold 11px ui-monospace, Menlo, monospace',
-    color: PALETTE.menu.labelGold,
-    align: 'center',
-    slant: 0.22,
   });
 
-  return toTexture(canvas, { wrapS: RepeatWrapping, wrapT: ClampToEdgeWrapping });
+  // ── 6. the fine-print band ───────────────────────────────────────────────
+  /**
+   * Texture, not information.
+   *
+   * Real labels carry an ingredients block and the eye reads it as "this is a
+   * printed product" without ever reading the words. Faking an ingredients list
+   * would be inventing product claims for a soft drink that does not exist, so
+   * these lines say what the thing actually is — a game and its version — at a
+   * size where that is a texture anyway.
+   */
+  const bandTop = cy + ry * 0.68;
+  ctx.fillStyle = withAlpha(PALETTE.label.band, 0.55);
+  ctx.fillRect(cx - rx, bandTop, rx * 2, ry * 0.28);
+  ctx.font = `500 13px ${FONT_FAMILY}`;
+  ctx.textAlign = 'center';
+  ctx.fillStyle = withAlpha(PALETTE.label.inkMuted, 0.75);
+  const lines = ['BOTTLE CAP CHAOS', 'PROCEDURAL CROWN CAP SIMULATOR', 'NET 200ml · NO REAL CIDER INSIDE'];
+  lines.forEach((line, i) => ctx.fillText(line, cx, bandTop + 22 + i * 17));
+
+  ctx.restore();
+  return toSmoothTexture(canvas);
+}
+
+/**
+ * A crown cap seen face on, as flat printed shapes.
+ *
+ * Two or three tones and no gradient: this is ink on paper, and the gloss on it
+ * belongs to the glass in front. Deliberately not `capLogoTexture`'s artwork —
+ * that one is a red disc with a wordmark, which would put the name on the label
+ * twice.
+ */
+function drawCapMark(ctx, cx, cy, r) {
+  const teeth = 21;
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  // The crimped skirt, as a ring of trapezoid teeth.
+  ctx.fillStyle = PALETTE.menu.capBrand;
+  ctx.beginPath();
+  for (let i = 0; i < teeth; i++) {
+    const a0 = (i / teeth) * Math.PI * 2;
+    const a1 = ((i + 0.55) / teeth) * Math.PI * 2;
+    const a2 = ((i + 1) / teeth) * Math.PI * 2;
+    ctx.lineTo(Math.cos(a0) * r * 0.86, Math.sin(a0) * r * 0.86);
+    ctx.lineTo(Math.cos(a0) * r, Math.sin(a0) * r);
+    ctx.lineTo(Math.cos(a1) * r, Math.sin(a1) * r);
+    ctx.lineTo(Math.cos(a2) * r * 0.86, Math.sin(a2) * r * 0.86);
+  }
+  ctx.closePath();
+  ctx.fill();
+
+  // The top panel, and one flat highlight crescent on it.
+  ctx.beginPath();
+  ctx.arc(0, 0, r * 0.86, 0, Math.PI * 2);
+  ctx.fillStyle = PALETTE.menu.capBrand;
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(0, 0, r * 0.86, Math.PI * 1.05, Math.PI * 1.75);
+  ctx.arc(0, 0, r * 0.62, Math.PI * 1.75, Math.PI * 1.05, true);
+  ctx.closePath();
+  ctx.fillStyle = withAlpha(PALETTE.label.paper, 0.55);
+  ctx.fill();
+
+  // A rising bubble trio, so the mark says "carbonated" as well as "cap".
+  ctx.fillStyle = withAlpha(PALETTE.label.paper, 0.9);
+  for (const [bx, by, br] of [[-r * 0.22, r * 0.10, r * 0.13], [r * 0.06, -r * 0.16, r * 0.09], [r * 0.26, r * 0.22, r * 0.07]]) {
+    ctx.beginPath();
+    ctx.arc(bx, by, br, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 /**

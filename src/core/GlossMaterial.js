@@ -175,6 +175,19 @@ export class GlossMaterials {
       thickness = 0,
       ior = 1.45,
       opacity = 1,
+      alphaTest = 0,
+      alphaToCoverage = false,
+      /**
+       * This surface's share of the global environment intensity.
+       *
+       * Needed because the environment is currently the ONLY light source, so
+       * it doubles as the exposure dial — and a printed label is not lit the way
+       * a lacquered board is. The bottle's decal is the brightest diffuse
+       * surface in the game and at full intensity it went past the bloom
+       * threshold and blew out to a white oval with no artwork visible at all.
+       */
+      envIntensity = 1,
+      vertexColors = false,
       rim = true,
       uvScale = [1, 1],
       uvOffset = [0, 0],
@@ -208,6 +221,7 @@ export class GlossMaterials {
       map: texture,
       color: new Color(color),
       side: doubleSided ? DoubleSide : FrontSide,
+      vertexColors,
       metalness,
       roughness: roughness ?? this._roughnessFor(gloss),
       clearcoat: clearcoat * this.shared.clearcoatAmount,
@@ -216,7 +230,18 @@ export class GlossMaterials {
       thickness,
       ior,
       opacity,
-      transparent: opacity < 1 || transmission > 0,
+      alphaTest,
+      alphaToCoverage,
+      /**
+       * `alphaTest` surfaces stay OPAQUE, and that is the point.
+       *
+       * A cut alpha writes depth and needs no sorting, which is what lets the
+       * bottle's label sit inside a stack that already has a back glass wall, a
+       * liquid and a front glass wall blending against each other. Made
+       * `transparent` instead it becomes a fourth thing in that sort, and at
+       * some angles it sorts behind the glass it is printed on and disappears.
+       */
+      transparent: alphaTest === 0 && (opacity < 1 || transmission > 0),
       /**
        * The environment, applied at CONSTRUCTION as well as by `setEnvironment`.
        *
@@ -227,10 +252,11 @@ export class GlossMaterials {
        * every surface in the game rendered black.
        */
       envMap: this._environment,
-      envMapIntensity: this.shared.envIntensity,
+      envMapIntensity: this.shared.envIntensity * envIntensity,
     });
 
     material.userData.gloss = gloss;
+    material.userData.envIntensity = envIntensity;
     material.userData.clearcoatBase = clearcoat;
     material.userData.rim = rim;
 
@@ -284,7 +310,7 @@ export class GlossMaterials {
   /** Push every shared knob onto every live material. For the debug panel. */
   apply() {
     for (const m of this._materials) {
-      m.envMapIntensity = this.shared.envIntensity;
+      m.envMapIntensity = this.shared.envIntensity * (m.userData.envIntensity ?? 1);
       m.roughness = this._roughnessFor(m.userData.gloss ?? 1);
       m.clearcoat = (m.userData.clearcoatBase ?? 0) * this.shared.clearcoatAmount;
       const shader = m.userData.shader;

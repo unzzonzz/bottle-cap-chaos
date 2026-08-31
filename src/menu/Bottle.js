@@ -66,7 +66,11 @@ import { PALETTE } from '../core/palette.js';
  */
 
 /** Bottle-cap red, the same one the viewer starts its picker at. */
-const CAP_COLOR = PALETTE.player[0];
+/**
+ * The brand cap. See `PALETTE.menu.capBrand` for why this one value matters more
+ * than most: `main.js` paints the whole screen with it during the handover.
+ */
+const CAP_COLOR = PALETTE.menu.capBrand;
 const LINER_COLOR = PALETTE.metal.liner;
 
 export class Bottle {
@@ -97,8 +101,45 @@ export class Bottle {
     // Opaque and lit, so the drink picks up the same key and fill as the glass
     // around it. `gloss: 0` — a liquid seen through brown glass with a specular
     // highlight on it looks like a solid.
-    this.liquidMaterial = retro.create({ color: PALETTE.liquid.core, gloss: 0 });
-    this.labelMaterial = retro.create({ map: this.labelMap, uvScale: [1, 1] });
+    // `vertexColors` is what makes the meniscus ring visible — see the note in
+    // `buildLiquidGeometry`. A faint gloss so the surface catches the sun.
+    this.liquidMaterial = retro.create({
+      color: PALETTE.liquid.core,
+      gloss: 0.55,
+      vertexColors: true,
+    });
+    /**
+     * The oval decal. `alphaTest`, never `transparent`.
+     *
+     * The texture is an oval in a rectangular page, so the margin has to vanish.
+     * Blending it would make the label a fourth participant in a sort that
+     * already has the back wall, the liquid and the front wall in it, and at
+     * some angles it lost and disappeared behind the glass it is printed on.
+     * A cut alpha is opaque: it writes depth, needs no sorting, and — because
+     * the decal stands 0.3 mm proud of the envelope — correctly occludes the
+     * front wall behind it, which is where a real label sits.
+     *
+     * `alphaToCoverage` is what keeps the cut edge clean now that PHASE 1 turned
+     * MSAA on.
+     */
+    this.labelMaterial = retro.create({
+      map: this.labelMap,
+      uvScale: [1, 1],
+      alphaTest: 0.5,
+      alphaToCoverage: true,
+      preset: 'plastic',
+      /**
+       * Dimmer than everything else, and measurably so.
+       *
+       * The mint ground is the brightest diffuse colour in the palette and the
+       * decal faces the camera and the sun at once. At full environment
+       * intensity it cleared the bloom threshold across its whole area and came
+       * out as a featureless white oval — the artwork was drawn correctly and
+       * simply could not be seen. Verified by sampling the texture, which was
+       * fine, and then by dropping this.
+       */
+      envIntensity: 0.35,
+    });
 
     this.capBodyMaterial = retro.create({ color: CAP_COLOR });
     // WHITE, not the cap colour. The panel map used to be a greyscale

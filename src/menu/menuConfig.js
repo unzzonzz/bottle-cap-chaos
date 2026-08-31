@@ -62,11 +62,15 @@ export const MENU_CONFIG = {
     /**
      * How high the head can climb, in mm up the bottle.
      *
-     * Just short of the lip at 196. It arrives there as the cap goes, which is
-     * the whole point: the eruption is a bottle that has run out of room, not a
-     * bottle that decided to spray.
+     * Just short of the lip, which is at 200 on the long-neck profile. It
+     * arrives there as the cap goes, which is the whole point: the eruption is a
+     * bottle that has run out of room, not a bottle that decided to spray.
+     *
+     * Re-checked against the new silhouette: the neck top is 186 and the lip is
+     * 200, so a head at 192 is inside the finish and still under the cap. It was
+     * 188 against a 196 lip, i.e. the same 8 mm of headroom.
      */
-    foamCeiling: 188,
+    foamCeiling: 192,
     /**
      * Foam made per second while shaking, as a VOLUME in world units cubed.
      *
@@ -84,7 +88,14 @@ export const MENU_CONFIG = {
 
     // ── the bubbles ────────────────────────────────────────────────────────
     /** Distinct points on the glass that bubbles come up from. See `Fizz`. */
-    nucleationSites: 9,
+    /**
+     * More of them, because the liquid stopped doing the work.
+     *
+     * It was 9 against an opaque brown drink where the bubbles were a detail. A
+     * clear cider shows almost nothing of its own — the slosh included — so the
+     * carbonation is what says there is liquid in there at all.
+     */
+    nucleationSites: 12,
     /** Radius at nucleation, world units. 0.09 is about nine tenths of a mm. */
     bubbleRadius: 0.09,
     /** How much a bubble grows over one climb. 1.5 means it ends 2.5x bigger. */
@@ -101,7 +112,7 @@ export const MENU_CONFIG = {
     /** How far the helical path instability swings the bubble off its site. */
     bubbleWobble: 0.42,
     /** Overall brightness of the bubbles. */
-    fizzStrength: 0.95,
+    fizzStrength: 1.1,
 
     // ── aiming at the camera ───────────────────────────────────────────────
     /** The lean it turns TO as the pressure builds. See `applyLean`. */
@@ -124,7 +135,7 @@ export const MENU_CONFIG = {
     // ── the trimmings ──────────────────────────────────────────────────────
     /** How far the cap's panel stands proud of the bottle's lip, in mm. */
     capLift: 0.4,
-    shadowScale: 2.5,
+    shadowScale: 2.42,
     shadowLift: 0.06,
     burstSeconds: 0.14,
     burstSize: 5.5,

@@ -498,8 +498,54 @@ export const PALETTE = {
     pool: ['#9fd0e8', '#b4dcef', '#c8e6f4', '#dcf0f9', '#ecf8fd'],
     meterOn: CYAN,
     meterOff: MIST,
-    /** The default cap colour on the opponent screen, before a player picks. */
-    capDefault: '#b4c2ce',
+    /**
+     * The BRAND cap — the one on the bottle, and the one the screen is painted
+     * with during the menu-to-game handover.
+     *
+     * ── this is the most-seen single colour in the game ──────────────────────
+     * `MENU_CONFIG.transition.coverSeconds` is 0.35s, and for all of it the
+     * whole screen is this colour with the logo over it. The duration was raised
+     * from 0.05 specifically to give the logo time to be read, so this is not a
+     * detail of the bottle — it is the transition's identity.
+     *
+     * Sky blue rather than the red it was. Checked against both player colours:
+     * it is 4.2:1 from 2P's royal blue and 2.0:1 from 1P's coral, so a menu cap
+     * is never mistaken for a player's.
+     */
+    capBrand: '#5ec8ea',
+    /**
+     * The NEUTRAL cap the mark editor draws on. Deliberately not the brand cap.
+     *
+     * A mark belongs to neither player and is previewed on neither's colour, and
+     * it must not look like the brand cap either — you are drawing YOUR artwork,
+     * not editing the game's logo. A warm grey against a saturated cyan: barely
+     * apart in lightness, entirely apart in chroma, which is the axis §A5.3 asks
+     * for.
+     */
+    capDefault: '#c9c4bc',
+  },
+
+  /**
+   * The bottle's oval label. A printed decal, and therefore MATTE.
+   *
+   * Nothing in this group gets a gloss or a gel highlight, and that is the one
+   * rule worth stating: the label is paper under glass, and the shine on it
+   * belongs to the bottle. Treating it like a UI panel — which is the obvious
+   * mistake, since the UI right next to it is all gel — makes it read as a
+   * sticker floating in front of the bottle rather than wrapped onto it.
+   *
+   * A pale aqua-mint ground is the convention for cider and ramune labels; it is
+   * not any one brand's, and neither is the layout it carries (arched Latin
+   * along the oval, an illustration in the middle, a fine-print band at the
+   * bottom). The illustration is this game's own crown cap.
+   */
+  label: {
+    mint: '#bfe8e0',
+    mintTop: '#d8f4ee',
+    paper: PAPER,
+    ink: INK,
+    inkMuted: SLATE,
+    band: '#a4d6cc',
   },
 
   /**

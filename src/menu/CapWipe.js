@@ -74,7 +74,7 @@ export class CapWipe {
    * @param {object} tuning  the live `MENU_CONFIG.wipe` block
    * @param {import('three').Texture} [panelMap]  the cap's top artwork
    */
-  constructor({ retro, tuning, panelMap = null, color = PALETTE.player[0], panelColor = PALETTE.untinted }) {
+  constructor({ retro, tuning, panelMap = null, color = PALETTE.menu.capBrand, panelColor = PALETTE.untinted }) {
     this.tuning = tuning;
 
     this.root = new Group();

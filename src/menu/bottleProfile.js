@@ -6,39 +6,51 @@
  * the same reason: the shape is the thing that gets argued about, and it should
  * be possible to change it without touching a buffer.
  *
- * ── it is a contour bottle, and the contour is the whole job ────────────────
- * Bottom to top: a short heel, a lower body that swells, a WAIST that pinches
- * in, the upper body at its widest with the label wrapped round it, a shoulder
- * that S-curves into a narrow neck, and a crown finish. Miss the waist and the
- * thing reads as a milk bottle; overdo it and it reads as an hourglass. The
- * default is 87% of the upper body, in the middle of the 85–90% the brief asks
- * for.
+ * ── it is a long-neck cider bottle, and the neck is the whole job ───────────
+ * Bottom to top: a short heel, a STRAIGHT cylindrical body, a short round
+ * shoulder, a long straight neck, and a crown finish. The neck is about 23% of
+ * the total height, which is what separates this silhouette from a soft-drink
+ * bottle: the eye reads the ratio of neck to body long before it reads anything
+ * else about the shape.
  *
- * The shape is deliberately NOT anyone's registered bottle. The proportions
- * here are its own — a slightly taller neck, a shallower pinch, a straighter
- * lower body — and the label that goes on it carries this game's name.
+ * ── it used to be a contour bottle, and every part of that is gone ──────────
+ * Worth stating because the numbers below look arbitrary otherwise. The previous
+ * shape was a contour bottle whose defining feature was a WAIST pinching to 85%
+ * of the upper body, with ten vertical flutes running up it, a short neck, and a
+ * label banded all the way round. All four are deliberately removed:
+ *
+ *   - `waistRatio` is 1.0. Three body control points at the same radius make the
+ *     spline a straight line, which is the point — a cider bottle is a cylinder.
+ *   - `ribDepth` is 0. The flutes are switched off at the amplitude rather than
+ *     deleted, so the machinery survives for anything that wants it back. Same
+ *     discipline as `mode.cards === false` turning cards off with the code left
+ *     standing. `ribs` KEEPS its value — see `columns`.
+ *   - `neckLength` went 12 -> 32.
+ *   - the label is a front decal on a partial arc, not a band. See `labelSweep`.
  *
  * ── the parts are built by different maths, on purpose ──────────────────────
  * The BODY is a Catmull-Rom through five control points, resampled by arc
- * length so rows land where the curvature is rather than where the parameter
- * happens to be — that is what keeps the waist from being cut by two rows while
- * the straight lower body gets four.
+ * length. With every control point now at the same radius that resampling has
+ * little to do, and it is kept because the heel still bends and because a
+ * profile change should not also be a change of curve type.
  *
  * The SHOULDER is an S: it leaves the body vertically and arrives at the neck
- * vertically, which is what "부드럽게 벌어지는 곡선 구간" means. A circular or
- * superelliptic quadrant cannot do that — one end of a quadrant is always
- * horizontal, and a horizontal tangent at the neck is a shelf, not a shoulder.
+ * vertically. A circular or superelliptic quadrant cannot do that — one end of a
+ * quadrant is always horizontal, and a horizontal tangent at the neck is a
+ * shelf, not a shoulder.
  *
  * The FINISH is an explicit point list. A crown finish is TOOLED glass: two
- * beads and an undercut between them, with corners that are meant to be
- * corners. Running a spline through it would round off the one part of the
- * bottle whose job is to be square enough for a cap to grip.
+ * beads and an undercut between them, with corners that are meant to be corners.
+ * Running a spline through it would round off the one part of the bottle whose
+ * job is to be square enough for a cap to grip.
  *
- * ── the rib weight rides on the row ─────────────────────────────────────────
- * Each row carries `rib`, 0..1, which is how much of the flute amplitude
- * applies there. That is where "라벨 띠 구간에는 리브를 넣지 마라" lives: it is
- * a property of the PROFILE, decided once here, rather than a special case in
- * the mesh builder or — worse — two meshes with a join between them.
+ * ── the finish is FROZEN ────────────────────────────────────────────────────
+ * `beadRadius`, `lipRadius`, `boreRadius`, `finishHeight` and `neckRadius` are
+ * not adjustable. The cap that goes on this bottle is the same geometry the
+ * three game modes throw — `capGeometry.js`, 32 mm across the crests — so a
+ * finish that drifts is a cap that either floats above the bottle or sinks into
+ * it, and a menu cap that is a different object from the game's. `neckLength`
+ * may move freely; `neckRadius` may not.
  *
  * Units are millimetres throughout, as in `capGeometry`, and the conversion to
  * world units is that module's `MM`.
@@ -46,59 +58,60 @@
 
 export const BOTTLE_DEFAULTS = {
   // ── the body ─────────────────────────────────────────────────────────────
-  /** Across the flat bottom. */
-  baseRadius: 25.6,
+  /** Across the flat bottom. Rises to the body radius over `heelHeight`. */
+  baseRadius: 29.2,
   /** The short foot. Enough to read as a heel and no more. */
-  heelHeight: 2.6,
+  heelHeight: 3.0,
   /**
-   * Widest point of the LOWER body, below the waist.
+   * The lower, waist and upper body control points.
    *
-   * Nearly as wide as the upper body, and that is what makes the pinch a pinch.
-   * The first version had this at 28.8 against an upper body of 31 and a waist
-   * of 27, and the waist was then only 6% narrower than the widest thing below
-   * it — on a 45-pixel-wide bottle that is one pixel a side and the silhouette
-   * read as a straight tube.
+   * All three at 30.0, which is the entire silhouette decision: a Catmull-Rom
+   * through collinear points IS a straight line, so the body is a true cylinder
+   * of 60 mm diameter with no residual bulge. The three y values are spread
+   * evenly so the arc-length resampling puts rows at even heights rather than
+   * bunching them where curvature used to be.
    */
   lowerRadius: 30.0,
-  lowerY: 36,
+  lowerY: 40,
   /**
-   * The pinch, as a fraction of the upper body.
+   * The pinch, as a fraction of the upper body. ONE — there is no pinch.
    *
-   * The single most recognisable number on the bottle. The brief's range is
-   * 85–90%; this sits at the tight end of it, because the shape has to survive
-   * being 45 pixels wide and 5-bit shaded.
+   * Kept as a parameter rather than deleted so the contour shape is one number
+   * away, and because `buildBottleProfile` reports `waistRadius` to callers.
    */
-  waistRatio: 0.85,
-  waistY: 74,
-  /** Widest point of the whole bottle. The label wraps this. */
-  bodyRadius: 31.0,
-  bodyY: 116,
+  waistRatio: 1.0,
+  waistY: 84,
+  /** The body radius. 60 mm diameter against 200 mm tall — 3.33 : 1. */
+  bodyRadius: 30.0,
+  bodyY: 112,
   /** How far the body carries on above its widest point before the shoulder. */
-  bodyRun: 20,
+  bodyRun: 16,
 
   // ── the shoulder ─────────────────────────────────────────────────────────
-  shoulderHeight: 34,
+  /** Short. A cider bottle turns into its neck quickly. */
+  shoulderHeight: 26,
   /**
    * Where the bend happens, 0..1.
    *
    * 0 starts turning in immediately off the body — a round, sloping shoulder.
-   * 1 carries the body up and turns late — a square one. Both ends of the range
-   * still leave and arrive vertically; this only moves the middle.
+   * 1 carries the body up and turns late — a square one. Low, because the
+   * reference shoulder is round and short.
    */
-  shoulderCurve: 0.42,
+  shoulderCurve: 0.26,
 
   // ── the neck ─────────────────────────────────────────────────────────────
+  /** FROZEN. The finish starts here and the cap has to fit it. */
   neckRadius: 12.2,
-  /** How much wider the neck is at its BASE. "위에서 아래로 완만히 넓어짐". */
-  neckFlare: 1.4,
-  neckLength: 12,
+  /** How much wider the neck is at its BASE. More, now the neck is long. */
+  neckFlare: 2.2,
+  /** Long. With the 14 mm finish on top this is 46 mm, 23% of the bottle. */
+  neckLength: 32,
 
-  // ── the crown finish ─────────────────────────────────────────────────────
+  // ── the crown finish — FROZEN, see the header ────────────────────────────
   /**
    * The bead the cap crimps under. A standard crown finish is 27.4 mm across
    * it, against 32 mm across the cap's crests — so the skirt overhangs, and it
-   * is meant to. Too far under and the cap reads as balanced on top of the
-   * bottle rather than gripping it.
+   * is meant to.
    */
   beadRadius: 14.0,
   /** The lip ring above the undercut — the sealing face. */
@@ -107,63 +120,81 @@ export const BOTTLE_DEFAULTS = {
   /** The bore. Never seen with a cap on, but it closes the mesh. */
   boreRadius: 10.4,
 
-  // ── the flutes ───────────────────────────────────────────────────────────
+  // ── the flutes, switched off ─────────────────────────────────────────────
   /**
-   * NOT the cap's 21. That number is a bottling standard about crimping; this
-   * one is a moulding choice about how a bottle catches light, and the two have
-   * nothing to do with each other.
+   * The flute count. KEPT at 10 even though the amplitude is zero.
+   *
+   * Setting this to 0 to "remove" the flutes is a trap the geometry used to
+   * fall into: the column count was `ribs * radialPerRib` clamped to a minimum
+   * of 6, so `ribs: 0` produced a SIX-SIDED bottle. Tessellation is `columns`
+   * now and has nothing to do with this number, but the value is left standing
+   * so that turning the flutes back on is one edit to `ribDepth`.
    */
   ribs: 10,
-  /**
-   * Half the peak-to-trough, in mm — the same convention as `toothDepth`.
-   *
-   * At FOUR columns per rib a vertex lands on every crest and every trough, so
-   * the groove is twice this and no correction is needed. At three the trough
-   * is only sampled at cos(120 degrees) and reaches 75% of it.
-   */
-  ribDepth: 1.15,
+  /** Zero. The reference glass is completely smooth. */
+  ribDepth: 0,
   ribFrom: 10,
   ribTo: 152,
   /** How far the flutes take to die out at each end of their band. */
   ribFade: 5,
 
-  // ── the label band ───────────────────────────────────────────────────────
+  // ── the label decal ──────────────────────────────────────────────────────
   /**
-   * A little below the widest point rather than centred on it.
+   * A tall oval on the FRONT, not a band round the bottle.
    *
-   * Centred, the band's fade-out reached 138 mm and the shoulder starts at 136,
-   * so every flute above the label was on the SHOULDER and the upper body had
-   * none at all — which is not the "몸통 상하부" the brief asks for. Dropping it
-   * leaves a band of body above the label for the flutes to come back on.
+   * 66 mm of the bottle's 200 — a third of it — which is what makes the label
+   * the thing you read rather than a stripe you notice.
    */
-  labelFrom: 94,
+  labelFrom: 60,
   labelTo: 126,
-  /** How far the label mesh stands off the glass. Purely anti-z-fighting. */
-  labelOffset: 0.45,
-  /** How many times the artwork goes round. 2 = a front panel and a back one. */
-  labelPanels: 2,
+  /** How far the label mesh stands off the glass. Thinner than a band. */
+  labelOffset: 0.3,
+  /** One. The artwork maps across the arc exactly once. */
+  labelPanels: 1,
+  /**
+   * The arc the label occupies, in degrees.
+   *
+   * 360 is the old band. At 160 the decal covers only the front, which is what
+   * a printed oval label does — and it means the whole texture is spent on the
+   * oval instead of 78% of it being transparent margin. The same resolution for
+   * 22% of the texels.
+   *
+   * `buildLabelGeometry` centres this on the camera-facing side; see the note
+   * there about why the arc is 10..170 degrees and not 0..160.
+   */
+  labelSweep: 160,
+  /**
+   * The oval's width in mm — 70% of the body diameter.
+   *
+   * Its HEIGHT is decided by `labelTo - labelFrom`. This is only used by the
+   * texture, to work out how much of the page the oval covers; the mesh is a
+   * plain arc and the transparent margin is what shapes it.
+   */
+  labelOvalWidth: 42,
 
   // ── the contents ─────────────────────────────────────────────────────────
-  /** Where the drink stops. Above the label, below the shoulder's top. */
-  fillLevel: 143,
+  /** Where the drink stops. Mid-shoulder, as it is on the reference bottle. */
+  fillLevel: 150,
   /** The liquid's radius as a fraction of the glass envelope. */
-  liquidInset: 0.9,
+  liquidInset: 0.92,
 
   // ── tessellation ─────────────────────────────────────────────────────────
   /**
-   * Columns per rib.
+   * Columns around the bottle. Split from the flute count deliberately.
    *
-   * 4, and it is not interchangeable with 3 here the way it is on the cap. At 3
-   * the lathe has exactly three facets per rib, so the facet edges and the rib
-   * period are the same frequency: the two alias together and the flutes read
-   * as nothing but a coarsely tessellated cylinder. Measured that way on
-   * screen — the body came out smooth with the modulation running at full
-   * amplitude. At 4 a vertex lands on every crest and every trough and the
-   * scallop is a scallop.
+   * It used to be `ribs * radialPerRib`, which made sense while the tessellation
+   * existed to resolve the flutes — four columns per rib put a vertex on every
+   * crest and every trough. With the flutes off it is a pure smoothness number
+   * and tying it to `ribs` is how you get a hexagonal bottle by setting a flute
+   * count to zero.
+   *
+   * 72 gives a 2.6 mm edge on a 30 mm radius: below the point where either the
+   * smooth shading or a clearcoat highlight shows the facets.
    */
-  radialPerRib: 4,
-  bodyRows: 10,
-  shoulderRows: 5,
+  columns: 72,
+  bodyRows: 8,
+  /** More than the body's. The shoulder is where all the curvature now is. */
+  shoulderRows: 7,
 };
 
 /** Where the flutes fade in and out, as a smooth 0..1 gate. */

@@ -64,9 +64,22 @@ const TAU = Math.PI * 2;
  */
 function revolve(
   rows,
-  { cols, ribs, ribDepth, height, wrap = true, flipU = false, tint = null, vFrom = 0, vTo = 1 },
+  {
+    cols,
+    ribs,
+    ribDepth,
+    height,
+    wrap = true,
+    flipU = false,
+    tint = null,
+    vFrom = 0,
+    vTo = 1,
+    sweepFrom = 0,
+    sweepTo = TAU,
+  },
 ) {
   const stride = wrap ? cols + 1 : cols;
+  const sweep = sweepTo - sweepFrom;
   const pos = [];
   const nor = [];
   const uv = [];
@@ -75,7 +88,7 @@ function revolve(
 
   const ring = [];
   for (let i = 0; i <= cols; i++) {
-    const th = (i / cols) * TAU;
+    const th = sweepFrom + (i / cols) * sweep;
     ring.push({
       c: Math.cos(th),
       s: Math.sin(th),
@@ -155,18 +168,37 @@ function assemble({ pos, nor, uv, col, index }) {
  */
 export function buildGlassGeometry(profile) {
   const p = profile.params;
-  const cols = Math.max(6, Math.round(p.ribs * Math.max(2, p.radialPerRib)));
+  /**
+   * Tessellation, from `columns` — NOT from the flute count.
+   *
+   * It was `ribs * radialPerRib` clamped to a floor of 6, which was correct
+   * while the columns existed to resolve the flutes. With `ribDepth: 0` the two
+   * have nothing to do with each other, and the old form had a trap in it:
+   * setting `ribs: 0` to switch the flutes off gave `max(6, 0)` — a SIX-SIDED
+   * bottle. See the note on `BOTTLE_DEFAULTS.columns`.
+   */
+  const cols = Math.max(12, Math.round(p.columns));
   const rows = profile.rows.map((r) => ({ r: r.r * MM, y: r.y * MM, rib: r.rib }));
   const height = profile.height * MM;
 
-  // Dark at the heel, clearing toward the neck. Two hard-ish stops rather than
-  // a ramp all the way up: this is a 15-bit framebuffer and a long smooth ramp
-  // would come back as banding, which is the one thing dithering cannot fix
-  // when the gradient is IN the vertex data.
+  /**
+   * Barely tinted, and smooth all the way up.
+   *
+   * It used to run from 0.52 at the heel to 1.0 at the neck in a squared ramp,
+   * with the curve chosen to fake two hard stops because a 15-bit framebuffer
+   * turned a long smooth gradient into visible banding. There is no 15-bit
+   * framebuffer and no dither any more, so the shape can be what it should be —
+   * and the floor was far too dark regardless: clear cider glass is bright at
+   * the heel, not smoked.
+   *
+   * 0.86 -> 1.00, linear, with a faint cool cast. The remaining darkening is
+   * there only because more glass is between you and the far wall down at the
+   * base, and the tint is the cheapest way to say so.
+   */
   const tint = (y) => {
     const t = Math.min(1, Math.max(0, y / height));
-    const k = 0.52 + 0.48 * (t * t);
-    return [k * 0.94, k, k * 0.86];
+    const k = 0.86 + 0.14 * t;
+    return [k * 0.97, k, k * 0.99];
   };
 
   const mesh = revolve(rows, {
@@ -242,7 +274,7 @@ export function buildLiquidGeometry(profile) {
   // Fewer columns than the glass: it is seen THROUGH the glass, at a fraction
   // of the contrast, and nothing about it survives to the framebuffer that a
   // finer ring would have improved.
-  const cols = Math.max(6, Math.round(p.ribs * 2));
+  const cols = Math.max(8, Math.round(p.columns / 2));
   const fill = Math.min(profile.height - 4, p.fillLevel);
 
   const surfaceR = profile.envelopeAt(fill) * p.liquidInset;
@@ -253,27 +285,53 @@ export function buildLiquidGeometry(profile) {
     rows.push({ r: profile.envelopeAt(y) * p.liquidInset * MM, y: y * MM, rib: 0 });
   }
 
+  /**
+   * Vertex colours, so the meniscus is brighter than the drink under it.
+   *
+   * ── the fill line stopped reading when the drink went clear ─────────────
+   * It used to be an opaque brown, so its top surface was obvious and the slosh
+   * with it. A pale cider inside pale glass is nearly the same value as its
+   * container, and `Bottle._slosh` — which tilts that surface every frame — was
+   * computing something nobody could see.
+   *
+   * A real drink is most visible at its surface: the meniscus catches the light
+   * and the rim where it meets the glass catches more. This is that, as a
+   * multiplier the shader already applies. The rim goes ABOVE 1 deliberately —
+   * the render target is half-float, so a value over white survives to the bloom
+   * pass and the ring picks up a faint glow, which is the one place on this
+   * bottle where that is physically what would happen.
+   *
+   * It costs nothing to animate: the slosh already rewrites these vertices'
+   * POSITIONS, so the bright ring tilts with the surface for free.
+   */
+  const WALL = [0.92, 0.97, 1.0];
+  const BASE = [0.72, 0.8, 0.86];
+  const SURFACE_MID = [1.15, 1.3, 1.35];
+  const SURFACE_RIM = [1.7, 1.85, 1.9];
+
   const mesh = revolve(rows, {
     cols,
     ribs: 1,
     ribDepth: 0,
     height: profile.height * MM,
     wrap: false,
-    tint: null,
+    tint: () => WALL,
   });
-  const { pos, nor, uv, index } = mesh;
+  const { pos, nor, uv, col, index } = mesh;
 
   // ── the base, so the drink is not a shell ────────────────────────────────
   const baseCentre = pos.length / 3;
   pos.push(0, 0, 0);
   nor.push(0, -1, 0);
   uv.push(0.5, 0.5);
+  col.push(...BASE);
   const baseRim = pos.length / 3;
   for (let i = 0; i < cols; i++) {
     const th = (i / cols) * TAU;
     pos.push(rows[0].r * Math.cos(th), 0, rows[0].r * Math.sin(th));
     nor.push(0, -1, 0);
     uv.push(0.5, 0.5);
+    col.push(...BASE);
   }
   for (let i = 0; i < cols; i++) index.push(baseCentre, baseRim + i, baseRim + ((i + 1) % cols));
 
@@ -282,18 +340,20 @@ export function buildLiquidGeometry(profile) {
   pos.push(0, fill * MM, 0);
   nor.push(0, 1, 0);
   uv.push(0.5, 0.5);
+  col.push(...SURFACE_MID);
   const surfaceRim = pos.length / 3;
   for (let i = 0; i < cols; i++) {
     const th = (i / cols) * TAU;
     pos.push(surfaceR * MM * Math.cos(th), fill * MM, surfaceR * MM * Math.sin(th));
     nor.push(0, 1, 0);
     uv.push(0.5, 0.5);
+    col.push(...SURFACE_RIM);
   }
   for (let i = 0; i < cols; i++) {
     index.push(surfaceCentre, surfaceRim + ((i + 1) % cols), surfaceRim + i);
   }
 
-  const g = assemble({ pos, nor, uv, col: [], index });
+  const g = assemble({ pos, nor, uv, col, index });
   // Where the slosh writes. Centre first, then the ring, in column order.
   g.userData.surfaceCentre = surfaceCentre;
   g.userData.surfaceRim = surfaceRim;
@@ -329,7 +389,7 @@ const FOAM_ROWS = 6;
 
 export function buildFoamGeometry(profile) {
   const p = profile.params;
-  const cols = Math.max(6, Math.round(p.ribs * 2));
+  const cols = Math.max(8, Math.round(p.columns / 2));
 
   const pos = [];
   const nor = [];
@@ -387,34 +447,55 @@ export function buildFoamGeometry(profile) {
  * millimetre.
  *
  * Following the profile rather than being a straight cylinder is what gives the
- * band's top and bottom edges their slight curve as they wrap — the brief's
- * "띠 상하단이 병 곡률을 따라 살짝 휘어짐" — for free and correctly, instead of
- * faking it in the texture. The texture draws the arc on TOP of that, because
- * on a bottle this size one of the two alone is not enough to see.
+ * decal's edges their slight curve, for free and correctly, instead of faking
+ * it in the texture.
  *
- * `labelPanels` repeats the artwork round the bottle. At 128 texels across the
- * full circumference the logo would land on about twenty texels where it is
- * being read; two panels doubles that, which is the difference between a word
- * and a smudge. Real bottles carry a front and a back panel for their own
- * reasons and it looks entirely normal.
+ * ── a front decal on a PARTIAL arc, not a band ─────────────────────────────
+ * It used to wrap the whole bottle twice — `labelPanels: 2` — because at 128
+ * texels across the full circumference the logo landed on about twenty texels
+ * and two panels was the difference between a word and a smudge.
+ *
+ * A cider bottle carries one oval label on the front. Building the mesh for
+ * only the front arc means the texture is spent entirely on the oval instead of
+ * three quarters of it being transparent margin: the same texel density for
+ * about a fifth of the pixels.
+ *
+ * ── the arc is 10..170 degrees, and 0..160 is the bug ──────────────────────
+ * `revolve` starts its ring at theta = 0, which is +x. The camera sits on +z.
+ * So the front of the bottle — the part facing the viewer — is theta = 90
+ * degrees, NOT 0. An arc of `labelSweep` laid down from 0 puts the label round
+ * the right-hand side of the bottle, visibly rotated away. It is centred on 90
+ * instead.
+ *
+ * `wrap` is false because a partial arc has no seam to duplicate, and `flipU`
+ * stays true for the reason the header gives: the ring winds anticlockwise and
+ * the camera is on +z, so without it the artwork is mirrored. The first band
+ * ever built read ƎⅼTTAꓭ.
  */
 export function buildLabelGeometry(profile) {
   const p = profile.params;
-  const cols = Math.max(6, Math.round(p.ribs * Math.max(2, p.radialPerRib)));
-  const steps = 3;
+  const cols = Math.max(12, Math.round(p.columns));
+  const steps = 4;
   const rows = [];
   for (let i = 0; i <= steps; i++) {
     const y = p.labelFrom + ((p.labelTo - p.labelFrom) * i) / steps;
     rows.push({ r: (profile.envelopeAt(y) + p.labelOffset) * MM, y: y * MM, rib: 0 });
   }
 
+  // Centred on the camera-facing side. See the note above on why this is not
+  // simply 0 .. sweep.
+  const sweep = (Math.max(1, Math.min(360, p.labelSweep)) * Math.PI) / 180;
+  const sweepFrom = Math.PI / 2 - sweep / 2;
+
   const mesh = revolve(rows, {
     cols,
     ribs: 1,
     ribDepth: 0,
     height: profile.height * MM,
-    wrap: true,
+    wrap: false,
     flipU: true,
+    sweepFrom,
+    sweepTo: sweepFrom + sweep,
     // v spans the band exactly, so the artwork is not cropped by where the band
     // happens to sit up the bottle.
     vFrom: (p.labelFrom * MM) / (profile.height * MM),

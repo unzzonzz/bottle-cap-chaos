@@ -227,22 +227,34 @@ export function bootMenuDebug(ctx) {
   bloom.add(bloomCfg, 'strength', 0, 1.5, 0.01).name('세기').onChange(applyBloom);
   bloom.add(bloomCfg, 'radius', 0, 1.5, 0.01).name('반경').onChange(applyBloom);
 
+  /**
+   * The glass, now that it is a `MeshPhysicalMaterial` rather than a hand-shaded
+   * shell. The rim and base-alpha dials are gone with the shader that had them —
+   * a rim on transmissive glass is what the Fresnel term does for itself.
+   */
   const glass = gui.addFolder('유리 재질');
-  const gm = bottle.glassFrontMaterial.uniforms;
-  const gb = bottle.glassBackMaterial.uniforms;
+  const gm = bottle.glassFrontMaterial;
+  const gb = bottle.glassBackMaterial;
   const pair = (key, min, max, step, name) =>
     glass
-      .add({ v: gm[key].value }, 'v', min, max, step)
+      .add({ v: gm[key] }, 'v', min, max, step)
       .name(name)
       .onChange((v) => {
-        gm[key].value = v;
-        gb[key].value = key === 'uBaseAlpha' ? v * 0.72 : v;
+        gm[key] = v;
+        gb[key] = v;
       });
-  pair('uBaseAlpha', 0, 1, 0.01, '기본 불투명도');
-  pair('uRimAlpha', 0, 1, 0.01, '가장자리 불투명도');
-  pair('uRimDark', 0, 1, 0.01, '가장자리 어두워짐');
-  pair('uRimPower', 0.5, 6, 0.05, '가장자리 폭');
-  pair('uHighlight', 0, 2, 0.01, '하이라이트 세기');
+  pair('transmission', 0, 1, 0.01, '투과율');
+  pair('roughness', 0, 0.6, 0.005, '거칠기');
+  pair('ior', 1, 2.4, 0.01, '굴절률');
+  pair('clearcoat', 0, 1, 0.01, '클리어코트');
+  pair('emissiveIntensity', 0, 1.5, 0.01, '하이라이트 세기');
+  glass
+    .add({ v: gm.thickness }, 'v', 0, 2, 0.01)
+    .name('벽 두께')
+    .onChange((v) => {
+      gm.thickness = v;
+      gb.thickness = v;
+    });
 
   /** Called once a frame from the loop. */
   function frame(state) {

@@ -1,5 +1,6 @@
-import { AdditiveBlending, BackSide, Color, DoubleSide, FrontSide, NormalBlending, ShaderMaterial, Vector2, Vector3 } from 'three';
+import { AdditiveBlending, BackSide, Color, DoubleSide, FrontSide, MeshPhysicalMaterial, NormalBlending, ShaderMaterial, Vector2, Vector3 } from 'three';
 import { PALETTE } from '../core/palette.js';
+import { MM } from '../cap/capGeometry.js';
 
 /**
  * Two materials the menu needs and `RetroMaterial` deliberately does not have.
@@ -185,42 +186,69 @@ function menuLightUniforms() {
 }
 
 export function createGlassMaterial(retro, { map, face = 'front', color = PALETTE.glass.tint } = {}) {
-  return new ShaderMaterial({
-    vertexShader: VERT,
-    fragmentShader: FRAG,
-    transparent: true,
-    // The far wall must not stamp depth over the drink that is drawn after it,
-    // and the near wall must not stamp depth over the label that is drawn after
-    // THAT. Ordering is stated once, in `Bottle`, by renderOrder.
+  /**
+   * Real transmissive glass, not a hand-shaded translucent shell.
+   *
+   * ── what it replaced, and why that had to go ────────────────────────────
+   * A `ShaderMaterial` doing its own vertex lighting with a rim term and an
+   * added highlight strip, drawn at `uBaseAlpha` 0.42/0.6. Its own comments
+   * record why it was that opaque: at 0.42 over a BLACK background every bit of
+   * shading arrived at 42% contrast and was then flattened by a 5-bit
+   * quantiser, so the flutes and the waist disappeared. Both of those premises
+   * are gone — there is no quantiser, the background is a bright sky, and the
+   * bottle has neither flutes nor a waist any more.
+   *
+   * What is left is a smooth cylinder of clear glass, which is exactly the case
+   * `transmission` exists for: the refraction and the thickness do the work
+   * that the rim term was faking.
+   *
+   * ── the highlight strips stay, and are now load-bearing ─────────────────
+   * The ten vertical flutes used to break the reflection into ten separate
+   * bands, and that is most of what made the silhouette read. A smooth cylinder
+   * has one broad highlight and goes visually flat — the appendix calls this
+   * out and asks for compensation. The strips are it: the same baked texture,
+   * moved onto `emissiveMap`, which adds light exactly where the map is bright
+   * and nothing where it is black. That is what it was doing additively before.
+   */
+  const glass = new MeshPhysicalMaterial({
+    color: new Color(color),
+    // Near-colourless and very smooth: cider glass, not a beer bottle.
+    transmission: 0.92,
+    roughness: 0.04,
+    metalness: 0,
+    ior: 1.45,
+    // In world units. The bottle is built in millimetres scaled by `MM`, so this
+    // is about 3 mm of wall — enough for the tint to say "glass" without the
+    // whole bottle going green.
+    thickness: 3 * MM,
+    clearcoat: 0.6,
+    clearcoatRoughness: 0.08,
+    attenuationColor: new Color(PALETTE.glass.tint),
+    attenuationDistance: 90 * MM,
+    emissive: new Color(PALETTE.glass.specular),
+    emissiveMap: map ?? null,
+    // The strips are a glint, not a paint. The old shader wanted 0.55 of an
+    // ADDED highlight over a half-opaque shell; against transmissive glass that
+    // already carries a Fresnel edge and a clearcoat, a tenth of that is the
+    // same amount of light on screen. At 0.38 the bottle read as frosted.
+    emissiveIntensity: 0.12,
+    vertexColors: true,
+    side: face === 'back' ? BackSide : FrontSide,
+    /**
+     * Depth still not written, and the render order still lives in `Bottle`.
+     *
+     * A transmissive material is `transparent` as far as three is concerned, so
+     * it sorts with the liquid, the fizz and the foam. The far wall must not
+     * stamp depth over the drink drawn after it, and the near wall must not
+     * stamp depth over the label — which is opaque and writes its own.
+     */
     depthWrite: false,
     depthTest: true,
-    side: face === 'back' ? BackSide : FrontSide,
-    vertexColors: true,
-    uniforms: {
-      ...menuLightUniforms(),
-      uColor: { value: new Color(color) },
-      uMap: { value: map },
-      // Low. The highlight is ADDED, so on a surface whose own alpha is around
-      // a half it is competing with almost nothing — at 0.85 the strips came
-      // out as opaque white stripes painted down the bottle rather than as
-      // glints on it.
-      uHighlight: { value: 0.55 },
-      uRimPower: { value: 2.2 },
-      uRimDark: { value: 0.6 },
-      uRimAlpha: { value: 0.4 },
-      /**
-       * Translucent, but not as translucent as it first was.
-       *
-       * At 0.42 over a black background every bit of per-vertex shading arrived
-       * on screen at 42% of its contrast and then went through a 5-bit
-       * quantiser — the flutes, the waist and the rim all flattened into one
-       * brown shape. Glass this dark IS mostly opaque anyway; what makes it
-       * read as glass is the rim and the highlight, not how much of the void
-       * behind it comes through.
-       */
-      uBaseAlpha: { value: face === 'back' ? 0.42 : 0.6 },
-    },
+    transparent: true,
   });
+  glass.envMapIntensity = retro?.shared?.envIntensity ?? 1;
+  glass.envMap = retro?._environment ?? null;
+  return glass;
 }
 
 /**
