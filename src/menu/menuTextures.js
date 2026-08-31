@@ -680,12 +680,28 @@ export function menuPlateTexture(label, state, { width = 256, height = 52, scale
   const skinState = SKIN_STATE[state] ?? state;
   const skin = skinFor(skinState, PALETTE.accent.sky);
 
+  /**
+   * 모서리는 **끝까지** 둥글다. `RADIUS.panel`(20) 이었다.
+   *
+   * ── 20 은 큰 화면에서 애매해진다 ────────────────────────────────────────
+   * 이 판은 가로로 길다 — 저술 크기가 256x52 이고, 화면이 커지면 그 비율 그대로
+   * 커진다. 고정 반경은 판이 커질수록 **상대적으로** 작아지므로, 작은 창에서
+   * 둥글어 보이던 것이 큰 창에서는 모서리만 살짝 깎인 사각형이 된다. 둥근 것도
+   * 각진 것도 아닌 상태이고, 그게 애매함의 정체다.
+   *
+   * `RADIUS.pill` 은 9999 이고 `roundRectPath` 가 `min(r, w/2, h/2)` 로 죈다 —
+   * 즉 언제나 높이의 절반이다. 판이 얼마나 커지든 양 끝이 반원인 알약이고, 비율이
+   * 바뀌지 않으므로 어느 크기에서도 같은 물건으로 보인다.
+   *
+   * 제목판(`titleTexture`)은 그대로 `RADIUS.panel` 이다. 누를 수 없는 것과 누를 수
+   * 있는 것이 다른 모양이어야 하고, 이제 그 구분이 반경 하나로 선다.
+   */
   gelButton(ctx, {
     x: 0,
     y: 0,
     w: width,
     h: height,
-    radius: RADIUS.panel,
+    radius: RADIUS.pill,
     state: skinState,
     accent: PALETTE.accent.sky,
   });

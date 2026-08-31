@@ -390,18 +390,63 @@ function iconClear(ctx, size, color) {
   ctx.stroke();
 }
 
-/** 되돌리기. 반시계로 도는 화살표. `redo` 는 이것을 좌우로 뒤집은 것. */
+/**
+ * 되돌리기. 한 바퀴에서 조금 모자란 원호와, 그 끝의 화살촉.
+ *
+ * ── 처음 것이 부자연스러웠던 이유 두 가지 ───────────────────────────────────
+ * 216도 호에 `arrowHead` 를 붙였는데, 그 각도가 손으로 고른 `PI * 1.4` 였다.
+ * 호의 접선은 시작 각도에서 정해지므로 둘이 맞을 이유가 없었고, 실제로 화살촉이
+ * 호가 가는 방향이 아니라 비스듬한 쪽을 가리켰다 — 화살표가 아니라 갈고리로
+ * 보였다.
+ *
+ * 두 번째는 화살촉이 선 두 개였다는 것이다. `arrowHead` 는 획으로 그린 V 자이고,
+ * 20 픽셀짜리 버튼에서 그 두 획은 호와 같은 굵기라 어디가 촉인지 읽히지 않았다.
+ *
+ * 그래서 접선을 **계산해서** 쓰고, 촉은 채운 삼각형이다. 작은 크기에서 방향을
+ * 말하는 것은 선이 아니라 덩어리다.
+ *
+ * 호는 300도다. 한 바퀴에 가까워야 "되돌린다" 로 읽히고, 완전히 닫으면 화살촉이
+ * 꼬리를 물어 원이 된다.
+ */
 function iconUndo(ctx, size, color) {
   setup(ctx, size, color);
-  const cx = size * 0.54;
-  const cy = size * 0.56;
-  const r = size * 0.26;
+  const cx = size / 2;
+  const cy = size * 0.52;
+  const r = size * 0.28;
+
+  /**
+   * 촉이 **왼쪽 위**에 앉는다. 그게 되돌리기다.
+   *
+   * 처음엔 촉이 오른쪽에 왔고, 그러면 시계 방향으로 읽혀 다시하기가 된다 — 바로
+   * 옆에 진짜 다시하기(이것의 좌우 반전)가 있으므로 둘이 같은 말을 하게 된다.
+   *
+   * 캔버스 각도는 0도가 오른쪽, 90도가 아래다. -135도가 왼쪽 위이고, 거기서
+   * 시계 반대 방향으로 300도 거슬러 오면 시작이 165도다.
+   */
+  const to = -Math.PI * 0.75;
+  const from = to + Math.PI * (300 / 180);
   ctx.beginPath();
-  ctx.arc(cx, cy, r, Math.PI * 0.9, Math.PI * 2.1);
+  ctx.arc(cx, cy, r, from, to, true);
   ctx.stroke();
-  const hx = cx + r * Math.cos(Math.PI * 0.9);
-  const hy = cy + r * Math.sin(Math.PI * 0.9);
-  arrowHead(ctx, size, hx, hy, Math.PI * 1.4);
+
+  /**
+   * 촉은 호가 **끝나는** 곳에 앉고, 방향은 그 점의 접선이다.
+   *
+   * 시계 반대 방향이므로 접선은 (sin a, -cos a) 다. 손으로 고른 각도가 아니라
+   * 호에서 나온 값이라, 위의 `from`/`to` 를 바꿔도 촉은 저절로 따라간다.
+   */
+  const hx = cx + r * Math.cos(to);
+  const hy = cy + r * Math.sin(to);
+  const tx = Math.sin(to);
+  const ty = -Math.cos(to);
+  const a = size * 0.22;
+  const w = size * 0.13;
+  ctx.beginPath();
+  ctx.moveTo(hx + tx * a * 0.5, hy + ty * a * 0.5);
+  ctx.lineTo(hx - tx * a * 0.5 - ty * w, hy - ty * a * 0.5 + tx * w);
+  ctx.lineTo(hx - tx * a * 0.5 + ty * w, hy - ty * a * 0.5 - tx * w);
+  ctx.closePath();
+  ctx.fill();
 }
 
 function iconRedo(ctx, size, color) {

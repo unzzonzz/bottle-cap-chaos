@@ -243,6 +243,14 @@ export class Bottle {
     this._surfaceBase = null;
     /** Whether the surface ring currently holds anything but its rest shape. */
     this._sloshed = false;
+    /**
+     * 액면의 수평을 푸는 데 쓰는 스크래치.
+     *
+     * 필드로 두는 이유는 매 프레임이기 때문이다 — `new Quaternion()` 과
+     * `new Vector3()` 를 프레임마다 두 개씩 만들면 GC 가 그만큼 자주 돈다.
+     */
+    this._surfQ = new Quaternion();
+    this._surfUp = new Vector3();
     /** The head's front, in world units up the bottle. Integrated by continuity. */
     this._foamTop = 0;
     /** The same, normalised over its travel, for everything that wants 0..1. */
@@ -339,7 +347,7 @@ export class Bottle {
 
     const surface = liquid.userData;
     const pos = liquid.getAttribute('position');
-    this._surfaceBase = { attr: pos, ...surface };
+    this._surfaceBase = { attr: pos, normal: liquid.getAttribute('normal'), ...surface };
 
     // A CIRCLE on the floor, not an ellipse. The ellipse the brief asks for is
     // what perspective makes of a circle seen from a camera a little above it —
@@ -653,22 +661,87 @@ export class Bottle {
     }
 
     const amp = Math.max(-t.sloshLimit, Math.min(t.sloshLimit, this._sloshX));
-    // Nothing to write and nothing to undo: skip, so a still bottle costs
-    // nothing at all here.
-    if (Math.abs(amp) < 1e-4 && !this._sloshed) return;
-    this._sloshed = Math.abs(amp) >= 1e-4;
 
+    /**
+     * ── 액면은 병이 아니라 **중력**을 따른다 ─────────────────────────────────
+     * 여기서 출렁임만 쓰고 있었다. 출렁임은 평형면 **둘레의** 진동이라 그것만으로는
+     * 부족했다 — 평형면 자체가 병의 축에 수직이었기 때문이다. 병이 22도 기울면
+     * 액면도 22도 기울어 따라갔고, 그건 액체가 아니라 병 안에 굳어 있는 것이다.
+     *
+     * 평형면은 중력에 수직인 평면, 즉 월드에서 수평인 평면이다. 병의 로컬 좌표계
+     * 에서 그 평면을 구하려면 월드의 위쪽 벡터를 로컬로 가져오면 된다:
+     *
+     *     up · (P - C) = 0,   C = 액면 중심 (0, y0, 0)
+     *     -> y = y0 - (up.x * x + up.z * z) / up.y
+     *
+     * `up` 은 액체 메시의 **월드** 쿼터니언을 뒤집어 얻는다. 조상 전부가 계산에
+     * 들어가야 하기 때문이다 — 기울기(`lean`)만 쓰면 뜨는 동작이나 흔들림이 축을
+     * 돌릴 때 액면이 그만큼 어긋난다.
+     *
+     * `up.y` 가 0 에 가까우면 병이 눕는다는 뜻이고 그때는 수평면이 병을 가로지르지
+     * 않는다. 여기서는 일어나지 않지만(최대 기울기가 22도) 0 으로 나누는 자리를
+     * 남겨 둘 이유는 없다.
+     */
+    this.liquid.getWorldQuaternion(this._surfQ);
+    this._surfUp.set(0, 1, 0).applyQuaternion(this._surfQ.invert());
+    const upy = this._surfUp.y;
+    const level = Math.abs(upy) > 1e-3;
+    const kx = level ? -this._surfUp.x / upy : 0;
+    const kz = level ? -this._surfUp.z / upy : 0;
+
+    /**
+     * 액면이 유리 밖으로 나가지 않게 묶는다.
+     *
+     * 기울어진 수평면의 높은 쪽은 `r * tan(기울기)` 만큼 올라간다. 22도에 반지름이
+     * 액면 높이에서 16 프로파일 단위면 6.5 단위이고 병 높이 안에 들어가지만,
+     * `fillLevel` 을 패널에서 올리면 목을 뚫고 나갈 수 있다. 위아래 모두 묶는다 —
+     * 아래로 뚫으면 옆벽이 액면 위로 삐져나온다.
+     */
+    const ceil = (this.profile.height - 2) * MM;
+    const floorY = 2 * MM;
+
+    /**
+     * 링이 **둘**이다: 부채꼴의 테두리와 옆벽 맨 윗줄. 같은 각도, 같은 반지름,
+     * 다른 정점. 하나만 움직이면 벽 끝이 액면 위로 삐져나오거나 사이가 벌어진다.
+     * `bottleGeometry` 의 `wallTopRim` 주석에 왜 둘인지 적혀 있다.
+     */
     const attr = base.attr;
+    const R0 = base.surfaceRadius ?? 0;
+    const wall = base.wallTopRim;
     for (let i = 0; i < base.surfaceCols; i++) {
       const th = (i / base.surfaceCols) * Math.PI * 2;
-      // Tipping about the same axis the bottle leans on, so the drink runs to
-      // the low side of a leaning bottle rather than to some unrelated one.
-      attr.setY(base.surfaceRim + i, base.surfaceY + Math.cos(th) * amp);
+      const x = R0 * Math.cos(th);
+      const z = R0 * Math.sin(th);
+      // 수평면 + 출렁임. 출렁임은 병이 기우는 축과 같은 축을 돈다 — 기울어진 병에서
+      // 술이 낮은 쪽으로 몰리지, 아무 상관 없는 쪽으로 몰리지 않는다.
+      const y = Math.max(
+        floorY,
+        Math.min(ceil, base.surfaceY + kx * x + kz * z + Math.cos(th) * amp),
+      );
+      attr.setY(base.surfaceRim + i, y);
+      if (wall !== undefined) attr.setY(wall + i, y);
     }
-    // The centre is the pivot of a tilt and does not move. That is what makes
-    // it a tilt rather than the whole surface bobbing.
+    // 가운데는 기울기의 피벗이다. 수평면도 출렁임도 여기서는 0 이므로 움직이지
+    // 않고, 그것이 이것을 기울기로 만든다 — 액면 전체가 위아래로 까딱이는 것이 아니라.
     attr.setY(base.surfaceCentre, base.surfaceY);
     attr.needsUpdate = true;
+
+    /**
+     * 부채꼴의 법선도 수평면을 따라간다.
+     *
+     * 위치만 기울이면 법선은 여전히 로컬 +Y 를 가리키고, 그건 병의 축이지 위쪽이
+     * 아니다. 조명이 액면을 병의 기울기대로 비추게 되어, 기울일수록 액면이 어두워
+     * 지거나 밝아진다 — 표면은 그대로인데 빛만 도는 것으로 보인다.
+     */
+    const nor = base.normal;
+    if (nor) {
+      const nx = this._surfUp.x;
+      const ny = this._surfUp.y;
+      const nz = this._surfUp.z;
+      nor.setXYZ(base.surfaceCentre, nx, ny, nz);
+      for (let i = 0; i < base.surfaceCols; i++) nor.setXYZ(base.surfaceRim + i, nx, ny, nz);
+      nor.needsUpdate = true;
+    }
   }
 
   // ── the burst at the mouth ─────────────────────────────────────────────────
