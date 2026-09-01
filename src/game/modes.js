@@ -242,6 +242,35 @@ export const MODES = {
        * the bottom of the screen where it has always been.
        */
       ownHalfBearing: (player) => (player === 0 ? 0 : Math.PI),
+
+      /**
+       * Against an AI, a handover does not pull the zoom back out.
+       *
+       * ── the reset exists for a seat swap, and there is no seat swap ────────
+       * `faceCurrentPlayer` resets bearing, zoom and pan when a turn changes
+       * hands, because two people share one screen and the incoming player must
+       * not inherit the outgoing one's framing. Against the computer nobody is
+       * arriving: the same person watches their own turn and then the AI's, and
+       * the framing they chose is still the framing they want.
+       *
+       * It is most acute in this mode. The pitch is 64 units long against a
+       * board of 56, the whole of it is on screen at the opening zoom, and
+       * aiming a shot at a ball 1.9 units across means zooming in — which the
+       * AI's reply then threw away, every single turn.
+       *
+       * The BEARING is still pinned and still applied; only the zoom and the pan
+       * are kept. That is exactly what the non-handover path already does, so
+       * this is not a new camera behaviour, it is the existing one reached from
+       * one more place. The reset button is unaffected — it calls
+       * `faceCurrentPlayer(true)`, and `force` overrides this.
+       *
+       * Not set on knockout or curling. The same argument would apply to
+       * knockout against an AI and it is deliberately not made here: that mode
+       * was not asked about, its board fits on screen at the default zoom, and a
+       * camera that behaves differently in two modes for reasons nobody wrote
+       * down is worse than one that is inconsistent on purpose.
+       */
+      keepZoomVsAi: true,
     },
 
     /** Inside the LINES, not the run-off — the pitch, not the wall. */

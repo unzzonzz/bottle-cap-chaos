@@ -713,8 +713,19 @@ async function boot(canvas) {
     // A turn that has changed hands resets the framing outright — bearing, zoom
     // and pan — whatever the last player left behind and whatever cards were
     // played to get here.
+    //
+    // ── unless there is nobody arriving to reset it FOR ─────────────────────
+    // The reset is a courtesy to the incoming player on a shared screen. Against
+    // an AI the same person is still sitting there, so a mode may ask to keep
+    // the zoom and the pan across the handover — see `MODES.football.camera
+    // .keepZoomVsAi` for why football in particular needs it. The bearing is
+    // still applied either way.
+    //
+    // `force` wins, and that is what keeps the reset button honest: it calls
+    // this with `force` and must always pull the framing back to default.
     if (force || handover) {
-      gameCamera.faceTo(bearing);
+      const keepFraming = !force && hasAi() && !!match.mode.camera?.keepZoomVsAi;
+      gameCamera.faceTo(bearing, keepFraming ? { zoom: false } : undefined);
       return true;
     }
 
