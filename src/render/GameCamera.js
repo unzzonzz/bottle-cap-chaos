@@ -389,6 +389,18 @@ export class GameCamera {
     };
   }
 
+  /**
+   * World units in one CSS pixel of board WIDTH, at the board plane.
+   *
+   * Width rather than height because the horizontal axis is level: the vertical
+   * one is tilted away from the camera and its scale therefore depends on where
+   * on the board you ask. Anything sizing a drawing in screen terms — the aim
+   * overlay's ribbons — wants the one that has a single answer.
+   */
+  get worldPerPixel() {
+    return (2 * this.distance * this.tanX) / Math.max(1, this.boardCssWidth);
+  }
+
   _pitchClamped() {
     const deg = this.fixedPitch
       ? this.fixedPitch()

@@ -2,9 +2,7 @@ import {
   BufferAttribute,
   BufferGeometry,
   Group,
-  Line,
   LineBasicMaterial,
-  LineLoop,
   LineSegments,
 } from 'three';
 import { rotateY, shotSpread } from '../game/shot.js';
@@ -54,6 +52,32 @@ import { PALETTE } from '../core/palette.js';
  * the string back to the cursor, the clamp crossbar, the deadzone ring — none of
  * which says where the cap will go, and without which a drag under chaos would
  * read as broken rather than as blind.
+ *
+ * ── every line here is a RIBBON, because width is not a material property ────
+ * `LineBasicMaterial.linewidth` is ignored by every WebGL renderer: a GL line is
+ * one DRAWING-BUFFER pixel and nothing else. The buffer is at the device's own
+ * ratio (see `Viewport`), so on a retina panel the whole bow was drawn a third
+ * to a half of a CSS pixel wide — a hairline that the aim, which is the one
+ * thing the player is looking at while they draw, could not afford.
+ *
+ * So each line is emitted several times, offset sideways by whole device pixels
+ * about its own centre — the same "width is geometry" answer `DistanceMarks`
+ * gives, done per segment instead of per mark so it holds at any heading. Two
+ * consequences worth stating:
+ *
+ *   · the offsets are computed from `worldPerPixel`, so the ribbon is a fixed
+ *     number of SCREEN pixels at every zoom. A fixed world offset would be a
+ *     hairline zoomed out and a slab zoomed in, which is the failure being fixed
+ *     showing up again at one end of the range.
+ *   · the ribs are spaced one device pixel apart rather than spread to fill a
+ *     width. Spread, a 3-pixel-wide pair of ribs is two hairlines with a gap
+ *     between them, which reads as a double line, not a thick one.
+ *
+ * The perpendicular is taken in the board plane, so it foreshortens with the
+ * camera's tilt — at the default 52° a line running across the screen comes out
+ * 0.79 of the width of one running up it. Below a pixel and a half of total
+ * width that difference is not visible, and the alternative is handing this file
+ * a camera so it can work in screen space.
  */
 
 /**
@@ -101,6 +125,25 @@ const RING_SEGMENTS = 28;
 /** Board-plane y for the flat overlays. Above the grid, below the caps. */
 const DECK = 0.06;
 
+/**
+ * How wide the bow is drawn, in CSS pixels.
+ *
+ * Still a thin line — a hairline plus a bit, not a stroke. The request was for
+ * the weight it already had, only reliably visible, so this is deliberately
+ * around the width of an ordinary UI border rather than anything that would
+ * start to read as a shape with an area.
+ */
+const GUIDE_WIDTH_CSS = 1.4;
+/**
+ * The fewest and most ribs a line is ever drawn with.
+ *
+ * The floor is 2 rather than 1 because a non-retina panel rounds `1.4` back down
+ * to the single pixel this exists to get away from — on that screen one extra
+ * pixel IS the whole of "a little thicker". The ceiling only bounds the buffers.
+ */
+const MIN_RIBS = 2;
+const MAX_RIBS = 6;
+
 function lineGeometry(maxPoints) {
   const g = new BufferGeometry();
   g.setAttribute('position', new BufferAttribute(new Float32Array(maxPoints * 3), 3));
@@ -112,17 +155,33 @@ export class AimOverlay {
     this.config = config;
     this.root = new Group();
 
-    this.pathGeo = lineGeometry(MAX_PATH_POINTS);
-    this.path = new Line(this.pathGeo, new LineBasicMaterial({ color: PATH_COLOR, fog: false }));
+    /**
+     * Sideways offsets, in world units, one per rib. Rewritten by
+     * `setPixelScale`; a single rib on the centreline until something tells this
+     * file how big a pixel is, so a caller that never does gets the old drawing
+     * rather than a wrong one.
+     */
+    this._ribs = [0];
+
+    // Every buffer is sized for the worst case of MAX_RIBS copies, and every one
+    // of them is now a segment LIST — a strip cannot be ribbed, because the ribs
+    // of two adjacent segments do not share an endpoint.
+    this.pathGeo = lineGeometry(MAX_PATH_POINTS * MAX_RIBS * 2);
+    this.path = new LineSegments(
+      this.pathGeo,
+      new LineBasicMaterial({ color: PATH_COLOR, fog: false }),
+    );
     this.path.frustumCulled = false;
     this.root.add(this.path);
 
     /**
      * The same path, broken into marching dashes. The trajectory card's line.
      *
-     * A separate object rather than a mode on the first one, because the two are
-     * different primitives: a `Line` is one continuous strip and a dashed path
-     * is a segment list with holes in it. Only one is ever visible.
+     * A separate object rather than a mode on the first one. Both are segment
+     * lists now that the path is ribbed, so the primitive is no longer what
+     * separates them — the COLOUR is: this one's material is rewritten every
+     * frame to step through `DASH_PALETTE`, and the plain path's is a constant.
+     * Only one is ever visible.
      *
      * The dashes advance by whole SAMPLES, not by a distance — each sample is a
      * fixed slice of simulated time, so the pattern flows at a constant rate
@@ -130,7 +189,7 @@ export class AimOverlay {
      * trick as scrolling a texture's UV, done on the index instead, and it steps
      * rather than sliding because stepping is what the hardware did.
      */
-    this.dashGeo = lineGeometry(MAX_PATH_POINTS * 2);
+    this.dashGeo = lineGeometry(MAX_PATH_POINTS * MAX_RIBS * 2);
     this.dashMaterial = new LineBasicMaterial({ color: PATH_COLOR, fog: false });
     this.dash = new LineSegments(this.dashGeo, this.dashMaterial);
     this.dash.frustumCulled = false;
@@ -140,19 +199,19 @@ export class AimOverlay {
     // Apex -> edge, the arc across the far end, edge -> apex: one closed outline
     // as a segment list, because a LineLoop cannot do the two straight flanks and
     // the arc without doubling back.
-    this.coneGeo = lineGeometry((CONE_ARC_SEGMENTS + 4) * 2);
+    this.coneGeo = lineGeometry((CONE_ARC_SEGMENTS + 4) * MAX_RIBS * 2);
     this.coneMaterial = new LineBasicMaterial({ color: CONE_COLOR, fog: false });
     this.cone = new LineSegments(this.coneGeo, this.coneMaterial);
     this.cone.frustumCulled = false;
     this.root.add(this.cone);
 
-    this.aimGeo = lineGeometry(8);
+    this.aimGeo = lineGeometry(4 * MAX_RIBS * 2);
     this.aimMaterial = new LineBasicMaterial({ color: AIM_COLOR, fog: false });
     this.aim = new LineSegments(this.aimGeo, this.aimMaterial);
     this.aim.frustumCulled = false;
     this.root.add(this.aim);
 
-    this.pullGeo = lineGeometry(12);
+    this.pullGeo = lineGeometry(4 * MAX_RIBS * 2);
     this.pullMaterial = new LineBasicMaterial({ color: PULL_COLOR, fog: false });
     this.pull = new LineSegments(this.pullGeo, this.pullMaterial);
     this.pull.frustumCulled = false;
@@ -161,9 +220,9 @@ export class AimOverlay {
     // No strike-height marker. It existed to show an axis the player could move;
     // the height is fixed now, so it would be a tick that is always in the same
     // place relative to the cap.
-    this.ringGeo = lineGeometry(RING_SEGMENTS);
+    this.ringGeo = lineGeometry(RING_SEGMENTS * MAX_RIBS * 2);
     this.ringMaterial = new LineBasicMaterial({ color: RING_IDLE_COLOR, fog: false });
-    this.ring = new LineLoop(this.ringGeo, this.ringMaterial);
+    this.ring = new LineSegments(this.ringGeo, this.ringMaterial);
     this.ring.frustumCulled = false;
     this.root.add(this.ring);
 
@@ -177,14 +236,91 @@ export class AimOverlay {
      * when no pull is in progress, because during a pull the deadzone ring is
      * already there and two rings on one cap is noise.
      */
-    this.hoverGeo = lineGeometry(RING_SEGMENTS);
+    this.hoverGeo = lineGeometry(RING_SEGMENTS * MAX_RIBS * 2);
     this.hoverMaterial = new LineBasicMaterial({ color: HOVER_COLOR, fog: false });
-    this.hover = new LineLoop(this.hoverGeo, this.hoverMaterial);
+    this.hover = new LineSegments(this.hoverGeo, this.hoverMaterial);
     this.hover.frustumCulled = false;
     this.hover.visible = false;
     this.root.add(this.hover);
 
     this.setVisible(false);
+  }
+
+  /**
+   * Tell the overlay how big a pixel is, so the ribbons can be a screen width.
+   *
+   * Called every frame from the render loop rather than on zoom changes: the
+   * distance eases, so "the zoom changed" is true for a run of frames that no
+   * single event marks the end of, and recomputing six small offsets is cheaper
+   * than the bookkeeping to avoid it.
+   *
+   * @param {number} worldPerPixel  world units in one CSS pixel at the board plane
+   * @param {number} pixelRatio     drawing-buffer pixels per CSS pixel
+   */
+  setPixelScale(worldPerPixel, pixelRatio = 1) {
+    const ratio = Math.max(1, pixelRatio || 1);
+    const px = Math.max(1e-6, worldPerPixel || 0) / ratio; // one DEVICE pixel, in world units
+    const count = Math.min(
+      MAX_RIBS,
+      Math.max(MIN_RIBS, Math.round(GUIDE_WIDTH_CSS * ratio)),
+    );
+    if (this._ribs.length !== count) this._ribs = new Array(count);
+    // Centred on the true line, so widening it does not also move it: the aim
+    // arrow starts at the cap's centre of mass and has to keep starting there.
+    for (let i = 0; i < count; i++) this._ribs[i] = (i - (count - 1) / 2) * px;
+  }
+
+  /**
+   * One segment of a line, written once per rib.
+   *
+   * The offset is perpendicular in xz only — the y of both endpoints is carried
+   * through untouched, because the predicted path is sampled at the cap's actual
+   * centre of mass and a hop in it is real. Flattening the ribbon to `DECK`
+   * would have quietly straightened the one line that is allowed to leave it.
+   *
+   * @returns {number} the new write cursor
+   */
+  _emit(a, w, x0, y0, z0, x1, y1, z1) {
+    const dx = x1 - x0;
+    const dz = z1 - z0;
+    const len = Math.hypot(dx, dz);
+    // A segment with no length has no perpendicular, and the sampled path is
+    // full of them the moment the cap comes to rest. Dropping it costs nothing;
+    // dividing by it would put NaNs in the buffer and take the whole line off
+    // screen.
+    if (len < 1e-6) return w;
+    const nx = -dz / len;
+    const nz = dx / len;
+    for (let i = 0; i < this._ribs.length; i++) {
+      if (w + 6 > a.length) break;
+      const o = this._ribs[i];
+      a[w++] = x0 + nx * o;
+      a[w++] = y0;
+      a[w++] = z0 + nz * o;
+      a[w++] = x1 + nx * o;
+      a[w++] = y1;
+      a[w++] = z1 + nz * o;
+    }
+    return w;
+  }
+
+  /** A circle on the deck, as a ribbed segment list. The two rings share it. */
+  _writeCircle(geo, cx, cz, r) {
+    const attr = geo.getAttribute('position');
+    const a = attr.array;
+    let w = 0;
+    let px = cx + r;
+    let pz = cz;
+    for (let i = 1; i <= RING_SEGMENTS; i++) {
+      const ang = (i / RING_SEGMENTS) * Math.PI * 2;
+      const x = cx + Math.cos(ang) * r;
+      const z = cz + Math.sin(ang) * r;
+      w = this._emit(a, w, px, DECK, pz, x, DECK, z);
+      px = x;
+      pz = z;
+    }
+    attr.needsUpdate = true;
+    geo.setDrawRange(0, w / 3);
   }
 
   /**
@@ -217,15 +353,7 @@ export class AimOverlay {
       this.hover.visible = false;
       return;
     }
-    const attr = this.hoverGeo.getAttribute('position');
-    for (let i = 0; i < RING_SEGMENTS; i++) {
-      const a = (i / RING_SEGMENTS) * Math.PI * 2;
-      attr.array[i * 3] = com.x + Math.cos(a) * radius;
-      attr.array[i * 3 + 1] = DECK;
-      attr.array[i * 3 + 2] = com.z + Math.sin(a) * radius;
-    }
-    attr.needsUpdate = true;
-    this.hoverGeo.setDrawRange(0, RING_SEGMENTS);
+    this._writeCircle(this.hoverGeo, com.x, com.z, radius);
     this.hover.visible = true;
   }
 
@@ -303,9 +431,15 @@ export class AimOverlay {
       return;
     }
     const n = Math.min(MAX_PATH_POINTS, points.length / 3);
-    attr.array.set(points.slice(0, n * 3));
+    const a = attr.array;
+    let w = 0;
+    for (let i = 0; i + 1 < n; i++) {
+      const j = i * 3;
+      const k = j + 3;
+      w = this._emit(a, w, points[j], points[j + 1], points[j + 2], points[k], points[k + 1], points[k + 2]);
+    }
     attr.needsUpdate = true;
-    this.pathGeo.setDrawRange(0, n);
+    this.pathGeo.setDrawRange(0, w / 3);
   }
 
   /**
@@ -329,16 +463,13 @@ export class AimOverlay {
     // keeps the sign of its left operand, which would make every test fail on
     // the half of the cycle where it is negative.
     const p = ((Math.floor(phase) % DASH_PERIOD) + DASH_PERIOD) % DASH_PERIOD;
+    const a = attr.array;
     let w = 0;
     for (let i = 0; i + 1 < n; i++) {
       if (((i + p) % DASH_PERIOD) >= DASH_ON) continue;
-      if (w + 6 > attr.array.length) break;
-      attr.array[w++] = points[i * 3];
-      attr.array[w++] = points[i * 3 + 1];
-      attr.array[w++] = points[i * 3 + 2];
-      attr.array[w++] = points[(i + 1) * 3];
-      attr.array[w++] = points[(i + 1) * 3 + 1];
-      attr.array[w++] = points[(i + 1) * 3 + 2];
+      const j = i * 3;
+      const k = j + 3;
+      w = this._emit(a, w, points[j], points[j + 1], points[j + 2], points[k], points[k + 1], points[k + 2]);
     }
     attr.needsUpdate = true;
     this.dashGeo.setDrawRange(0, w / 3);
@@ -348,15 +479,7 @@ export class AimOverlay {
   _writeRing(com, armed) {
     // The deadzone, to scale. Release inside this and nothing fires.
     const r = Math.max(this.config.shot.deadzone, 0.05);
-    const attr = this.ringGeo.getAttribute('position');
-    for (let i = 0; i < RING_SEGMENTS; i++) {
-      const a = (i / RING_SEGMENTS) * Math.PI * 2;
-      attr.array[i * 3] = com.x + Math.cos(a) * r;
-      attr.array[i * 3 + 1] = DECK;
-      attr.array[i * 3 + 2] = com.z + Math.sin(a) * r;
-    }
-    attr.needsUpdate = true;
-    this.ringGeo.setDrawRange(0, RING_SEGMENTS);
+    this._writeCircle(this.ringGeo, com.x, com.z, r);
     this.ringMaterial.color.set(armed ? RING_ARMED_COLOR : RING_IDLE_COLOR);
   }
 
@@ -374,28 +497,16 @@ export class AimOverlay {
     const ez = com.z + uz * clamped;
 
     // The string.
-    a[0] = com.x;
-    a[1] = DECK;
-    a[2] = com.z;
-    a[3] = ex;
-    a[4] = DECK;
-    a[5] = ez;
+    let w = this._emit(a, 0, com.x, DECK, com.z, ex, DECK, ez);
 
     // A crossbar at the far end. It marks the clamp, so it is only worth drawing
     // once the clamp is doing something.
-    let count = 2;
     if (atClamp) {
       const k = this.config.shot.deadzone * 0.8;
-      a[6] = ex - uz * k;
-      a[7] = DECK;
-      a[8] = ez + ux * k;
-      a[9] = ex + uz * k;
-      a[10] = DECK;
-      a[11] = ez - ux * k;
-      count = 4;
+      w = this._emit(a, w, ex - uz * k, DECK, ez + ux * k, ex + uz * k, DECK, ez - ux * k);
     }
     attr.needsUpdate = true;
-    this.pullGeo.setDrawRange(0, count);
+    this.pullGeo.setDrawRange(0, w / 3);
     // The clamp still wins: "you have stopped gaining power" is a fact about
     // this instant of the drag, and 강타 is a fact about the whole of it.
     this.pullMaterial.color.set(
@@ -417,10 +528,8 @@ export class AimOverlay {
     const a = attr.array;
     let w = 0;
 
-    const push = (x, z) => {
-      a[w++] = x;
-      a[w++] = DECK;
-      a[w++] = z;
+    const seg = (x0, z0, x1, z1) => {
+      w = this._emit(a, w, x0, DECK, z0, x1, DECK, z1);
     };
 
     if (half <= 1e-5) {
@@ -436,10 +545,8 @@ export class AimOverlay {
     const e0 = edge(-1);
     const e1 = edge(1);
 
-    push(com.x, com.z);
-    push(e0.x, e0.z);
-    push(com.x, com.z);
-    push(e1.x, e1.z);
+    seg(com.x, com.z, e0.x, e0.z);
+    seg(com.x, com.z, e1.x, e1.z);
 
     // The far arc. Drawn on the arc rather than as a chord because a chord makes
     // the reachable set look like a triangle, and the corners of that triangle
@@ -449,8 +556,7 @@ export class AimOverlay {
       const t = -half + (i / CONE_ARC_SEGMENTS) * half * 2;
       const d = rotateY(dx, dz, t);
       const p = { x: com.x + d.x * reach, z: com.z + d.z * reach };
-      push(prev.x, prev.z);
-      push(p.x, p.z);
+      seg(prev.x, prev.z, p.x, p.z);
       prev = p;
     }
 
@@ -464,33 +570,25 @@ export class AimOverlay {
     const tipX = com.x + dx * reach;
     const tipZ = com.z + dz * reach;
 
-    a[0] = com.x;
-    a[1] = DECK;
-    a[2] = com.z;
-    a[3] = tipX;
-    a[4] = DECK;
-    a[5] = tipZ;
+    let w = this._emit(a, 0, com.x, DECK, com.z, tipX, DECK, tipZ);
 
     // An arrowhead, so the warm line reads as a direction rather than as a second
     // string. BOTH barbs — one alone just looks like the line frayed.
     const back = reach * 0.06;
     const side = back * 0.55;
-    a[6] = tipX;
-    a[7] = DECK;
-    a[8] = tipZ;
-    a[9] = tipX - dx * back - dz * side;
-    a[10] = DECK;
-    a[11] = tipZ - dz * back + dx * side;
-
-    a[12] = tipX;
-    a[13] = DECK;
-    a[14] = tipZ;
-    a[15] = tipX - dx * back + dz * side;
-    a[16] = DECK;
-    a[17] = tipZ - dz * back - dx * side;
+    w = this._emit(
+      a, w,
+      tipX, DECK, tipZ,
+      tipX - dx * back - dz * side, DECK, tipZ - dz * back + dx * side,
+    );
+    w = this._emit(
+      a, w,
+      tipX, DECK, tipZ,
+      tipX - dx * back + dz * side, DECK, tipZ - dz * back - dx * side,
+    );
 
     attr.needsUpdate = true;
-    this.aimGeo.setDrawRange(0, 6);
+    this.aimGeo.setDrawRange(0, w / 3);
   }
 
 }

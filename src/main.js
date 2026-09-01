@@ -2302,6 +2302,11 @@ async function boot(canvas) {
      */
     const marked = active().highlight ?? -1;
     const ring = marked >= 0 ? marked : hovered;
+    // How wide to draw the bow, in a unit the overlay can turn into world
+    // offsets. Handed in every frame because the camera's distance eases — see
+    // `AimOverlay.setPixelScale`, and note that the hover ring goes through it
+    // too, so it has to be set before this call rather than beside the aim.
+    overlay.setPixelScale(gameCamera.worldPerPixel, viewport.renderer.getPixelRatio());
     overlay.setHover(
       ring >= 0 ? match.arena.capCom(ring) : null,
       match.arena.desc.radius * Math.max(1, CONFIG.view.grabRadius),
