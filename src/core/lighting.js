@@ -59,15 +59,28 @@ export function createLightRig(scene, { shadows = true, shadowMapSize = BUDGET.s
  *
  *     0.95 / 0.42 / 0.35   평균 0.578  최대 0.607   ← 어두웠다
  *     1.15 / 0.50 / 0.40   평균 0.604  최대 0.632
- *     1.30 / 0.56 / 0.44   평균 0.623  최대 0.652   ← 지금
+ *     1.30 / 0.56 / 0.44   평균 0.623  최대 0.652
+ *     1.40 / 0.60 / 0.47   평균 0.633  최대 0.662   ← 지금
  *     1.45 / 0.62 / 0.48   평균 0.641  최대 0.672
  *
- * 상한을 정하는 것은 블룸 임계값 0.72 다. 판이 그것을 넘으면 나무가 빛나기
- * 시작하는데, 빛나야 하는 것은 젖은 금속이지 나무가 아니다. 1.45 조는 최대
- * 0.672 로 여유가 5% 밖에 없어서, 밝은 뚜껑이 겹치는 순간 넘는다. 1.30 조는
- * 10% 를 남긴다.
+ * 마지막 한 칸은 "인게임이 조금 더 밝아도 되겠다"는 요청으로 올린 것이고,
+ * 의도적으로 한 칸이다. 화면 전체 평균은 이걸로 거의 움직이지 않는다 — 프레임
+ * 전체를 재면 선형 휘도 0.347 에서 0.350 으로 1% 다. 밝기를 실제로 옮긴 것은
+ * 위 문단이 말하는 그대로 **하늘**이고, `PALETTE.bg.below` 에 적혀 있다.
+ *
+ * ── 상한은 여전히 블룸이지만, 표의 숫자로 재면 안 된다 ──────────────────────
+ * 빛나야 하는 것은 젖은 금속이지 나무가 아니다. 그 판단은 그대로다. 다만 위
+ * 표는 **sRGB 로 인코딩된 화면 픽셀**에 Rec.709 계수를 곱한 값이고, 블룸의
+ * 하이패스는 그보다 앞, 선형 HDR 타겟에서 돈다 — `LuminosityHighPassShader` 의
+ * `luminance()` 는 선형값에 같은 계수를 곱한다. 두 숫자를 같은 자로 놓고
+ * "0.652 대 0.72, 여유 10%" 라고 읽었던 것이 어긋난 부분이다.
+ *
+ * 같은 판을 선형으로 다시 재면 평균 0.363, 최대 0.400 이다. 임계값 0.72 의
+ * 절반 근처이고, 뚜껑의 스펙큘러만 그 위로 올라간다 — 프레임에서 임계값을 넘는
+ * 픽셀은 0.9% 이고 판에는 하나도 없다. 다음에 이 값을 만지는 사람은 표에 한 줄
+ * 더 붙이되, 넘는지 여부는 선형 휘도로 판단할 것.
  */
-const sun = new DirectionalLight(PALETTE.light.sun, 1.3);
+const sun = new DirectionalLight(PALETTE.light.sun, 1.4);
   sun.position.set(SUN_DIR.x, SUN_DIR.y, SUN_DIR.z).multiplyScalar(120);
   sun.castShadow = shadows;
   sun.shadow.mapSize.set(shadowMapSize, shadowMapSize);
@@ -96,7 +109,7 @@ const sun = new DirectionalLight(PALETTE.light.sun, 1.3);
    * 위는 하늘색, 아래는 지면색. 키가 닿지 않는 면이 검게 죽지 않고 하늘색을
    * 띠게 만드는 게 전부이고, 그게 "그림자 안에서도 색이 보인다"의 구현이다.
    */
-  const hemi = new HemisphereLight(PALETTE.light.ambientSky, PALETTE.light.ambientGround, 0.56);
+  const hemi = new HemisphereLight(PALETTE.light.ambientSky, PALETTE.light.ambientGround, 0.6);
   scene.add(hemi);
 
   /**
@@ -107,7 +120,7 @@ const sun = new DirectionalLight(PALETTE.light.sun, 1.3);
    * 문제다 — 역광이 그림자를 던지면 카메라 쪽으로 그림자가 나와서 접지 그림자와
    * 싸운다.
    */
-  const rim = new DirectionalLight(PALETTE.light.rim, 0.44);
+  const rim = new DirectionalLight(PALETTE.light.rim, 0.47);
   rim.position.set(0.62, 0.28, -0.74).multiplyScalar(120);
   rim.castShadow = false;
   scene.add(rim);
