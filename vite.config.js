@@ -1,7 +1,21 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  base: '/',
+  /**
+   * Where the built page thinks it lives.
+   *
+   * ── it CANNOT be a constant, and the two consumers disagree ──────────────
+   * Capacitor serves the bundle from the root of a local server inside the app,
+   * so iOS and Android need `/` — `npm run ios` runs this same build. GitHub
+   * Pages serves a project site from `/<repo>/`, and a page built with `/` there
+   * asks for `/assets/...`, which is one directory above everything it needs.
+   *
+   * So the default is the one that must not break — the shipped apps — and the
+   * sub-path is opted into by the thing that needs it. `.github/workflows/
+   * pages.yml` sets it from the repository's own name, so a rename or a fork
+   * carries it without editing this file.
+   */
+  base: process.env.BCC_BASE || '/',
   // Vite does not read PORT on its own. Honouring it lets a second dev server
   // run alongside one that already holds 5173.
   server: { port: Number(process.env.PORT) || 5173 },
