@@ -1932,6 +1932,270 @@ export const CONFIG = {
     },
 
     /**
+     * Per-mode overrides. A key that is absent here uses the common value.
+     *
+     * ── the two modes are not the same size of problem ─────────────────────
+     * Football is 4v4 plus a ball — nine bodies against knockout's six — and its
+     * weights are in different units entirely: `goal` against `dropOpponent`,
+     * world units of ball travel against squared edge fractions. Folding them
+     * into one block would give every survival number a second, unrelated
+     * meaning, and re-tuning either mode would silently re-tune the other.
+     *
+     * A mode that overrides nothing gets `config.ai` back BY IDENTITY, so the
+     * survival AI reads exactly what it read before this block existed and its
+     * panel sliders stay live mid-search. See `ai/strategy.js: aiTuning`.
+     */
+    perMode: {
+      football: {
+        /**
+         * ── the shooter cap is four, which is every cap ────────────────────
+         * A side has four here. So the ranking in `footballCandidates` never
+         * actually cuts anybody at the shipped value and the "which caps may
+         * shoot" question is moot — it only bites if this slider comes down,
+         * and then nearest-the-ball is the right order.
+         *
+         * ── and the fan is NARROWER than survival's, from measurement ───────
+         * A cap aimed dead at a ball 9.6 units away hit it on 96 of 96 draws
+         * through the real error cone, which is 1.5° to 7.0° at these powers.
+         * Aiming is not what fails in this mode; choosing what to aim AT is. So
+         * the budget goes on more targets rather than a wider spread around
+         * each, and `angleSpreadDeg` comes down from 9 to 6.
+         */
+        sampling: {
+          maxShooters: 4,
+          anglesPerTarget: 3,
+          angleSpreadDeg: 6,
+          powerSteps: 5,
+          /**
+           * ── the same 64 knockout uses, and that is a measurement ──────────
+           * This was set to 96 on the reasoning that football generates several
+           * hundred candidates where knockout generates a few dozen, so a bigger
+           * slice of the list ought to be worth having. That reasoning is wrong,
+           * and the numbers say so plainly. Two AI-vs-AI matches per row, 60
+           * turns each, changing only this:
+           *
+           *     maxCand   goals  own   ball%  idle%   eval/turn   think p50/p95
+           *          48       3    0      75     18          72   1767 / 3035 ms
+           *          64       4    0      88      7          89   2152 / 3132 ms
+           *          80       2    0      83     12         105   2525 / 3759 ms
+           *          96       4    0      83      8         121   2745 / 4314 ms
+           *
+           * 64 is the best row on every quality axis at once — most goals, most
+           * turns that touch the ball, fewest that do nothing — and it costs 27%
+           * less search than 96 to get there. Above it the extra candidates are
+           * refinements of plans the search had already found, and they buy
+           * nothing while pushing the tail out.
+           *
+           * 48 is where it starts to hurt: ball contact falls to 75% and idle
+           * turns nearly triple, which is the generator's later waves getting
+           * cut off rather than a worse choice among what survived.
+           *
+           * It also lands football's search time on knockout's: 2152 ms against
+           * 2157 ms measured on the same machine, at 89 rollouts a turn against
+           * 88. So the AI takes the same time to move in both modes, which is
+           * what "drop이 넉아웃 AI 대비 증가하지 않음" asks for — and it is reached
+           * by choosing the candidate count, never by opening `totalBudgetMs`.
+           *
+           * Affordable at all because a football rollout is CHEAPER than a
+           * knockout one: measured settle length over 384 shots, p50 63 steps
+           * against knockout's 92. The pitch has more friction and the caps
+           * travel a third as far.
+           */
+          maxCandidates: 64,
+        },
+
+        /**
+         * Hard ceiling on a single rollout, in physics steps.
+         *
+         * ── football's turns are shorter in the middle and much longer in the
+         * tail, and the tail is where the goals are ─────────────────────────
+         * Measured over 384 shots from the kickoff:
+         *
+         *     mode      p50   p90   p95   p99   max   over 240
+         *     football   63    79    88   298   324    10/384
+         *     knockout   92   144   149   162   175     0/288
+         *
+         * The common 240 truncates 2.6% of football rollouts, and they are not a
+         * random 2.6%: a rollout still running at 240 steps is a ball still
+         * ROLLING, which is exactly the shot that is on its way into a net. One
+         * verified own goal in the accuracy test took 410 steps to trickle in.
+         * Truncating there would score a scoring shot as "ball somewhere near
+         * the goal" and the search would never choose it.
+         *
+         * 420 covers p99 with room, and costs almost nothing on average because
+         * the median is 63: the mean rises from about 74 steps to about 76.
+         */
+        maxRolloutSteps: 420,
+
+        /**
+         * What a pitch is worth. Every term is measured or argued; see
+         * `ai/footballEvaluate.js`, where each one is defined.
+         *
+         * ── the scale is set by the two facts at the top ───────────────────
+         * A goal has to dominate every amount of position, exactly as
+         * `dropOpponent` does next door and for the same reason: a shot that
+         * scores must never lose to a shot that tidies. The largest positional
+         * total a candidate can realistically reach is `ballAdvance` at its
+         * measured ceiling — the best single strike moves the ball 31 units —
+         * so about 340, plus a full `ballThreat` at 200. `goal` at 2600 is
+         * roughly four times that combined, which is the margin the survival
+         * file found it needed.
+         */
+        weights: {
+          /** Their net. The win condition, and it must WIN. */
+          goal: 2600,
+          /**
+           * Mine. Above `goal`, and the asymmetry is structural rather than
+           * taste: conceding hands over the score AND the kickoff
+           * (`FootballRules._kickoffBy`), so the opponent moves next as well. A
+           * goal for and a goal against are not mirror images.
+           *
+           * The same shape as `dropOpponent` 260 against `loseOwn` 300: the AI
+           * will not trade a goal for an own goal, it has to come out ahead.
+           */
+          ownGoal: 3200,
+          /**
+           * Per world unit the ball got closer to their net. THE gradient.
+           *
+           * 11 rather than something rounder because of what it has to buy: a
+           * measured good strike moves the ball 15 to 31 units, so a typical
+           * attacking turn is worth 165 to 340 — the same order as `ballThreat`
+           * and `goalUncovered`, and an order below a goal. Raise it and the AI
+           * hoofs the ball anywhere forward; lower it and the mode's only
+           * gradient stops being able to outvote a tie-break.
+           */
+          ballAdvance: 11,
+          /**
+           * Per world unit it came back toward mine. Above `ballAdvance`.
+           *
+           * Not the same measurement with a sign — these are distances to two
+           * different goals, so a ball shoved sideways scores near zero on both.
+           * Heavier because the two are not symmetric in consequence: ground
+           * given up in front of my own net is where own goals come from.
+           */
+          ballRetreat: 15,
+          /** Can I score NEXT turn from this position, 0..1. */
+          ballThreat: 200,
+          /** Can they, 0..1. Heavier, same asymmetry as the goal pair. */
+          foeBallThreat: 260,
+          /**
+           * How much of the road to my net nobody of mine is covering, 0..1.
+           *
+           * The term that makes the AI defend, and the one with no survival
+           * counterpart. It is what stops the keeper being fired upfield and
+           * leaving an open goal — priced below a conceded goal and above any
+           * single attacking gain, so abandoning the line is a move the search
+           * will make when it wins the ball and not otherwise.
+           */
+          goalUncovered: 180,
+          /**
+           * My caps within a strike of the ball, 0..1 each. A tiebreaker.
+           *
+           * ── it has a CUTOFF, and the cutoff is deliberate ─────────────────
+           * `supportRadius` is 14, so a cap 30 units from the ball scores
+           * nothing here and gains nothing by closing to 22. That looks like a
+           * missing gradient and was measured as a suspect: a ball beyond one
+           * flick of every cap gives the search no reason to walk toward it.
+           *
+           * Measured over three AI-vs-AI matches, splitting the brief's
+           * "무의미 턴" by whether the ball was within a full-power flick
+           * (20.9 units) of ANY of that player's caps when the turn opened:
+           *
+           *     seed        idle    of which the ball was reachable
+           *     5e6f7a8b      7%                                 7%
+           *     11117777     18%                                 8%
+           *     2b2b9999      5%                                 3%
+           *
+           * So the turns that look idle in the worst seed are mostly turns where
+           * NOTHING could have touched the ball — the pitch is 64 long and a cap
+           * travels 21 — and the rate of "could have reached it and did not"
+           * sits at 3–8% across all three. There is no missing gradient to add;
+           * there is a pitch longer than a flick.
+           *
+           * What the AI does on those turns is drop back and cover, because
+           * `goalUncovered` and `foeBallThreat` are the only terms still moving.
+           * That is the right football answer to a ball you cannot contest, and
+           * it comes out of the existing terms rather than out of a new one.
+           */
+          shooterSupport: 10,
+          /**
+           * Per own cap left outside the lines.
+           *
+           * NOT a loss: `FootballRules` says plainly there is no out for a cap
+           * in this mode, so it is still on the field and still selectable. It
+           * is merely somewhere useless. Priced as a nudge, nowhere near the
+           * price of losing one — because it has not lost one.
+           */
+          capStranded: 25,
+          /** Per orb my own cap reaches, and per orb theirs does. As knockout. */
+          orbGain: 5,
+          orbGift: 34,
+        },
+
+        /**
+         * The distances the pitch terms measure with. World units, on a pitch
+         * that is 41.4 x 64.0 with a 10.7-wide goal mouth.
+         */
+        pitch: {
+          /**
+           * How far away a cap can still be a threat to the ball.
+           *
+           * Measured cap travel on this surface: 0.42 -> 9.4 units, 0.61 ->
+           * 14.5, 0.81 -> 18.7, 1.00 -> 20.9. So 20 is "one full-power flick
+           * away" — past it the cap has spent the whole shot arriving and
+           * cannot also drive the ball anywhere. Note how much shorter this is
+           * than knockout's 26: the pitch has more friction than the board.
+           */
+          reach: 20,
+          /**
+           * How far from a net the ball has to be for a strike to reach it.
+           *
+           * The measured ceiling for ball travel off one cap is 31 units, and
+           * that is the best case with everything lined up. 26 is the honest
+           * figure for a shot that also has to be accurate enough to go in.
+           */
+          strikeRange: 26,
+          /**
+           * How near my net the ball has to be before the goal counts as
+           * exposed — and the same radius that puts `clear` and `block` into
+           * wave 0.
+           *
+           * 22 is about a third of the pitch's length, which is the defensive
+           * third by the usual reckoning, and comfortably outside the penalty
+           * area (10 deep at this scale) so the AI starts defending before the
+           * ball is already in the box.
+           */
+          coverRange: 22,
+          /**
+           * How far off the goal-to-ball line a cap still counts as covering.
+           *
+           * 4.0, against a cap radius of 1.6 and a ball of 0.96: a cap covers a
+           * corridor about two and a half cap-radii wide, which is roughly what
+           * it can actually intercept given that the striker has to come
+           * through it. Widen it and one cap "covers" the whole mouth from the
+           * side; narrow it and nothing ever counts as defended.
+           */
+          coverWidth: 4,
+          /** How near the ball a cap has to be to count as support. */
+          supportRadius: 14,
+        },
+
+        /**
+         * 원모어's threshold, on football's scale rather than knockout's.
+         *
+         * The common value is 25, which is meaningful against survival scores
+         * where a whole cap is 260. Here `ballAdvance` alone makes 25 on two
+         * units of ball movement, so the common figure would play the card on
+         * every turn that touched the ball. 180 is about a sixth of a good
+         * attacking turn — the turn has to be genuinely worth repeating.
+         */
+        cards: {
+          oneMoreMinScore: 180,
+        },
+      },
+    },
+
+    /**
      * Draw the top N evaluated trajectories, with their scores. Panel only.
      *
      * "이게 있어야 AI가 왜 그 수를 뒀는지 알 수 있다." It is the only window into

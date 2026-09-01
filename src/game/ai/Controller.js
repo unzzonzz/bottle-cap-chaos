@@ -2,6 +2,12 @@ import { MATCH_STATE } from '../Match.js';
 import { nextSeed } from '../../physics/rng.js';
 import { AiPlanner } from './AiPlanner.js';
 import { decideCard } from './cardPolicy.js';
+import { strategyFor } from './strategy.js';
+// Imported for their side effect: each registers itself under a mode key, so
+// `strategyFor` can find it. A mode with no strategy is one the menu never
+// offered — see `MODES.<mode>.ai` and `strategy.js`.
+import './survivalStrategy.js';
+import './footballStrategy.js';
 
 /**
  * Who is playing this seat, as one interface with two implementations.
@@ -191,7 +197,12 @@ export class AiController {
     this._replanned = false;
     this.aim = null;
     this.highlight = -1;
-    this.planner.begin({ match, player: this.player, shotSeed: this._shotSeed });
+    this.planner.begin({
+      match,
+      player: this.player,
+      shotSeed: this._shotSeed,
+      strategy: strategyFor(match.mode),
+    });
   }
 
   cancel() {

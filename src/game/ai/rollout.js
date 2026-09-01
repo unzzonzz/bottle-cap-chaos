@@ -1,6 +1,6 @@
 import { RAPIER } from '../../physics/rapier.js';
 import { applyIntegrationParams } from '../../physics/PhysicsWorld.js';
-import { BODY_KIND, capsInSensor, secondsToSteps } from '../Arena.js';
+import { BODY_KIND, ballInSensor, capsInSensor, secondsToSteps } from '../Arena.js';
 import { TurnSettle } from '../TurnSettle.js';
 import { nearestCapWithin } from '../Orbs.js';
 import { applyResolved, resolveImpulse } from '../shot.js';
@@ -30,6 +30,31 @@ import { applyResolved, resolveImpulse } from '../shot.js';
  * evaluator is therefore not scoring an approximation of what would happen — it
  * is scoring what WILL happen, and a shot the search believes drops a cap is a
  * shot that drops it.
+ *
+ * ── and the BALL readout was measured the same way ──────────────────────────
+ * The cap positions were the whole of the readout when the above was written.
+ * Football needs the ball, a goal verdict and a crossing point, and every one of
+ * those is a new opportunity to disagree with the live turn — so the same test
+ * was run against `FootballRules`, from the football fixture's opening position
+ * and from a position six turns in with the ball on the goal line:
+ *
+ *     shots compared      steps   ball x/y/z   goal latch   crossing point
+ *     3 in play             ==        ==           ==            ==
+ *     3 out over a line     ==        ==           ==            ==
+ *     4 into a net          ==        ==           ==            ==
+ *
+ * Ten for ten, exact. Two of those are worth naming because they are the cases
+ * a coordinate test would get wrong: a full-power clearance that crossed at
+ * 284 steps and rolled on to rest 11 units past where it crossed, and an own
+ * goal at 410 steps whose ball settled at z −33.101273 in both runs.
+ *
+ * The goal figure is a latch and not a position, so it agrees with the live
+ * `resolveTurn` even when the ball comes back out — see `_observeBall`.
+ *
+ * One number from that sweep is worth carrying into the evaluator's design: of
+ * 1152 shots fanned from the KICKOFF position, exactly zero scored. A goal is
+ * not something a football search finds by looking one flick ahead, which is why
+ * `footballEvaluate` cannot be built on `goal` alone.
  *
  * That property is worth more than any amount of aiming precision, and it is
  * bought entirely by not writing a second physics path. Every function this
@@ -160,6 +185,22 @@ class RolloutArena {
   capCom(index) {
     return this._body(this.live.capBodies[index]).worldCom();
   }
+
+  /**
+   * The ball, in the copy. `Arena.ballCom` with the world swapped.
+   *
+   * It exists so the LAYOUT's own predicates can be asked of a rollout:
+   * `FootballPitch.ballIsOut(arena)` reads nothing but `arena.ballCom()`, so
+   * handing it this object answers "is the ball out" about the fork instead of
+   * about the board the player is looking at. That is the same trick
+   * `TurnSettle` is driven by, and it is why there is no second copy of the out
+   * rule anywhere in the search.
+   */
+  ballCom() {
+    if (!this.live.hasBall) return null;
+    const b = this._body(this.live.ballBody);
+    return b ? b.worldCom() : null;
+  }
 }
 
 /**
@@ -220,7 +261,12 @@ export class Rollout {
 
     const body = this.world.getRigidBody(arena.capBodies[shot.capIndex]);
     if (!body) {
-      this.result = { steps: 0, reason: null, out: [], pos: [], orbTouched: [], path: null };
+      this.result = {
+        steps: 0, reason: null, out: [], pos: [], orbTouched: [], path: null,
+        // Same shape as the real one: a reader that has to check whether the
+        // ball fields exist is a reader that will forget to.
+        ball: null, goalConceded: -1, ballOut: null,
+      };
       this.done = true;
       this.free();
       return;
@@ -258,12 +304,95 @@ export class Rollout {
     this.every = Math.max(1, Math.round(samplePath));
     if (this.path) this._sample();
 
+    /**
+     * ── the ball readout, and it is gated on `hasBall` rather than on a mode ──
+     * `RolloutArena` already SIMULATES the ball — it is in `bodies`, it takes
+     * the ball's own damping, and `atRest` waits for it. What was missing was
+     * only the reading. So this adds no physics and changes none: on a layout
+     * with no ball every field below stays null and `_observeBall` is never
+     * called, which is why knockout's digest cannot move.
+     *
+     * `arena.hasBall` and not `mode.id === 'football'` deliberately. Curling has
+     * no ball today and a fourth mode that has one gets this for nothing; a mode
+     * check here would be a second place to remember.
+     */
+    this.hasBall = !!arena.hasBall;
+    /** Both goals' sensor handles, by the player who DEFENDS each. */
+    this.goalSensors = this.hasBall ? [0, 1].map((p) => arena.layout.goalSensorOf?.(p) ?? -1) : null;
+    /**
+     * Latched in flight, exactly as `FootballRules._latched` is, and for the
+     * reason given there: the Law is "has crossed", not "is across at the end".
+     * A ball that enters the net, has the bounce killed, and trickles back out
+     * has scored — measured live at two of eight shots — and a search that only
+     * looked at the settled position would score those as corners and refuse the
+     * shot that produced them.
+     *
+     * The player who CONCEDED, matching `pendingGoal().conceded`. -1 is no goal.
+     */
+    this.goalLatched = -1;
+    /** Where the ball crossed the lines, from `FootballPitch.crossing`. */
+    this.ballExit = null;
+    /** The last sample with the ball inside: the other end of that segment. */
+    this.ballInsideLast = null;
+
     this.ceiling = Math.min(maxSteps, secondsToSteps(arena.turnConfig.hardTimeoutSec));
   }
 
   _sample() {
     const c = this.ra.capCom(this.shot.capIndex);
     this.path.push(c.x, c.y, c.z);
+  }
+
+  /**
+   * `FootballRules.observe()`, asked of the copy.
+   *
+   * ── the live rules object MUST NOT be called from here ────────────────────
+   * `observe()` is a method on a STATEFUL object: it writes `_latched`,
+   * `_exit` and `_inside`, and those three belong to the turn the player is
+   * actually taking. A search that called it would leave a goal latched from a
+   * hypothetical shot and the real turn would score it.
+   *
+   * So the state is duplicated and the JUDGEMENT is not. Every question below is
+   * put to the same code the live turn puts it to — `ballInSensor` against the
+   * same goal sensors, `layout.ballIsOut` and `layout.crossing` against the same
+   * metrics — with `this.ra` standing in for the arena. If the two ever
+   * disagreed about what a goal is, the AI would search for goals that the game
+   * does not award, which is the one failure that makes the rest of this
+   * worthless.
+   *
+   * The ORDER matches `Match._watchForGoal` -> `FootballRules.observe` exactly:
+   * exit tracking first, then the goal latch, both after the step and before
+   * `TurnSettle.postStep`. See the call site in `advance`.
+   */
+  _observeBall() {
+    this._trackExit();
+    if (this.goalLatched >= 0) return;
+    for (let player = 0; player < 2; player++) {
+      const sensor = this.goalSensors[player];
+      if (sensor >= 0 && ballInSensor(this.world, this.arena.ballCollider, sensor)) {
+        this.goalLatched = player;
+        return;
+      }
+    }
+  }
+
+  /** `FootballRules._trackExit`, over the copy. Records a crossing; judges nothing. */
+  _trackExit() {
+    const layout = this.arena.layout;
+    if (!layout.ballIsOut) return;
+    const b = this.ra.ballCom();
+    if (!b) return;
+    const here = { x: b.x, z: b.z };
+
+    if (!layout.ballIsOut(this.ra)) {
+      this.ballInsideLast = here;
+      // Back between the lines: whatever it did on the way out did not put it
+      // out, and the next crossing is the one that counts.
+      this.ballExit = null;
+      return;
+    }
+    if (this.ballExit) return;
+    this.ballExit = layout.crossing?.(this.ballInsideLast ?? here, here) ?? null;
   }
 
   /**
@@ -304,6 +433,16 @@ export class Rollout {
         }
       }
 
+      /**
+       * Watched DURING the steps, for the same reason the orbs above are: a
+       * goal and a crossing are both facts about a MOMENT, and by the time the
+       * turn is judged that moment has gone and the ball is elsewhere. `Match`
+       * puts `rules.observe()` in precisely this slot — after the step, after
+       * the orb pickup, before `postStep` — so this is the same sequence and not
+       * merely the same tests.
+       */
+      if (this.hasBall) this._observeBall();
+
       if (this.settle.postStep(this.ra)) return this._finish();
     }
 
@@ -328,6 +467,26 @@ export class Rollout {
       pos,
       orbTouched: this.orbTouched,
       path: this.path,
+      /** Where the ball settled, or null on a layout without one. */
+      ball: this.hasBall ? { ...this.ra.ballCom() } : null,
+      /**
+       * Which player's net it went into, latched in flight. -1 is no goal.
+       *
+       * The same number `FootballRules.resolveTurn` reads off its own latch, so
+       * the scorer is `1 - goalConceded` and an own goal is the case where that
+       * is not the shooter. The evaluator prices those two separately — see
+       * `footballEvaluate` — which is why this is a player index rather than a
+       * boolean.
+       */
+      goalConceded: this.hasBall ? this.goalLatched : -1,
+      /**
+       * Where it crossed the lines, or null for a ball still in play.
+       *
+       * The CROSSING, not the resting place: `FootballPitch.crossing` explains
+       * why they are routinely metres apart, and the restart is taken from this
+       * one. `{x, z, overGoalLine}`, ready for `findRespawn`.
+       */
+      ballOut: this.hasBall ? this.ballExit : null,
       /**
        * The settled world, for a reply search to plan from.
        *

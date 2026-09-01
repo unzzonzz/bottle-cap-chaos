@@ -78,6 +78,40 @@ export function capsInSensor(world, capColliders, sensorHandle) {
   return capColliders.map((handles) => handles.some((h) => inside.has(h)));
 }
 
+/**
+ * Is the ball inside a sensor volume, on ANY world.
+ *
+ * ── `capsInSensor` for the one body that is not a cap ────────────────────────
+ * Same discipline, same reason. A goal in this game is a sensor query and never
+ * a coordinate comparison — `FootballRules` is emphatic about why: the netting
+ * combines restitution by Min at zero, so a ball that goes in STOPS in, and the
+ * line judgement belongs to the narrow phase that knows where the net box
+ * actually is. An AI that judged goals by comparing `z` against `halfZ` would be
+ * a second judge, and it would disagree with the live one precisely on the
+ * shots that graze the line — which are the shots worth searching for.
+ *
+ * Takes a world and a collider handle rather than an arena, so the look-ahead
+ * can ask it of a `restoreSnapshot` copy. Handles survive the snapshot — that is
+ * the whole reason `PhysicsWorld` traffics in handles rather than bodies — so
+ * the live arena's `ballCollider` and the layout's sensor handles address the
+ * same shapes in the fork.
+ *
+ * @param {import('@dimforge/rapier3d-compat').World} world
+ * @param {number} ballCollider  the ball's collider handle, or -1 for no ball
+ * @param {number} sensorHandle
+ * @returns {boolean}
+ */
+export function ballInSensor(world, ballCollider, sensorHandle) {
+  if (sensorHandle < 0 || ballCollider < 0) return false;
+  const sensor = world.getCollider(sensorHandle);
+  if (!sensor) return false;
+  let hit = false;
+  world.intersectionPairsWith(sensor, (other) => {
+    if (other.handle === ballCollider) hit = true;
+  });
+  return hit;
+}
+
 export class Arena {
   /**
    * @param {import('../physics/PhysicsWorld.js').PhysicsWorld} physics
@@ -510,7 +544,11 @@ export class Arena {
   /** Is the ball inside this sensor volume? */
   ballInside(sensorHandle) {
     if (!this.hasBall) return false;
-    return this.intersecting(sensorHandle).has(this.ballCollider);
+    // Delegated to the free function for the reason `capsInside` is: the AI's
+    // look-ahead asks the same question of a restored copy of this world, and
+    // one definition of "in the goal" is the only way the two can agree about a
+    // ball on the line. See `ballInSensor`.
+    return ballInSensor(this.physics.world, this.ballCollider, sensorHandle);
   }
 
   /**

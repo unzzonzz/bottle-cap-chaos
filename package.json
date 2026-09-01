@@ -12,6 +12,8 @@
     "det:node": "node tools/determinism/harness.mjs run",
     "det:jsc": "vite build --config tools/determinism/vite.jsc.config.js && /System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Helpers/jsc tools/determinism/build/jsc-bundle.js",
     "det:collect": "node tools/determinism/collect.mjs",
+    "det:ai": "node tools/determinism/ai-harness.mjs run",
+    "det:ai:stats": "node tools/determinism/ai-harness.mjs stats",
     "ios": "npm run build && npx cap sync ios && npx cap open ios",
     "ios:sync": "npm run build && npx cap sync ios",
     "android:sync": "npm run build && npx cap sync android",
@@ -19,7 +21,7 @@
     "server:lan": "node tools/lan-address.mjs && node server/index.js",
     "server:test": "node server/test/flow.test.mjs && node server/test/lockstep.test.mjs && node server/test/resilience.test.mjs",
     "server:live": "node server/test/live.mjs",
-    "test": "npm run det:node && npm run server:test"
+    "test": "npm run det:node && npm run server:test && npm run det:ai"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",

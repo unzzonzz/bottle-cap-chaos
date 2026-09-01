@@ -1732,6 +1732,45 @@ export function bootPhysicsDebug({
   aiWeights.add(aiCfg.threat, 'reach', 4, 60, 1).name('위협 사거리 (단위)');
   aiWeights.add(aiCfg.threat, 'pushDistance', 2, 40, 1).name('피격 시 밀리는 거리 (단위)');
 
+  /**
+   * Football's overrides, which are a different set of numbers entirely.
+   *
+   * ── a value with no dial is as bad as a dial with no value ────────────────
+   * `config.ai.perMode.football` exists because a goal and a dropped cap are not
+   * measured in the same units, so the two modes cannot share one weights block
+   * — see `ai/strategy.js: aiTuning`. That reasoning would be worth very little
+   * if the football numbers were then the only ones in the project that could
+   * not be dragged while playing, which is the whole point of this panel.
+   *
+   * The common folder above still tunes knockout, and it still tunes every
+   * football value that is NOT overridden here. Nothing is duplicated: these are
+   * bound to the override objects themselves.
+   */
+  const fb = aiCfg.perMode?.football;
+  if (fb) {
+    const aiFootball = ai.addFolder('축구 전용 평가');
+    aiFootball.add(fb.sampling, 'maxCandidates', 4, 240, 1).name('평가 후보 수 (=예산)');
+    aiFootball.add(fb.sampling, 'maxShooters', 1, 4, 1).name('사용할 뚜껑 수');
+    aiFootball.add(fb.sampling, 'angleSpreadDeg', 0, 30, 0.5).name('부채꼴 폭 (°)');
+    aiFootball.add(fb, 'maxRolloutSteps', 60, 960, 10).name('시뮬 최대 길이 (스텝)');
+    aiFootball.add(fb.weights, 'goal', 0, 6000, 10).name('득점 (+)');
+    aiFootball.add(fb.weights, 'ownGoal', 0, 6000, 10).name('자책골 (−)');
+    aiFootball.add(fb.weights, 'ballAdvance', 0, 60, 0.5).name('공 전진 (+, 단위당)');
+    aiFootball.add(fb.weights, 'ballRetreat', 0, 60, 0.5).name('공 후퇴 (−, 단위당)');
+    aiFootball.add(fb.weights, 'ballThreat', 0, 800, 5).name('내 다음 턴 득점각 (+)');
+    aiFootball.add(fb.weights, 'foeBallThreat', 0, 800, 5).name('상대 득점각 (−)');
+    aiFootball.add(fb.weights, 'goalUncovered', 0, 800, 5).name('골문 비움 (−)');
+    aiFootball.add(fb.weights, 'shooterSupport', 0, 100, 1).name('공 근처 아군 (+)');
+    aiFootball.add(fb.weights, 'capStranded', 0, 200, 1).name('런오프에 방치 (−)');
+    // The distances the pitch terms are measured with — see `config.ai.perMode`.
+    aiFootball.add(fb.pitch, 'reach', 4, 60, 1).name('뚜껑 도달 사거리 (단위)');
+    aiFootball.add(fb.pitch, 'strikeRange', 4, 60, 1).name('슛 사거리 (단위)');
+    aiFootball.add(fb.pitch, 'coverRange', 4, 60, 1).name('수비 반응 거리 (단위)');
+    aiFootball.add(fb.pitch, 'coverWidth', 0.5, 15, 0.1).name('커버 폭 (단위)');
+    aiFootball.add(fb.pitch, 'supportRadius', 2, 40, 1).name('지원 판정 반경 (단위)');
+    aiFootball.add(fb.cards, 'oneMoreMinScore', 0, 1200, 5).name('원모어: 최소 이득 (축구)');
+  }
+
   const aiSkill = ai.addFolder('실력 조절');
   // Both default to 0 and are meant to. See the block header in `config.js` for
   // why aim error is the wrong dial and `pickRandomness` is the right one.
@@ -1816,17 +1855,31 @@ export function bootPhysicsDebug({
 
       const e = c.plan?.entry;
       /**
-       * The chosen move AND the four terms that decide between attacking and
-       * getting out of the way.
+       * The chosen move AND the terms that decided it.
        *
-       * Without them a strange-looking move is unreadable: "attack" and "flee"
-       * are labels, and what actually chose between them is whether this cap was
-       * lined up (`self`) and whether the shot lines one of theirs up (`foe`).
+       * ── read off the terms rather than named, and that was a crash ─────────
+       * This used to print `selfThreat`, `foeThreat` and `foeEdge` by name,
+       * which is the right set for knockout and does not exist in football —
+       * whose terms are `goal`, `ballAdvance`, `goalUncovered` and so on. Opening
+       * this readout during a football turn was a `TypeError` on `undefined`,
+       * and the panel is where you go when the AI has just done something
+       * strange, so it failed exactly when it was needed.
+       *
+       * Whatever the evaluator returned is printed instead, non-zero entries
+       * only. That is the contract every strategy owes — `terms` is required and
+       * is the only debugging surface a search has — so a third mode's readout
+       * works before anybody remembers this file exists.
        */
+      const shown = !e
+        ? ''
+        : Object.entries(e.terms)
+            .filter(([, v]) => Math.abs(v) > 0.005)
+            .map(([k, v]) => `${k} ${v.toFixed(2)}`)
+            .join(' / ');
       aiStats.chose = !e
         ? '—'
         : `${e.candidate.intent} · 뚜껑${e.candidate.capIndex} · 세기 ${e.candidate.power.toFixed(2)} · ${e.score.toFixed(0)}점` +
-          `  [내위험 ${e.terms.selfThreat.toFixed(2)} / 상대위험 ${e.terms.foeThreat.toFixed(2)} / 상대끝 ${e.terms.foeEdge.toFixed(2)}]`;
+          (shown ? `  [${shown}]` : '  [모든 항목 0]');
 
       aiStats.cards = !c.cardLog.length
         ? '손패 없음'

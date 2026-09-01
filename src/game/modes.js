@@ -159,6 +159,23 @@ export const MODES = {
     name: '알까기 축구',
     createLayout: (config) => new FootballPitch(config),
     createRules: (arena) => new FootballRules(arena),
+
+    /**
+     * This mode can be played against the computer.
+     *
+     * The line knockout's note said would be all it took: "football gets an AI by
+     * writing an evaluator and adding this line — see `ai/candidates.js` and
+     * `ai/evaluate.js`, which are split apart for that purpose." That turned out
+     * to be true of this file and not quite of the search — the split those two
+     * were built for had to be finished before it could be handed a second game
+     * — but nothing else here changed. See `ai/footballStrategy.js`.
+     *
+     * The menu reads this to decide whether to offer the row and `main.js` reads
+     * it before building a controller. `strategyFor` is the other half: this says
+     * the mode CLAIMS an opponent, that says the code for one exists.
+     */
+    ai: true,
+
     /**
      * Read off `view.footballPitchAngle` rather than pinned to a literal, so the
      * angle is inspectable — but there is no camera-angle control on the panel

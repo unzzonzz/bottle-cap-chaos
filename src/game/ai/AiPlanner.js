@@ -1,12 +1,28 @@
 import { Rng, nextSeed } from '../../physics/rng.js';
 import { Rollout } from './rollout.js';
-import { dangerMap, evaluateSurvival, exposureOf } from './evaluate.js';
-import { survivalCandidates } from './candidates.js';
+import { aiTuning } from './strategy.js';
 import { rotateY, shotSpread } from '../shot.js';
 import { shapeAim } from '../AimInput.js';
 
 /**
  * The search: candidates in, one shot out, spread across frames.
+ *
+ * ── it does not know which game it is searching ────────────────────────────
+ * Everything below is candidate management: build a queue, roll each entry out a
+ * chunk at a time, fold the probe and reply stages back in, rank. None of that
+ * is survival, and none of it is football. What used to make this file
+ * survival-only was four imported names — `survivalCandidates`,
+ * `evaluateSurvival`, `dangerMap`, `exposureOf` — called by name, so the search
+ * could only ever score caps falling off a board.
+ *
+ * They are behind an `AiStrategy` now, handed in and carried around. The context
+ * it builds is OPAQUE here: exactly two fields of it are read below, `player`
+ * and `precise`, and neither is a fact about the mode — one is whose turn it is
+ * and the other is whether 궤적 is armed, which is this file's own business and
+ * is written INTO the context on the way in. So football swaps in a different
+ * evaluator, a different generator and a different notion of danger without a
+ * line of this file knowing there is a ball. It is the same separation
+ * `Controller` keeps from `Match`, one level down. See `strategy.js`.
  *
  * ── the budget is a CANDIDATE COUNT, and that is a determinism fix ──────────
  * The obvious design is a wall-clock deadline: evaluate until 700 ms is gone,
@@ -113,9 +129,19 @@ import { shapeAim } from '../AimInput.js';
 export class AiPlanner {
   /**
    * @param {typeof import('../config.js').CONFIG} config
+   * @param {import('./strategy.js').AiStrategy} [strategy]
+   *   What game this is searching. Optional here and normally supplied per turn
+   *   by `begin`, because the planner outlives a match and the MATCH is the
+   *   authority on which mode is being played — a strategy fixed at construction
+   *   would be the previous mode's after a rebuild.
+   *
+   *   Never defaulted to survival. A football turn searched with the knockout
+   *   evaluator would score goals as caps falling off a board and look like a
+   *   very bad AI rather than like a wiring mistake.
    */
-  constructor(config) {
+  constructor(config, strategy = null) {
     this.config = config;
+    this.strategy = strategy;
 
     /** @type {import('./candidates.js').Candidate[]} */
     this._queue = [];
@@ -145,10 +171,49 @@ export class AiPlanner {
    * @param {object} opts
    * @param {import('../Match.js').Match} opts.match
    * @param {number} opts.player
+   * @param {import('./strategy.js').AiStrategy} [opts.strategy]
+   *   Which game to search. Omitted by `Controller._replan`, which is re-opening
+   *   the SAME turn after a card and must not change what it is searching.
    */
-  begin({ match, player, shotSeed = 0 }) {
+  begin({ match, player, shotSeed = 0, strategy = null }) {
     this._shotSeed = shotSeed >>> 0;
-    const cfg = this.config.ai;
+    if (strategy) this.strategy = strategy;
+    /**
+     * No strategy means this mode has no computer opponent implemented.
+     *
+     * It should be unreachable — `main.js` refuses to build an `AiController`
+     * for a mode whose `MODES.<mode>.ai` is not set, and a mode that sets it
+     * without registering a strategy is a wiring mistake. Answered here rather
+     * than left to crash on the first `this.strategy.buildContext`, because the
+     * controller already knows what to do with a search that finds nothing: it
+     * warns and passes the turn. A hang would be the worse failure.
+     */
+    if (!this.strategy) {
+      console.warn('[ai] no strategy registered for this mode; the turn will pass');
+      this._queue = [];
+      this.scored = [];
+      this._at = 0;
+      // Zeroed rather than left stale: the panel reads these, and a counter from
+      // the previous turn beside a search that never ran reads as a search that
+      // ran and found nothing.
+      this.generated = 0;
+      this.evaluated = 0;
+      this.dropped = 0;
+      this.elapsedMs = 0;
+      this.cutShort = false;
+      this.running = false;
+      return false;
+    }
+    /**
+     * `config.ai`, with this mode's overrides folded in — see `aiTuning`.
+     *
+     * Held for the turn so every stage reads the same numbers, and IDENTICAL to
+     * `this.config.ai` by object identity for a mode that overrides nothing. So
+     * knockout's sliders stay as live as they were and its search reads exactly
+     * what it read before this existed.
+     */
+    this._tuning = aiTuning(this.config, this.strategy.id);
+    const cfg = this._tuning;
     const arena = match.arena;
     const rules = match.rules;
 
@@ -163,32 +228,6 @@ export class AiPlanner {
     this._rng = new Rng(
       (match.seed ^ Math.imul(rules.turn + 1, 0x9e3779b9) ^ 0x51ed2701) >>> 0,
     );
-
-    const alive = rules.alive;
-    const shooters = [];
-    const opponents = [];
-    for (let i = 0; i < arena.capCount; i++) {
-      if (!alive[i]) continue;
-      if (arena.capOwner[i] === player) shooters.push(i);
-      else opponents.push(i);
-    }
-
-    const before = [];
-    for (let i = 0; i < arena.capCount; i++) {
-      const c = arena.capCom(i);
-      before.push({ x: c.x, y: c.y, z: c.z });
-    }
-
-    /**
-     * Where the brink is.
-     *
-     * `layout.extents` is the outer edge the camera has to frame — board half
-     * plus shelf plus slope — which is the line a cap genuinely falls off, not
-     * the old painted out line. Read off the layout so a resized board moves it
-     * without this file knowing the board is square.
-     */
-    const extents = arena.layout.extents;
-    const safeRadius = Math.max(1e-3, Math.min(extents.x, extents.z));
 
     /**
      * The card state, read live through `shapeAim`.
@@ -226,25 +265,26 @@ export class AiPlanner {
       ? { impulse: this._cards.impulseMulFor(player), spread: this._cards.spreadMulFor(player) }
       : { impulse: 1, spread: 1 };
 
-    this._ctx = {
+    /**
+     * Everything the evaluator will need, gathered by the strategy.
+     *
+     * Opaque past this line. Two fields are read below — `player` and
+     * `capOwner` — and both are facts about the match; the rest is a private
+     * conversation between one mode's context builder and that mode's
+     * evaluator. See `strategy.js`.
+     */
+    this._ctx = this.strategy.buildContext({
+      match,
       player,
-      capOwner: arena.capOwner.slice(),
-      alive: alive.slice(),
-      before,
-      safeRadius,
-      capRadius: arena.desc.radius,
-      weights: cfg.weights,
+      arena,
+      rules,
+      config: this.config,
+      // The merged block, so the turn has exactly one of it. A strategy that
+      // re-merged for itself would be a second object that has to stay equal to
+      // this one, and nothing would notice the day it did not.
+      tuning: cfg,
       precise: this._precise,
-      /**
-       * The geometry the threat model measures with. Absolute world units, so
-       * they are read against `arena.desc.radius` and the board's own size
-       * rather than being fractions of something.
-       */
-      threat: {
-        reach: cfg.threat.reach,
-        pushDistance: cfg.threat.pushDistance,
-      },
-    };
+    });
 
     this._snapshot = match.turnSnapshot;
     this._arena = arena;
@@ -264,24 +304,19 @@ export class AiPlanner {
     this._orbs = match.orbs.list.map((o) => ({ id: o.id, x: o.x, z: o.z }));
 
     /**
-     * Which of my caps are already in trouble, so the generator can aim them
-     * somewhere safer rather than hoping a centre-ward shot helps.
-     *
-     * Computed once per turn rather than per candidate: it describes the board
-     * the AI is looking at, not any particular move.
+     * Whatever the generator needs computed once per turn rather than per
+     * candidate — it describes the board the AI is looking at, not any
+     * particular move. Survival's is a danger map; a mode with nothing to
+     * precompute returns null.
      */
-    this.danger = dangerMap(player, this._ctx);
+    this.preTurn = this.strategy.preTurn(this._ctx);
 
-    const all = survivalCandidates({
-      player,
-      shooters,
-      comOf: (i) => before[i],
-      opponents,
+    const all = this.strategy.candidates({
+      ctx: this._ctx,
       orbs: this._orbs,
-      danger: this.danger,
-      capRadius: arena.desc.radius,
-      safeRadius,
+      preTurn: this.preTurn,
       sampling: cfg.sampling,
+      config: this.config,
     });
     // Truncated HERE rather than by running out of time, so what gets considered
     // is a property of the config and not of the machine. See the header.
@@ -328,7 +363,7 @@ export class AiPlanner {
    */
   tick() {
     if (!this.running) return true;
-    const cfg = this.config.ai;
+    const cfg = this._tuning;
     const frameBudget = Math.max(0.5, cfg.frameBudgetMs);
     const totalBudget = Math.max(1, cfg.totalBudgetMs);
 
@@ -427,8 +462,8 @@ export class AiPlanner {
            * worth flinching from, it is nearly binary, and ten reply candidates
            * estimate it far better than they estimate a positional score.
            */
-          const { terms } = evaluateSurvival(result, job.entry.replyCtx);
-          const kills = terms.dropOpponent;
+          const { terms } = this.strategy.evaluate(result, job.entry.replyCtx);
+          const kills = this.strategy.replyPenalty(terms);
           if (job.entry.replyBest === null || kills > job.entry.replyBest) {
             job.entry.replyBest = kills;
           }
@@ -441,15 +476,15 @@ export class AiPlanner {
            *
            * Centre first, then the two edges — `_applyProbes` reads the order.
            */
-          const { terms } = evaluateSurvival(result, this._ctx);
-          job.entry.boostKills.push(terms.dropOpponent - terms.loseOwn);
+          const { terms } = this.strategy.evaluate(result, this._ctx);
+          job.entry.boostKills.push(this.strategy.netGain(terms));
         } else if (job.probe) {
           // One edge of this candidate's cone. Folded in by `_applyProbes`.
-          const { score, terms } = evaluateSurvival(result, this._ctx);
+          const { score, terms } = this.strategy.evaluate(result, this._ctx);
           job.entry.probeScores.push(score);
-          job.entry.probeKills.push(terms.dropOpponent - terms.loseOwn);
+          job.entry.probeKills.push(this.strategy.netGain(terms));
         } else {
-          const { score, terms, meta } = evaluateSurvival(result, this._ctx);
+          const { score, terms, meta } = this.strategy.evaluate(result, this._ctx);
           this.scored.push({ candidate: job.candidate, score, terms, meta, result, order: job.order });
         }
       }
@@ -567,7 +602,7 @@ export class AiPlanner {
    * which fits under the card animation and the gap that follow it.
    */
   _finishStage1() {
-    const cfg = this.config.ai;
+    const cfg = this._tuning;
     this.scored.sort((a, b) => b.score - a.score || a.order - b.order);
 
     /**
@@ -604,9 +639,9 @@ export class AiPlanner {
 
     for (const entry of pool) {
       entry.blindScore = entry.score;
-      entry.blindKills = entry.terms.dropOpponent - entry.terms.loseOwn;
+      entry.blindKills = this.strategy.netGain(entry.terms);
       entry.probeScores = [entry.score];
-      entry.probeKills = [entry.terms.dropOpponent - entry.terms.loseOwn];
+      entry.probeKills = [this.strategy.netGain(entry.terms)];
       if (probes < 1) continue;
 
       const half = shotSpread(
@@ -653,7 +688,9 @@ export class AiPlanner {
      */
     const boostPool = this._canBoost
       ? this.scored
-          .filter((e) => /^(attack|drive):/.test(e.candidate.intent))
+          // Which intents are ATTACKS is the mode's answer, not this file's:
+          // survival's are `attack:`/`drive:`, football's aim at a ball.
+          .filter((e) => this.strategy.isAttack(e.candidate))
           .slice(0, Math.max(0, Math.round(cfg.boostPool)))
       : [];
 
@@ -694,7 +731,7 @@ export class AiPlanner {
    * opponent about a shot that will not land is wasted solver.
    */
   _finishStage2() {
-    const cfg = this.config.ai;
+    const cfg = this._tuning;
     this._applyProbes();
     this.scored.sort(
       (a, b) => (b.searched ? 1 : 0) - (a.searched ? 1 : 0) || b.score - a.score || a.order - b.order,
@@ -708,30 +745,29 @@ export class AiPlanner {
       const snap = entry.result.snapshot;
       if (!snap || replies < 1) continue;
 
-      const foe = 1 - this._ctx.player;
-      const alive = this._ctx.alive.map((a, i) => a && !entry.result.out[i]);
-      const before = entry.result.pos;
-      const replyCtx = { ...this._ctx, player: foe, alive, before };
+      /**
+       * The board this shot leaves, seen from the other seat.
+       *
+       * Built by the strategy because what "the board changed" MEANS is the
+       * mode's business: survival has to strike the caps this shot pushed off
+       * out of `alive`, and football has to carry the ball to where it stopped.
+       * Getting the second one wrong is silent — the opponent's answer would be
+       * planned against a ball that has not moved yet — which is why it is one
+       * named method rather than a spread and two overrides at the call site.
+       */
+      const replyCtx = this.strategy.replyContext(this._ctx, entry.result);
+      if (!this.strategy.hasReply(replyCtx)) continue;
 
-      const shooters = [];
-      const targets = [];
-      for (let i = 0; i < alive.length; i++) {
-        if (!alive[i]) continue;
-        (this._ctx.capOwner[i] === foe ? shooters : targets).push(i);
-      }
-      if (!shooters.length || !targets.length) continue;
-
-      const list = survivalCandidates({
-        player: foe,
-        shooters,
-        comOf: (i) => before[i],
-        opponents: targets,
-        orbs: this._orbs.filter((o) => !entry.result.orbTouched.some((t) => t.id === o.id)),
-        danger: dangerMap(foe, replyCtx),
-        capRadius: this._ctx.capRadius,
-        safeRadius: this._ctx.safeRadius,
-        sampling: cfg.sampling,
-      }).slice(0, replies);
+      const list = this.strategy
+        .candidates({
+          ctx: replyCtx,
+          // An orb this shot already collected is not there to be run at again.
+          orbs: this._orbs.filter((o) => !entry.result.orbTouched.some((t) => t.id === o.id)),
+          preTurn: this.strategy.preTurn(replyCtx),
+          sampling: cfg.sampling,
+          config: this.config,
+        })
+        .slice(0, replies);
 
       entry.replyCtx = replyCtx;
       entry.replyBest = null;
@@ -801,7 +837,7 @@ export class AiPlanner {
    * better discriminator for the same two rollouts.
    */
   _applySamples() {
-    const w = Math.max(0, this.config.ai.replyWeight);
+    const w = Math.max(0, this._tuning.replyWeight);
     for (const entry of this.scored) {
       /**
        * A cap the opponent can kill next turn, priced at what losing one costs.
@@ -818,7 +854,7 @@ export class AiPlanner {
       if (entry.replyBest !== null && entry.replyBest !== undefined) {
         entry.intentScore = entry.score;
         entry.replyKills = entry.replyBest;
-        entry.score -= w * entry.replyBest * this.config.ai.weights.loseOwn;
+        entry.score -= w * entry.replyBest * this.strategy.replyUnit(this._tuning.weights);
         entry.searched = true;
       }
     }
@@ -968,7 +1004,7 @@ export class AiPlanner {
    */
   choose(shotSeed) {
     if (!this.scored.length) return null;
-    const cfg = this.config.ai;
+    const cfg = this._tuning;
 
     let entry = this.scored[0];
     const randomness = Math.max(0, Math.min(1, cfg.pickRandomness));
@@ -1083,87 +1119,26 @@ export class AiPlanner {
    */
   situation(extra) {
     if (!this.scored.length) return null;
-    const best = this.scored[0];
-    const second = this.scored[1] ?? best;
-    const ctx = this._ctx;
-
-    let myCaps = 0;
-    let foeCaps = 0;
-    for (let i = 0; i < ctx.capOwner.length; i++) {
-      if (!ctx.alive[i]) continue;
-      if (ctx.capOwner[i] === ctx.player) myCaps++;
-      else foeCaps++;
-    }
-
-    return {
-      player: ctx.player,
-      myCaps,
-      foeCaps,
-      bestScore: best.score,
-      secondScore: second.score,
-      bestDropsCap: best.terms.dropOpponent > 0,
-      bestRisksOwn: best.terms.loseOwn > 0,
-      myEdgeRisk: exposureOf(ctx.player, ctx),
-      foeEdgeRisk: exposureOf(1 - ctx.player, ctx),
-      /**
-       * ── what 강타 would actually buy, simulated ───────────────────────────
-       * `boostOpensKill`: some shortlisted attack kills at the boosted cone's
-       * centre AND both its edges — 강타 alone is enough.
-       *
-       * `boostOpensPrecisionKill`: it kills down the boosted cone's middle but
-       * not at its edges — 강타 supplies the reach, and only 궤적 makes the
-       * reach landable. That pair IS the long-range finisher.
-       *
-       * Both are false when 강타 is already in effect, since the shortlist is
-       * then already boosted and probing it again would recommend a second copy
-       * of a card that does not stack.
-       */
-      boostOpensKill: this.scored.some((e) => (e.boostRobust ?? 0) > 0),
-      boostOpensPrecisionKill: this.scored.some(
-        (e) => (e.boostBlind ?? 0) > 0 && (e.boostRobust ?? 1) <= 0,
-      ),
-      /**
-       * ── the two facts the card decisions actually turn on ─────────────────
-       * A kill either survives its own cone or it does not, and that difference
-       * is exactly what 궤적 sells. `robustKills` is the net at the cone's edges;
-       * `blindKills` is the net down the middle. A candidate that wins blind but
-       * not robustly is a shot the AI can land only if it knows its draw — which
-       * is the card, precisely.
-       *
-       * Both are NETS, not kill counts — see `_applyProbes`. A cap traded for a
-       * cap reads 0 and buys nothing, which is why the AI no longer spends two
-       * cards to reach a move it has already scored as losing.
-       *
-       * ── only a PROBED candidate may claim to be robust ──────────────────────
-       * `spreadPool` is 12 and `scored` holds up to `maxCandidates` — 64 — so
-       * ranks 13 and below never get `robustKills` at all. This fell back to the
-       * blind net for those, which is the stage-1 result fired with the cone
-       * switched off: it says the shot lands down the middle and says nothing
-       * whatever about the edges. So an unprobed candidate could assert "a kill
-       * that needs no card", and since BOTH card rules hold on this flag, one
-       * such candidate at rank 13 vetoed the entire 강타+궤적 combo while the
-       * shot actually fired was a probed, fragile one.
-       *
-       * Unprobed now reads 0 — unknown, not robust — which is the direction that
-       * fails safe: the AI may spend a card it did not strictly need, rather than
-       * refuse the one that wins. Under 궤적 the fallback is the blind net again,
-       * and correctly so: the card removes the cone, so the centre sample IS the
-       * whole story and there are no edges left to survive.
-       */
-      hasRobustKill: this.scored.some(
-        (e) =>
-          (e.robustKills ?? (this._precise ? e.terms.dropOpponent - e.terms.loseOwn : 0)) > 0,
-      ),
-      hasPrecisionKill: this.scored.some(
-        (e) =>
-          (e.blindKills ?? e.terms.dropOpponent - e.terms.loseOwn) > 0 &&
-          (e.robustKills ?? 1) <= 0,
-      ),
-      /** Already planning with 궤적 in hand, so it cannot be the answer again. */
+    /**
+     * Handed straight to the strategy, which fills in the mode's own reasons.
+     *
+     * `decideCard` is unchanged and stays unchanged: the five cards are the same
+     * five in both modes and the judgements about WHEN to spend them — a kill
+     * that needs precision, an opponent worth disrupting, a hand worth sealing —
+     * are the same shape. What differs is what "a kill" is, and that is a field
+     * in here rather than a branch in there.
+     *
+     * The probe results the policy reads (`boostRobust`, `robustKills`,
+     * `blindKills`) are attached to the entries by `_applyProbes` above, so the
+     * strategy reads them off `scored` rather than being handed a second copy.
+     */
+    return this.strategy.situation({
+      ctx: this._ctx,
+      scored: this.scored,
       precise: !!this._precise,
-      tuning: this.config.ai.cards,
-      ...extra,
-    };
+      tuning: this._tuning.cards,
+      extra,
+    });
   }
 
   cancel() {

@@ -74,8 +74,13 @@ function nearestExit(p, safeRadius) {
 /**
  * Aim headings as offsets around a target bearing, paired with a refinement
  * rank: 0 for straight at it, rising as the fan widens.
+ *
+ * Exported for football's generator. The discretisation is not survival's — it
+ * is the answer to "how do you turn a bearing into a handful of shots", which is
+ * the same question in both modes. Two copies would drift, and the one that
+ * drifted would be the one nobody re-measured.
  */
-function fanOffsets(count, spreadRad) {
+export function fanOffsets(count, spreadRad) {
   if (count <= 1) return [{ offset: 0, rank: 0 }];
   const out = [{ offset: 0, rank: 0 }];
   const half = Math.floor((count - 1) / 2);
@@ -93,8 +98,15 @@ function fanOffsets(count, spreadRad) {
  * Measured travel on the default board: 0.25 -> 4.7 units, 0.50 -> 18.6,
  * 0.75 -> 26.7, 1.00 -> 62.5. See the note inside for why the old quadratic
  * bias made a third of that range unreachable.
+ *
+ * Exported, and football imports it rather than writing its own ladder. The two
+ * rules encoded here — linear in PULL, and ranked from the middle outward with
+ * ties to the stronger draw — are both bug fixes with measurements attached, and
+ * both of them are about the SHOT rather than about the board. What differs
+ * between the modes is how far the thing you hit then travels, and that belongs
+ * in the count the caller asks for. See `config.ai.perMode`.
  */
-function powerSteps(count) {
+export function powerSteps(count) {
   const out = [];
   for (let i = 0; i < count; i++) {
     const t = count === 1 ? 0.5 : i / (count - 1);
