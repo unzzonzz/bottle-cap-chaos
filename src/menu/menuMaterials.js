@@ -1,5 +1,6 @@
 import { AdditiveBlending, BackSide, Color, DoubleSide, FrontSide, MeshPhysicalMaterial, NormalBlending, ShaderMaterial, Vector2, Vector3 } from 'three';
 import { PALETTE } from '../core/palette.js';
+import { QUALITY } from '../core/quality.js';
 import { MM } from '../cap/capGeometry.js';
 
 /**
@@ -185,6 +186,50 @@ function menuLightUniforms() {
   };
 }
 
+/**
+ * 유리가 유리로 보이게 하는 값들. 티어가 갈리는 유일한 자리.
+ *
+ * ── 호출부는 티어를 모른다 ─────────────────────────────────────────────────
+ * `Bottle` 은 `createGlassMaterial(retro, { map, face })` 이라고만 말한다 — 그게
+ * 의도 플래그다. "유리를 하나 줘" 이고 "투과율 0.92 짜리 물리 재질을 줘" 가
+ * 아니다. 어느 구현이 나오는지는 이 함수 안에서만 갈리고, 그래서 티어 변경이
+ * 호출부를 한 줄도 건드리지 않는다.
+ *
+ * ── 최저·낮음: `transmission: 0` 으로 끝내면 안 된다 ────────────────────────
+ * 투과를 끄기만 하면 병은 불투명한 청록 덩어리가 된다. 그건 성능 설정이 아니라
+ * 정체성 변경이다 — 이 화면은 병과 물과 거품이 전부이고, 병이 유리가 아니면
+ * 화면이 무엇에 관한 것인지 말하지 않는다.
+ *
+ * 그래서 **가짜 유리**를 짓는다. 세 가지가 그 일을 나눠 한다:
+ *
+ *   `opacity` 0.55   뒤가 비친다. 유리라고 말하는 것의 절반은 이것이다.
+ *   정점 틴트 램프    `vertexColors` 로 그대로 남는다. 액면 링과 두께감.
+ *   하이라이트 스트립  `emissiveMap` 의 세로 띠. 투과 유리에서는 프레넬 테와
+ *                    클리어코트가 곡면을 읽히게 하는데 둘 다 없어지므로, 이
+ *                    띠가 그 몫을 혼자 진다. 그래서 강도를 0.12 에서 올린다 —
+ *                    0.4 는 이 파일이 옛 셰이더 시절에 쓰던 0.55 를 반투명
+ *                    셸에 맞춰 다시 잡은 값이고, 위 문단이 그 0.55 가 왜
+ *                    그만큼이었는지 적어 두었다.
+ *
+ * `thickness` 와 `attenuationDistance` 는 굴절 경로 길이에 대한 진술이라 투과가
+ * 없으면 아무 일도 하지 않는다. 남겨 둬도 무해하지만, 남기면 다음 사람이 저
+ * 값들이 뭔가 하고 있다고 읽는다.
+ */
+export function applyGlassQuality(material, retro) {
+  const real = QUALITY.glass;
+  material.transmission = real ? 0.92 : 0;
+  material.opacity = real ? 1 : 0.3;
+  material.thickness = real ? 3 * MM : 0;
+  material.emissiveIntensity = real ? 0.12 : 0.4;
+  material.clearcoat = 0.6 * QUALITY.clearcoat;
+  // 투과 재질은 three 가 알아서 `transparent` 로 다루지만, 가짜 유리는 알파
+  // 블렌딩이 유일한 투명 수단이므로 명시해야 한다. 둘 다 참인 것이 맞다.
+  material.transparent = true;
+  material.envMap = retro?._environment ?? null;
+  material.needsUpdate = true;
+  return material;
+}
+
 export function createGlassMaterial(retro, { map, face = 'front', color = PALETTE.glass.tint } = {}) {
   /**
    * Real transmissive glass, not a hand-shaded translucent shell.
@@ -256,8 +301,7 @@ export function createGlassMaterial(retro, { map, face = 'front', color = PALETT
    * 그래서 여기만 되돌린다.
    */
   glass.envMapIntensity = (retro?.shared?.envIntensity ?? 1) * 2.2;
-  glass.envMap = retro?._environment ?? null;
-  return glass;
+  return applyGlassQuality(glass, retro);
 }
 
 /**

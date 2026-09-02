@@ -42,8 +42,6 @@ import { registerTextureCache } from '../ui/fonts.js';
  * 아무것도 아니지만 매 프레임이면 생각할 수 없다.
  */
 
-const BACK_MARK = PALETTE.ui.edgeStrong;
-
 /**
  * A card's accent, from the palette rather than from the catalog.
  *
@@ -54,10 +52,208 @@ const BACK_MARK = PALETTE.ui.edgeStrong;
  * to the catalog value for a card the palette has not been told about, so adding
  * one cannot leave the hand with an undefined `strokeStyle`.
  */
-function accentOf(card) {
+export function accentOf(card) {
   return PALETTE.card[card.id] ?? card.accent;
 }
 
+
+/**
+ * 아트 패널의 배경 무늬. 카드마다 다르다.
+ *
+ * ── 왜 필요했나 ─────────────────────────────────────────────────────────────
+ * 구조는 유리 패널 → 이름 → 아트 패널 → 아이콘 → 설명 세 줄이었고, 아트 패널이
+ * 사실상 비어 있었다: accent 12% 의 옅은 사각형 하나 위에 아이콘 하나. 그래서
+ * 여섯 장이 **accent 색과 아이콘 모양만** 달랐다. 부채꼴에서 카드는 왼쪽 끝이 조금
+ * 나오거나 기울어 겹쳐 있고, 그 상태에서 구분되는 것은 색 하나뿐이었다.
+ *
+ * ── 일러스트가 아니라 절차적 배경이다 ───────────────────────────────────────
+ * 카드마다 그림을 그리면 파이프라인이 하나 늘고, 여섯 장이 서로 다른 손에서 나온
+ * 것처럼 보이기 시작한다. 여기 있는 것은 전부 같은 규칙을 따르는 추상 무늬다:
+ * accent 계열 안에서만, 알파 0.10~0.25, 그리고 **아이콘보다 뒤로 물러난다.**
+ * 아이콘이 여전히 주역이고, 배경이 아이콘을 읽기 어렵게 하면 그건 실패다.
+ *
+ * ── 물방울과 기포는 금지다 ──────────────────────────────────────────────────
+ * 병(`menu/Bottle`)과 오브(`OrbView`)가 이미 그 언어를 쓴다. 카드까지 쓰면 화면에서
+ * 같은 것이 세 번 나오고, 그러면 그건 모티프가 아니라 이 게임의 기본 무늬가 된다.
+ *
+ * ── 난수가 없다 ─────────────────────────────────────────────────────────────
+ * 전부 닫힌 식이다. 텍스처는 해상도마다 다시 구워지고 패널의 슬라이더 하나로도
+ * 캐시가 비므로, 난수를 쓰면 같은 카드가 다시 구워질 때 무늬가 바뀐다 — 플레이어가
+ * 보기에 그건 카드가 바뀐 것이다.
+ *
+ * @param {CanvasRenderingContext2D} ctx  카드 프레임 좌표
+ * @param {string} id     카탈로그의 카드 id
+ * @param {{x:number,y:number,w:number,h:number,accent:string}} panel
+ */
+function drawArtMotif(ctx, id, { x, y, w, h, accent }) {
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  ctx.save();
+  roundRectPath(ctx, x, y, w, h, RADIUS.chip);
+  ctx.clip();
+  ctx.lineCap = 'round';
+
+  switch (id) {
+    /**
+     * 궤적 — 아래에서 위로 흐르는 곡선 다발. 한 줄만 진하다.
+     *
+     * 카드가 하는 일이 "길게 내다본다" 이므로 선이 패널 밖으로 나가야 한다. 다발
+     * 안의 한 줄만 진한 것은 예측선이 여럿 중 **고른 하나**이기 때문이다.
+     */
+    case 'trajectory': {
+      for (let i = 0; i < 5; i++) {
+        const k = i / 4;
+        const lead = i === 3;
+        ctx.strokeStyle = withAlpha(accent, lead ? 0.34 : 0.13);
+        ctx.lineWidth = lead ? 3 : 1.6;
+        ctx.beginPath();
+        ctx.moveTo(x - 4, y + h - 2 - k * h * 0.18);
+        ctx.bezierCurveTo(
+          x + w * 0.3, y + h * (0.86 - k * 0.5),
+          x + w * 0.55, y + h * (0.5 - k * 0.28),
+          x + w + 4, y + h * (0.34 - k * 0.24),
+        );
+        ctx.stroke();
+      }
+      break;
+    }
+
+    /**
+     * 혼란 — 어긋난 파형 두 겹.
+     *
+     * 주기가 서로 나누어떨어지지 않아(3 과 4.5) 두 줄이 만났다 벌어졌다 한다. 그
+     * 간섭무늬가 곧 "흐트러진다"이고, 같은 주기 두 개는 그냥 굵은 선 하나로 보인다.
+     * `CardFx` 가 팔레트 주기를 서로 소로 잡는 것과 같은 이유의 같은 장치다.
+     */
+    case 'chaos': {
+      for (const [cycles, phase, alpha] of [[3, 0, 0.22], [4.5, 1.1, 0.14]]) {
+        ctx.strokeStyle = withAlpha(accent, alpha);
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        for (let i = 0; i <= 48; i++) {
+          const t = i / 48;
+          const px = x + t * w;
+          const py = cy + Math.sin(t * Math.PI * 2 * cycles + phase) * h * 0.3;
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+      }
+      break;
+    }
+
+    /**
+     * 강타 — 중심으로 수렴하는 방사선. 중앙이 가장 밝다.
+     *
+     * 선이 중심에서 **멈추지 않고** 조금 못 미쳐 끝난다. 다 만나면 별이 되고, 별은
+     * 혼란의 것이다. 못 미치면 힘이 아직 도착하지 않은 것으로 읽힌다.
+     */
+    case 'smash': {
+      const r0 = Math.min(w, h) * 0.16;
+      const r1 = Math.max(w, h) * 0.72;
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * Math.PI * 2 + 0.26;
+        ctx.strokeStyle = withAlpha(accent, i % 3 === 0 ? 0.22 : 0.11);
+        ctx.lineWidth = i % 3 === 0 ? 3 : 1.8;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
+        ctx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+        ctx.stroke();
+      }
+      break;
+    }
+
+    /**
+     * 원모어 — 겹쳐 도는 링 셋. 끊긴 곳이 서로 어긋난다.
+     *
+     * 끊김이 한 자리에 모이면 고리가 아니라 괄호가 된다. 어긋나 있어야 눈이 한
+     * 고리에서 다음 고리로 넘어가고, 그 넘어감이 "한 번 더"다.
+     */
+    case 'onemore': {
+      // 아이콘도 고리다. 그래서 링은 아이콘 **밖에서** 시작해야 한다 — 안쪽에서
+      // 돌면 배경이 아니라 아이콘의 일부로 읽히고, 이 카드만 무늬가 없는 것이 된다.
+      const base = Math.min(w, h) * 0.3;
+      for (let i = 0; i < 3; i++) {
+        const r = base + i * Math.min(w, h) * 0.17;
+        ctx.strokeStyle = withAlpha(accent, 0.22 - i * 0.05);
+        ctx.lineWidth = 3 - i * 0.55;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0.9 + i * 2.1, 0.9 + i * 2.1 + Math.PI * 1.55);
+        ctx.stroke();
+      }
+      break;
+    }
+
+    /**
+     * 침묵 — 촘촘한 격자에 한 칸씩 어긋난 결. 가장 어둡고 조용하다.
+     *
+     * 여섯 장 중 유일하게 곡선이 없다. 다른 다섯 장이 전부 흐르거나 도는 무늬라,
+     * 격자 하나만으로 이 카드는 "멈춘 것"이 된다. 세로선을 가로선보다 옅게 해서
+     * 결이 한 방향으로 눕는다 — 완전히 균질한 격자는 배경이 아니라 무늬가 된다.
+     */
+    case 'silence': {
+      const cell = Math.min(w, h) * 0.19;
+      ctx.lineWidth = 1.2;
+      for (let gx = x + cell * 0.5; gx < x + w; gx += cell) {
+        ctx.strokeStyle = withAlpha(accent, 0.1);
+        ctx.beginPath();
+        ctx.moveTo(gx, y);
+        ctx.lineTo(gx, y + h);
+        ctx.stroke();
+      }
+      let row = 0;
+      for (let gy = y + cell * 0.5; gy < y + h; gy += cell, row++) {
+        // 한 줄 걸러 반 칸 밀린다. 자물쇠의 결이지 방안지가 아니다.
+        const off = row % 2 ? cell * 0.5 : 0;
+        ctx.strokeStyle = withAlpha(accent, 0.2);
+        ctx.beginPath();
+        ctx.moveTo(x + off - cell, gy);
+        ctx.lineTo(x + w, gy);
+        ctx.stroke();
+      }
+      break;
+    }
+
+    /**
+     * 스왑 — 서로를 지나쳐 가는 두 호.
+     *
+     * 부록의 표에는 이 카드가 없지만 비워 두면 여섯 장 중 한 장만 배경이 없고,
+     * 그건 "즉시 구분된다"를 다섯 장에서만 만족한다는 뜻이다. 두 호가 **교차한 뒤
+     * 반대쪽으로 나가는** 것이 이 카드가 하는 일 그대로다.
+     */
+    case 'swap':
+    default: {
+      for (const dir of [1, -1]) {
+        ctx.strokeStyle = withAlpha(accent, dir > 0 ? 0.22 : 0.13);
+        ctx.lineWidth = dir > 0 ? 3 : 2.2;
+        ctx.beginPath();
+        ctx.moveTo(x - 4, cy - dir * h * 0.3);
+        ctx.bezierCurveTo(
+          cx - w * 0.1, cy - dir * h * 0.3,
+          cx + w * 0.1, cy + dir * h * 0.3,
+          x + w + 4, cy + dir * h * 0.3,
+        );
+        ctx.stroke();
+      }
+      break;
+    }
+  }
+
+  /**
+   * 위쪽의 아주 옅은 흰 광택. 여섯 장 전부에 같은 것이 걸린다.
+   *
+   * 에어로다 — 이건 인쇄물이 아니라 **코팅된** 카드고, 아트 패널은 유리 아래에
+   * 있는 것으로 보여야 한다. 무늬 위에 얹는 것은 그래야 무늬가 코팅 아래로
+   * 들어가기 때문이다.
+   */
+  const gloss = ctx.createLinearGradient(0, y, 0, y + h * 0.55);
+  gloss.addColorStop(0, withAlpha(PALETTE.ui.glossHi, 0.4));
+  gloss.addColorStop(1, withAlpha(PALETTE.ui.glossLo, 0));
+  ctx.fillStyle = gloss;
+  ctx.fillRect(x, y, w, h * 0.55);
+
+  ctx.restore();
+}
 
 const cache = new Map();
 
@@ -197,6 +393,10 @@ export function cardFaceTexture(card, width) {
   /**
    * 아트 패널과 아이콘.
    *
+   * 패널은 세 겹이다: accent 12% 의 물, 카드마다 다른 절차적 무늬(`drawArtMotif`),
+   * 그 위의 아이콘. 무늬가 생기기 전에는 이 셋 중 가운데가 없어서 여섯 장이 색과
+   * 아이콘만으로 갈렸다 — 부채꼴에서 겹쳐 있으면 색 하나뿐이었다.
+   *
    * 유니코드 글리프가 아니라 `icons.js` 의 벡터다. 글리프 다섯 개는 46px 에서
    * 잉크 픽셀 수를 세어 고른 것이었고, 그 측정은 알파 이진화를 전제로 했다.
    * 이진화가 없으므로 제약도 없다 — `iconForCard` 가 카탈로그의 `glyph` 를
@@ -204,11 +404,14 @@ export function cardFaceTexture(card, width) {
    */
   const artY = nameY + SPACE.sm;
   const artH = fh * 0.42;
+  const artX = SPACE.sm;
+  const artW = fw - SPACE.sm * 2;
   ctx.save();
-  roundRectPath(ctx, SPACE.sm, artY, fw - SPACE.sm * 2, artH, RADIUS.chip);
+  roundRectPath(ctx, artX, artY, artW, artH, RADIUS.chip);
   ctx.fillStyle = withAlpha(accent, 0.12);
   ctx.fill();
   ctx.restore();
+  drawArtMotif(ctx, card.id, { x: artX, y: artY, w: artW, h: artH, accent });
 
   const icon = iconForCard(card);
   if (icon) {
@@ -304,6 +507,41 @@ export function cardBackTexture(width) {
 }
 
 /**
+ * 경계에서 `grow` 만큼 밖(음수면 안)으로 밀린 라운드 사각형 하나를 긋는다.
+ *
+ * 부드러운 층은 전부 이것의 반복이다. 같은 경로를 굵기만 키워 여러 번 긋는 대신
+ * **경로를 옮겨 가며** 긋는 것은, 그래야 감쇠가 한쪽으로만 갈 수 있기 때문이다 —
+ * 같은 자리에서 굵기를 키우면 언제나 안팎 대칭이 되고, 드롭 가이드의 다크 헤일로는
+ * 대칭이면 안 된다. 안쪽 절반이 슬롯 안을 어둡게 만들어, 흰 글로우가 앉을 자리를
+ * 먼저 없앤다.
+ */
+function roundRing(ctx, { x, y, w, h, radius }, grow, lineWidth, style) {
+  ctx.lineWidth = lineWidth;
+  ctx.strokeStyle = style;
+  roundRectPath(ctx, x - grow, y - grow, w + grow * 2, h + grow * 2, radius + grow);
+  ctx.stroke();
+}
+
+/**
+ * 겹친 링으로 감쇠 한 층을 쌓는다. `from` 에서 `to` 로 가며 옅어진다.
+ *
+ * `shadowBlur` 로도 되지만 캔버스 그림자는 한 번에 한 색이라 층마다 상태를 갈아야
+ * 하고, 감쇠 곡선을 손에 쥘 수 없다. 링을 겹치면 곡선이 `weight` 하나다.
+ *
+ * 링의 굵기를 간격의 두 배로 잡아 이웃끼리 겹치게 한다 — 안 겹치면 감쇠가 아니라
+ * 줄무늬가 된다. 그래서 한 점을 대략 두 링이 덮고, 목표 알파의 절반씩을 넣는다.
+ */
+function ringFalloff(ctx, rect, from, to, peak, weight, color) {
+  const STEPS = 14;
+  const span = to - from;
+  const step = Math.abs(span) / STEPS;
+  for (let i = STEPS; i >= 1; i--) {
+    const t = i / STEPS;
+    roundRing(ctx, rect, from + span * t, step * 2, withAlpha(color, peak * 0.5 * weight(1 - t)));
+  }
+}
+
+/**
  * 드롭 가이드: 카드 모양의 빈 슬롯.
  *
  * ── 이건 **어포던스**고, 이미 있는 규칙 위에 놓인다 ──────────────────────────
@@ -322,91 +560,144 @@ export function cardBackTexture(width) {
  * `guideMargin` 을 보라 — 카드와 정확히 같은 크기의 테두리는 카드가 도착하는 순간
  * 완전히 덮이는 테두리라, 무언가를 확인해 주는 바로 그 순간에 사라지기 때문이다.
  *
- * ── 하드 밴드에서 부드러운 슬롯으로 ─────────────────────────────────────────
- * 예전에는 두 톤의 각진 띠와 정수 픽셀 사각형이었고, 주석이 그 이유를 "드롭 타깃
- * 둘레의 부드러운 글로우는 이 화면이 기를 수 있는 가장 현대적인 것"이라고 적어
- * 두었다. 그 문장은 이제 목표의 반대다. 모서리는 카드와 같은 `RADIUS.card` 로
- * 둥글고, 테두리는 점선이며 — 점선은 "여기는 아직 비어 있다"를 실선보다 잘 말한다 —
- * 모서리 꺾쇠만 실선으로 남겨 슬롯이라는 사실을 유지한다.
+ * ── 선이 아니라 **빛**이다 ──────────────────────────────────────────────────
+ * 이 자리의 주석은 두 번 뒤집혔고, 두 번 다 이유가 반쯤만 맞았다. 처음에는 두 톤의
+ * 각진 띠였고, 근거는 "드롭 타깃 둘레의 부드러운 글로우는 이 화면이 기를 수 있는
+ * 가장 현대적인 것"이었다 — 저해상도·양자화 파이프라인에서는 맞는 말이었다. 다음에는
+ * 그 문장을 뒤집어 라운드 모서리와 시안 점선과 모서리 꺾쇠가 되었다. 파이프라인이
+ * 사라졌다는 관찰은 옳았고 착지점이 틀렸다: 점선과 꺾쇠는 CAD 와 에디터 UI 의
+ * 관용구고, 시안은 버튼 테두리·포커스 링과 같은 색이라 "여기가 특별한 자리다"를
+ * 말하지 못한다. 둘 다 **선**이라는 점에서는 첫 번째 판본과 같은 물건이었다.
  *
- * @param {number} width   texels across, matching the on-screen size
- * @param {number} height  texels down. Not derived: the guide carries a margin,
- *                         so its proportion is the card's only when that is 0.
+ * 지금은 빛이다. 바깥에서 안쪽으로 네 층이고, 순서가 곧 이 그림이다:
+ *
+ *   1. 다크 헤일로   경계 바깥으로 넓게 감쇠하는 어두운 링. 팔레트의 네이비.
+ *                    **이것이 없으면 나무판 위에서 가이드가 사라진다** — 흰 빛은
+ *                    밝은 배경 위에서 없는 것과 같고, 새 팔레트는 나무판도 잔디도
+ *                    컬링 테이블도 전부 밝다. 국소 대비를 만드는 받침이다.
+ *   2. 흰 글로우     경계에서 주로 안쪽으로 감쇠하는 흰 빛. 바깥으로는 거의 나가지
+ *                    않는다 — 나가면 1 을 씻어내고, 그러면 받침이 사라진다.
+ *   3. 흰 코어       경계를 따라 얇고 단단한 흰 선. 형태를 유지하는 유일한 요소다.
+ *                    글로우만 있으면 밝은 배경에서 **모양**이 사라진다.
+ *   4. 안쪽 필       아주 옅은 흰색. "여기가 자리다". 카드가 그 위를 지나야 하므로
+ *                    옅다.
+ *
+ * ── 구운 글로우다. 두 번째 블렌딩 모드가 아니다 ─────────────────────────────
+ * 카드 씬은 블룸 밖이라(`CardLayer` 헤더) 빛나는 것은 전부 텍스처가 갖고 있어야
+ * 한다. 그리고 네 층을 **한 장에** 굽는다: 다크 헤일로와 흰 글로우가 같은 텍스처
+ * 안에 있으면 가산 블렌딩이 필요 없고, 따라서 `CardMaterials` 에 새 재질 종류가
+ * 늘지 않고 `refreshTextures` 경로가 그대로 산다. 가산으로 갔다면 밝은 배경 대응을
+ * 위해 어두운 층을 따로 알파로 그려야 했고, 그건 쿼드 두 장이다.
+ *
+ * ── 그래서 텍스처가 슬롯보다 크다 ───────────────────────────────────────────
+ * 글로우와 헤일로가 퍼질 자리가 텍스처 안에 있어야 한다. 슬롯 사각형은 `bleed`
+ * 만큼 안쪽으로 물러나 있고, 그리는 쪽이 쿼드를 그만큼 키워야 슬롯의 실제 크기가
+ * `guideMargin` 이 정한 값 그대로 남는다 — 그 크기가 `userData` 로 돌아간다.
+ * `noticeTexture` 가 같은 이유로 같은 일을 한다.
+ *
+ * 그 여백은 짧은 프레임에서 위 가장자리를 넘을 수 있다. 슬롯은 카드가 무장하는
+ * 높이에 그려지고 그 높이는 `_checkArmed` 가 정하므로, 쿼드를 프레임 안으로
+ * 밀어 넣는 것은 슬롯을 문턱이 아닌 곳으로 옮기는 것이라 할 수 없다. 넘어가는
+ * 부분이 무엇인지 재 보면 괜찮다: 16:9 창(프레임 512x384)에서 잘리는 것은 헤일로
+ * 바깥 13픽셀이고 그 구간의 알파는 0.004~0.06 이다. 형태를 지키는 코어와 흰
+ * 글로우는 경계에서 4픽셀 안쪽이라 어떤 프레임에서도 잘리지 않는다.
+ *
+ * @param {number} width   slot texels across, matching the on-screen size
+ * @param {number} height  slot texels down. Not derived: the guide carries a
+ *                         margin, so its proportion is the card's only when
+ *                         that is 0.
+ * @returns {import('three').Texture} `userData` carries the padded DRAW size.
  */
 export function useGuideTexture(width, height) {
-  const w = Math.max(24, Math.round(width));
-  const h = Math.max(24, Math.round(height));
-  const key = `guide:${w}:${h}`;
+  const sw = Math.max(24, Math.round(width));
+  const sh = Math.max(24, Math.round(height));
+  const key = `guide:${sw}:${sh}`;
   const hit = cache.get(key);
   if (hit) return hit;
 
-  const { canvas, ctx } = makeCanvas(w, h);
-  const u = w / SIZE.card.w;
-  const radius = RADIUS.card * u;
-  const line = Math.max(1.5, 2 * u);
-  const pad = line;
+  const u = sw / SIZE.card.w;
+  /** 형태를 유지하는 선. 1.5 프레임픽셀 아래로는 내려가지 않는다. */
+  const core = Math.max(1.5, 2 * u);
+  /** 글로우의 폭. 두께의 7배 — 6~8배 사이면 빛으로 읽히고 그 밖이면 띠가 된다. */
+  const glow = core * 7;
+  /** 헤일로는 그보다 넓다. 넓고 옅어야 받침이지 테두리가 아니다. */
+  const halo = glow * 1.7;
+  const bleed = Math.ceil(halo);
+  const w = sw + bleed * 2;
+  const h = sh + bleed * 2;
 
-  /**
-   * ── 금색을 버리고 화면이 이미 쓰는 **포커스 색**으로 ────────────────────────
-   * 노란 물에 노란 점선, 연노랑 꺾쇠였다. 금색은 이 화면 어디에도 없는 언어다 —
-   * `PALETTE.button.hover` 의 테두리도, `slotTexture` 의 강조도, `focusRing` 도
-   * 전부 CYAN 이고, 유리는 흰색이다. 카드를 내려놓을 자리만 금테를 두르면 그것만
-   * 다른 게임에서 온 것으로 보이고, 실제로 그렇게 보였다.
-   *
-   * 그래서 모양은 그대로 두고 — 안쪽 물, 점선, 모서리 꺾쇠 — 색만 시스템 것으로
-   * 바꾼다. 물은 유리와 같은 흰색이고, 점선은 CYAN, 꺾쇠는 CYAN_DEEP 이다.
-   *
-   * 꺾쇠가 점선보다 **진해진** 것은 예전과 반대다. 예전에는 연노랑이 노랑보다
-   * 옅었는데, 꺾쇠야말로 "여기가 슬롯이다"를 말하는 부분이라 가장 단단해야 한다.
-   * 깊은 청록은 나무판(황갈), 잔디(초록), 하늘(파랑) 어디에서도 읽힌다 — 흰
-   * 꺾쇠를 먼저 시도했다가 나무판 위에서 흐려져 물렀다.
-   */
-  // 옅은 물. 슬롯 안쪽이 주변보다 아주 조금 밝아야 "빈 자리"로 읽힌다.
-  roundRectPath(ctx, pad, pad, w - pad * 2, h - pad * 2, radius);
-  ctx.fillStyle = withAlpha(PALETTE.ui.glossHi, 0.16);
+  const { canvas, ctx } = makeCanvas(w, h);
+  const rect = { x: bleed, y: bleed, w: sw, h: sh, radius: RADIUS.card * u };
+  ctx.lineJoin = 'round';
+
+  // 1a. 넓고 아주 옅은 헤일로. 국소 대비의 대부분은 이것이 만든다.
+  ringFalloff(ctx, rect, core * 0.5, halo, 0.13, (k) => k, PALETTE.ui.shadow);
+  // 1b. 경계 바로 바깥의 좁고 진한 윤곽. 흰 선이 어느 배경에서도 끊기지 않게 한다.
+  ringFalloff(ctx, rect, core * 0.4, core * 3.2, 0.2, (k) => k * k, PALETTE.ui.shadow);
+
+  // 4. 안쪽 필. 유리다 — 슬롯 안쪽이 주변보다 아주 조금 밝아야 "빈 자리"로 읽힌다.
+  roundRectPath(ctx, bleed + core * 0.5, bleed + core * 0.5, sw - core, sh - core, rect.radius);
+  ctx.fillStyle = withAlpha(PALETTE.ui.glossHi, 0.12);
   ctx.fill();
 
-  // 점선 테두리.
-  ctx.save();
-  ctx.setLineDash([10 * u, 7 * u]);
-  ctx.lineCap = 'round';
-  ctx.lineWidth = line;
-  ctx.strokeStyle = withAlpha(PALETTE.accent.cyan, 0.9);
-  roundRectPath(ctx, pad, pad, w - pad * 2, h - pad * 2, radius);
-  ctx.stroke();
-  ctx.restore();
+  // 2. 흰 글로우. 주로 안쪽으로 — 바깥으로 나가면 1 을 씻어낸다.
+  ringFalloff(ctx, rect, -core * 0.6, -glow, 0.42, (k) => k * k, PALETTE.ui.glossHi);
+  ringFalloff(ctx, rect, core * 0.4, core * 1.6, 0.3, (k) => k, PALETTE.ui.glossHi);
+
+  // 3. 흰 코어. 형태를 지키는 하나.
+  roundRing(ctx, rect, 0, core, withAlpha(PALETTE.ui.glossHi, 0.92));
 
   /**
-   * 모서리 꺾쇠. 실선으로, 라운드를 따라 돈다.
+   * 밉은 여전히 없다.
    *
-   * 테두리만 있으면 패널로 읽힌다. 꺾쇠 넷이 있어야 **슬롯**으로 읽히고, 그것이
-   * 한 글자도 없이 "여기 놓아라"를 말하는 유일한 모양이다.
+   * 이 쿼드는 화면에 정면으로, 텍셀 하나가 프레임 픽셀 하나가 되게 놓인다. 무장할 때
+   * `guideArmedGrow` 로 최대 6% 커지지만 그건 **확대**라 이중선형이면 충분하고,
+   * 밉은 축소에만 쓰인다. 예전 판본이 계단을 걱정했던 것은 그리는 것이 단단한 점선
+   * 스트로크였기 때문이고, 부드러운 감쇠에는 확대할 계단이 없다.
    */
-  ctx.save();
-  ctx.lineCap = 'round';
-  ctx.lineWidth = line * 1.6;
-  ctx.strokeStyle = PALETTE.accent.cyanDeep;
-  const arm = Math.max(6, 20 * u);
-  const l = pad;
-  const r = w - pad;
-  const t = pad;
-  const b = h - pad;
-  const corners = [
-    [l, t + radius, l, t, l + radius, t],
-    [r, t + radius, r, t, r - radius, t],
-    [l, b - radius, l, b, l + radius, b],
-    [r, b - radius, r, b, r - radius, b],
-  ];
-  for (const [ax, ay, cx, cy, bx, by] of corners) {
-    ctx.beginPath();
-    ctx.moveTo(ax, ay + Math.sign(cy - ay) * -arm);
-    ctx.arcTo(cx, cy, bx, by, radius);
-    ctx.lineTo(bx + Math.sign(bx - cx) * arm, by);
-    ctx.stroke();
-  }
-  ctx.restore();
+  const tex = toTexture(canvas, { mips: false });
+  tex.userData = { width: w, height: h };
+  cache.set(key, tex);
+  return tex;
+}
+
+/**
+ * 도착 글로우: 카드 뒤에서 짧게 퍼지는 흰 빛.
+ *
+ * 드롭 가이드와 같은 층 쌓기지만 **어두운 것이 하나도 없다.** 가이드는 밝은 판 위에
+ * 놓이는 표지판이라 국소 대비를 만드는 받침이 필요하고, 이것은 카드 **뒤에서** 잠깐
+ * 새어 나오는 빛이라 받침을 깔면 도착이 아니라 그림자가 떨어진 것으로 보인다.
+ *
+ * 카드가 뽑혀 부채꼴에 앉는 순간에만 쓰인다 — `CardHand._landing`. 몇 프레임 만에
+ * 사라지므로 형태를 지키는 코어도 없다: 있으면 그 자리에 카드가 한 장 더 나타났다
+ * 사라진 것으로 보인다.
+ *
+ * @returns {import('three').Texture} `userData` carries the padded DRAW size.
+ */
+export function cardGlowTexture(width, height) {
+  const sw = Math.max(24, Math.round(width));
+  const sh = Math.max(24, Math.round(height));
+  const key = `glow:${sw}:${sh}`;
+  const hit = cache.get(key);
+  if (hit) return hit;
+
+  const u = sw / SIZE.card.w;
+  const glow = Math.max(10, 20 * u);
+  const bleed = Math.ceil(glow);
+  const w = sw + bleed * 2;
+  const h = sh + bleed * 2;
+
+  const { canvas, ctx } = makeCanvas(w, h);
+  const rect = { x: bleed, y: bleed, w: sw, h: sh, radius: RADIUS.card * u };
+  ctx.lineJoin = 'round';
+
+  roundRectPath(ctx, bleed, bleed, sw, sh, rect.radius);
+  ctx.fillStyle = withAlpha(PALETTE.ui.glossHi, 0.55);
+  ctx.fill();
+  ringFalloff(ctx, rect, 0, glow, 0.55, (k) => k * k, PALETTE.ui.glossHi);
 
   const tex = toTexture(canvas, { mips: false });
+  tex.userData = { width: w, height: h };
   cache.set(key, tex);
   return tex;
 }

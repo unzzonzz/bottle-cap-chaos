@@ -56,14 +56,23 @@ import { shapeAim } from '../AimInput.js';
  * cap, plus the retreat — and later waves refine. Truncating at 48 therefore
  * still considers retreating; truncating an intent-ordered list did not.
  *
- * ── the slice is checked between rollouts, not inside one ───────────────────
- * A rollout is 95 steps of solver and cannot be suspended halfway without
- * keeping the world alive across frames, which is what `TrajectoryPreview` does
- * and what makes it complicated. Here a single rollout is ~14 ms and the frame
- * is ~16 ms, so the granularity is one candidate: the loop stops as soon as the
- * elapsed slice is spent, and a frame runs one rollout more than its budget
- * strictly allows. Under-running by a whole candidate instead would mean a 6 ms
- * budget never starts one at all.
+ * ── the slice is a DEADLINE, and it reaches inside a rollout ────────────────
+ * A rollout is ~95 steps of solver, which is most of a frame on its own, so the
+ * candidate cannot be the unit: the world is kept alive across frames and
+ * stepped a chunk at a time, exactly as `TrajectoryPreview` keeps its own.
+ *
+ * The chunk was the granularity too, once, and that was one refinement short.
+ * `requestAnimationFrame` is aligned to vsync, so a frame that runs a hair past
+ * its interval waits for the whole of the next one — and a chunk of 8 steps
+ * costs 5.3 ms while a cap is still travelling. Checking the clock only between
+ * chunks therefore did not overrun by a chunk, it overran by a REFRESH: measured
+ * on a 120 Hz panel, frames aimed at 16.7 ms landed at 30. So `frameBudgetMs`
+ * becomes a deadline that is passed down into `Rollout.advance` and honoured
+ * per step; see the note there, and `ThinkBudget` for where the number comes
+ * from.
+ *
+ * None of which touches the answer. The same candidates run in the same order
+ * and each world takes the same steps; only the frame they land in moves.
  *
  * ── every random number here comes off the AI's own stream ──────────────────
  * "게임 시드를 소비하면 결정론이 깨진다", and this is exactly where it would
@@ -142,6 +151,11 @@ export class AiPlanner {
   constructor(config, strategy = null) {
     this.config = config;
     this.strategy = strategy;
+    /**
+     * `config.ai` with the mode's overrides folded in, or the raw block before
+     * the first `begin`. Written per turn; see the note at the assignment.
+     */
+    this._tuning = config.ai;
 
     /** @type {import('./candidates.js').Candidate[]} */
     this._queue = [];
@@ -357,21 +371,117 @@ export class AiPlanner {
   }
 
   /**
+   * Everything a card can change about what this search would FIND, as one key.
+   *
+   * ── the re-plan after a card is only needed when the shot has moved ────────
+   * `AiController` re-searches after every card rather than only after the
+   * physical ones, and its reason is a good one: a check on the card's id would
+   * be a second place that knows which cards are physical, and it would be wrong
+   * the moment a card is added. The cost used to be argued as free — "one search
+   * under an effect animation that is already playing" — and that stopped being
+   * true when the search got long enough to see. `replan` is its own phase with
+   * nothing on screen, so a 강타+궤적 turn was paying for three full searches
+   * back to back and the player was watching a still board for all of it.
+   *
+   * This keeps the property that mattered and drops the cost. It is not a list
+   * of cards: it is a reading of the four things the search actually consults
+   * about the hand, taken before and after. Two identical readings mean the
+   * second search would evaluate the same candidates through the same physics
+   * and rank them the same way — so it is skipped, and a card that changes any
+   * of them re-plans exactly as before, including one added tomorrow.
+   *
+   *   impulse/spread  what `shapeAim` gives every candidate — 강타
+   *   precise         whether the cone is knowable, which changes the QUEUE as
+   *                   well as the shots in it — 궤적
+   *   canBoost        whether the 강타 probe runs, which is what
+   *                   `situation()` hands the card policy
+   *
+   * 혼란 is deliberately absent, and that is not an oversight: it twists the
+   * OPPONENT's aim, `shapeAim` is called with `twist: false` here, and the
+   * planner is blind to its own deviation by design. Nothing it reads moves.
+   *
+   * ── and the BOARD, because a card is allowed to move it ───────────────────
+   * A key made only of the hand would be a bet that no effect ever changes a
+   * position, and 스왑 is exactly such an effect — shelved out of `CARDS` today,
+   * which is a fact about the deck rather than about this file. The same goes
+   * for an orb consumed mid-turn. So the positions, the living flags and the orb
+   * ids go in too, and what is compared is the whole of `begin`'s input rather
+   * than the part that happens to vary at the moment. Two reads of nine bodies
+   * per card turn against a search of ninety rollouts; it is not a cost.
+   *
+   * @param {import('../Match.js').Match} match
+   * @param {number} player
+   */
+  searchInputs(match, player) {
+    const arena = match.arena;
+    const board = [];
+    for (let i = 0; i < arena.capCount; i++) {
+      const c = arena.capCom(i);
+      board.push(c.x, c.y, c.z);
+    }
+    const ball = arena.hasBall ? arena.ballCom() : null;
+    if (ball) board.push(ball.x, ball.y, ball.z);
+    const key =
+      `${board.join(',')}|${match.rules.alive?.join('') ?? ''}|` +
+      `${match.orbs.list.map((o) => o.id).join(',')}`;
+
+    const cards = match.mode.cards === false ? null : match.cards;
+    if (!cards) return `nocards|${key}`;
+    const canBoost =
+      match.hands.get(player).some((c) => c.cardId === 'smash') &&
+      cards.usable('smash', player).ok;
+    return (
+      `${cards.impulseMulFor(player)}|${cards.spreadMulFor(player)}|` +
+      `${!!cards.trajectoryOn(player)}|${canBoost}|${key}`
+    );
+  }
+
+  /**
+   * The numbers this turn is being searched with. Read by `ThinkBudget`, so the
+   * slice is sized off the SAME merged block the search itself is using — a mode
+   * that overrides `frameBudgetMs` in `perMode` must not be budgeted from the
+   * common one.
+   */
+  get tuning() {
+    return this._tuning;
+  }
+
+  /**
    * Spend one frame's slice on the search.
    *
+   * @param {number} [budgetMs]
+   *   What THIS frame can afford, from `ThinkBudget`. The config's flat
+   *   `frameBudgetMs` when the caller has nothing better to offer — which is
+   *   every headless caller, `ai-harness.mjs` included, where there is no frame
+   *   to measure and nothing to keep smooth.
+   *
+   *   It changes how long the search takes and not what it finds; the decision
+   *   is fixed by `maxCandidates`. See the header.
    * @returns {boolean} true once the search has finished or run out of time
    */
-  tick() {
+  tick(budgetMs) {
     if (!this.running) return true;
     const cfg = this._tuning;
-    const frameBudget = Math.max(0.5, cfg.frameBudgetMs);
+    const frameBudget = Math.max(0.5, budgetMs ?? cfg.frameBudgetMs);
     const totalBudget = Math.max(1, cfg.totalBudgetMs);
 
     const sliceStart = performance.now();
     const t0 = sliceStart;
+    /**
+     * When this frame's share is spent.
+     *
+     * Handed DOWN into `Rollout.advance` as well as tested here, so the slice is
+     * a deadline the stepping respects rather than one it discovers it has
+     * passed. Checking only between chunks always ran one chunk too many, and a
+     * chunk is 5.3 ms at a rollout's launch — which is not a rounding error when
+     * `requestAnimationFrame` is aligned to vsync and a frame that goes one
+     * millisecond long waits for the whole of the next interval. See the note in
+     * `Rollout.advance`.
+     */
+    const sliceEnd = sliceStart + frameBudget;
 
     while (this._at < this._queue.length || this._live) {
-      if (performance.now() - sliceStart >= frameBudget) break;
+      if (performance.now() >= sliceEnd) break;
       /**
        * The safety valve, and it reports itself.
        *
@@ -431,7 +541,7 @@ export class AiPlanner {
        * which is the identical argument `TrajectoryPreview` makes for slicing
        * the human preview.
        */
-      if (this._live.advance(this._stepChunk)) {
+      if (this._live.advance(this._stepChunk, sliceEnd)) {
         const result = this._live.result;
         const job = this._liveJob;
         this._live = null;

@@ -117,6 +117,22 @@ class RolloutArena {
     this.bodies = [];
     for (const handle of live.capBodies) this.bodies.push({ handle, kind: BODY_KIND.CAP });
     if (live.hasBall) this.bodies.push({ handle: live.ballBody, kind: BODY_KIND.BALL });
+
+    /**
+     * Handle -> body, exactly as `PhysicsWorld.body` caches for the live world.
+     *
+     * `getRigidBody` is not a field read: it builds a JS wrapper around a WASM
+     * pointer on every call, and this class asks for one per body per reading —
+     * `peaks`, `capCom`, `ballCom`, `setExtraDamping` — every step of every
+     * rollout. The live arena has always cached; this one was the copy of that
+     * code that did not.
+     *
+     * Safe for exactly as long as the world is: `restoreSnapshot` builds the
+     * world once in the `Rollout` constructor and nothing adds or removes a body
+     * afterwards, so a handle resolves to the same body for this object's whole
+     * life. It dies with the world in `free()`.
+     */
+    this._cache = new Map();
   }
 
   /** The mode's turn clock, straight off the live arena. One set of numbers. */
@@ -125,7 +141,12 @@ class RolloutArena {
   }
 
   _body(handle) {
-    return this.world.getRigidBody(handle);
+    let b = this._cache.get(handle);
+    if (b === undefined) {
+      b = this.world.getRigidBody(handle);
+      this._cache.set(handle, b);
+    }
+    return b;
   }
 
   peaks() {
@@ -145,8 +166,8 @@ class RolloutArena {
     return out;
   }
 
-  atRest() {
-    const peaks = this.peaks();
+  /** @param {ReturnType<RolloutArena['peaks']>} [peaks]  see `Arena.atRest`. */
+  atRest(peaks = this.peaks()) {
     const rest = this.turnConfig.rest;
     for (const kind of Object.keys(peaks)) {
       const t = rest[kind] ?? rest[BODY_KIND.CAP];
@@ -412,11 +433,37 @@ export class Rollout {
    * just spread across a few frames of wall clock." The same argument holds
    * here, and it is what keeps the search's answer independent of frame timing.
    */
-  advance(budget) {
+  advance(budget, deadline = 0) {
     if (this.done) return true;
     const end = Math.min(this.ceiling, this.steps + Math.max(1, budget));
-
+    /**
+     * Steps between clock readings when a deadline is given.
+     *
+     * ── the frame budget is only honest if the OVERSHOOT is bounded too ─────
+     * `AiPlanner` used to check the clock only between chunks, so a slice always
+     * ran one chunk past its budget — and a chunk is not small when the cap is
+     * still travelling: 8 steps measured 5.3 ms against a 12 ms slice. That is
+     * not a rounding error, because `requestAnimationFrame` is aligned to vsync
+     * and a frame that misses its deadline waits for the whole of the next
+     * interval. Measured on a 120 Hz panel: thinking frames aimed at 16.7 ms
+     * came out at 30.
+     *
+     * So the deadline is checked in here, where the steps are. The objection to
+     * doing it per step was that the measurement would cost a noticeable
+     * fraction of the thing measured — true of a cheap step, and these are not:
+     * a knockout step costs 95 us at rest and 670 us at launch against about
+     * 25 ns for `performance.now()`, which is 0.03% of the cheapest of them. So
+     * it is read every step and the overshoot is bounded by ONE step rather than
+     * by a chunk — the difference between landing a frame at 16.7 ms and landing
+     * it at 19, which on a vsync clock is the difference between 16.7 and 25.
+     *
+     * It changes nothing about the answer. The same world takes the same steps
+     * in the same order; only the frame they land in moves — which is the same
+     * argument the chunking itself rests on, and `npm run det:ai` is what checks
+     * it: 2b19511a / 449d0891, unmoved.
+     */
     while (this.steps < end) {
+      if (deadline && performance.now() >= deadline) return false;
       this.settle.preStep(this.ra);
       this.world.step();
       this.steps++;

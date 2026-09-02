@@ -10,6 +10,7 @@ import {
 } from 'three';
 import { buildCapGeometry, CAP_DEFAULTS, CAP_GROUP, MM } from '../cap/capGeometry.js';
 import { makeCapTopTexture } from '../cap/capTexture.js';
+import { SHADOW_RANK, tagShadow } from '../core/quality.js';
 import { BOARD_TILE, makeBoardTexture } from './boardTexture.js';
 import { BALL_GROUP, buildBallGeometry } from './ballGeometry.js';
 import { PitchView } from './PitchView.js';
@@ -236,8 +237,13 @@ export class ArenaView {
        * 받는 쪽이 중요하다 — 뚜껑끼리 겹쳐 있을 때 위의 것이 아래에 그림자를
        * 드리우지 않으면 두 개가 같은 높이에 있는 것처럼 보인다. 알까기에서
        * 그건 판정에 관한 정보다.
+       *
+       * 던지는 쪽은 품질 티어가 끌 수 있다 — 최저·낮음에는 그림자가 없다.
+       * `tagShadow` 가 등급을 메시에 적어 두므로, 티어가 다시 올라가면 부팅
+       * 경로의 `refreshShadowCasters` 가 씬을 훑어 되살린다. 받는 쪽은 그대로
+       * 둔다: 그림자가 없으면 받을 것도 없고, 있으면 받아야 한다.
        */
-      mesh.castShadow = true;
+      tagShadow(mesh, SHADOW_RANK.HERO);
       mesh.receiveShadow = true;
       // NOT recentred. The viewer parks the cap on its mid-height because that
       // is what it orbits about; a physics body's origin is its own hem, which
@@ -253,7 +259,7 @@ export class ArenaView {
       // the vertex-snap shader works in.
       this.ballGeometry = buildBallGeometry(arena.ballRadius);
       this.ball = new Mesh(this.ballGeometry, this.ballMaterials);
-      this.ball.castShadow = true;
+      tagShadow(this.ball, SHADOW_RANK.HERO);
       this.ball.receiveShadow = true;
       this.root.add(this.ball);
     }

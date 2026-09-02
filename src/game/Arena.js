@@ -651,9 +651,16 @@ export class Arena {
     this.resetTransforms();
   }
 
-  /** Every kind under its own thresholds. Shared by `settle` and `TurnSettle`. */
-  atRest() {
-    const peaks = this.peaks();
+  /**
+   * Every kind under its own thresholds. Shared by `settle` and `TurnSettle`.
+   *
+   * @param {ReturnType<Arena['peaks']>} [peaks]
+   *   A reading already taken this step. `TurnSettle.postStep` keeps one for the
+   *   panel and would otherwise pay for a second identical one here — see the
+   *   note at that call. Omitted, this takes its own, which is what `settle`
+   *   below and every other caller wants.
+   */
+  atRest(peaks = this.peaks()) {
     for (const kind of Object.keys(peaks)) {
       if (!this._kindAtRest(kind, peaks)) return false;
     }

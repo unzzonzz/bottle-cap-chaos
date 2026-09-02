@@ -1,6 +1,6 @@
 import { Color, Scene, Vector3 } from 'three';
 import { GlossMaterials } from './core/GlossMaterial.js';
-import { buildEnvironment } from './core/environment.js';
+import { createEnvironment } from './core/environment.js';
 import { createLightRig } from './core/lighting.js';
 import { createSky } from './core/sky.js';
 import { Viewport } from './core/Viewport.js';
@@ -45,6 +45,7 @@ import { OnlineController } from './net/OnlineController.js';
 import { MatchFoundLayer } from './net/MatchFoundLayer.js';
 import { ModalLayer } from './ui/ModalLayer.js';
 import { AiController, HumanController } from './game/ai/Controller.js';
+import { ThinkBudget } from './game/ai/ThinkBudget.js';
 import { CardLayer, FRAME } from './render/CardLayer.js';
 import { CardFx } from './render/CardFx.js';
 import { CardFlight } from './render/CardFlight.js';
@@ -66,6 +67,15 @@ import { aimedLaunchDirection, CAP_COLOR } from './menu/Bottle.js';
 import { capLogoTexture } from './menu/menuTextures.js';
 import { AudioSystem } from './audio/AudioSystem.js';
 import { AudioSettingsBook, LocalStorageAudioSettings } from './audio/AudioSettings.js';
+import { GraphicsSettingsBook, LocalStorageGraphicsSettings } from './core/GraphicsSettings.js';
+import {
+  configureQuality,
+  onQualityChange,
+  refreshShadowCasters,
+  setQualityTier,
+  TIER_NAMES,
+} from './core/quality.js';
+import { FirstRunProbe } from './core/FirstRunProbe.js';
 import { MatchAudio } from './audio/MatchAudio.js';
 
 /**
@@ -167,6 +177,29 @@ const audioSettings = new AudioSettingsBook(new LocalStorageAudioSettings());
 const audio = new AudioSystem({ config: CONFIG.audio, settings: audioSettings }).install();
 
 /**
+ * 그래픽 품질. 소리와 같은 자리에, 같은 이유로.
+ *
+ * ── 이 세 줄의 **순서와 위치**가 전부다 ────────────────────────────────────
+ * 아래 세 갈래(캡 뷰어 · 경기 · 메뉴) 중 어느 것도 아직 `Viewport` 를 만들지
+ * 않았다는 것이 요점이다. `QUALITY.pixelRatioCap` 은 뷰포트가 생성자에서 읽고
+ * `QUALITY.worldTexture` 는 뷰가 텍스처를 구울 때 읽으므로, 티어가 그보다 늦게
+ * 정해지면 첫 프레임만 최대 티어로 그려진다 — 그 어긋남은 화면에 아무 흔적도
+ * 남기지 않는 종류다.
+ *
+ * ── 두 문서가 같은 키를 읽는다 ─────────────────────────────────────────────
+ * 메뉴와 경기는 `location.assign` 으로 오가는 별개 document 이고, 이 파일은 둘
+ * 다의 진입점이다. 즉 두 문서가 각자 부팅하면서 각자 이 세 줄을 돌리고, 같은
+ * `localStorage` 키를 읽으므로 같은 값이 나온다. 설정 화면에서 고른 티어가
+ * 경기 화면에 반영되는 것은 그 사실 하나로 끝난다 — 넘겨줄 것이 없다.
+ *
+ * 표는 `CONFIG.view.graphics` 에 있고 저장되지 않는다. 저장되는 것은 문서 쪽
+ * 숫자 하나뿐이다. `core/GraphicsSettings.js` 머리말에 그 분리의 근거가 있다.
+ */
+const graphicsSettings = new GraphicsSettingsBook(new LocalStorageGraphicsSettings());
+configureQuality({ table: CONFIG.view.graphics, tier: graphicsSettings.tier });
+graphicsSettings.onChange((book) => setQualityTier(book.tier));
+
+/**
  * The web view's own gestures, off — for all three destinations below.
  *
  * At module scope for the same reason `install()` above is: the guards are
@@ -201,7 +234,7 @@ if (new URLSearchParams(location.search).get('view') === 'cap') {
     document.getElementById('app').appendChild(p);
   });
 } else {
-  bootMenu(canvas, { audio, audioSettings });
+  bootMenu(canvas, { audio, audioSettings, graphicsSettings });
   /**
    * The far side of a match's fade back to the menu.
    *
@@ -228,6 +261,25 @@ if (new URLSearchParams(location.search).get('view') === 'cap') {
     url.searchParams.delete(HANDOVER_FLAG);
     history.replaceState(null, '', url);
   }
+}
+
+/**
+ * 조사를 붙인다. `높음으로` / `최대로`.
+ *
+ * "(으)로" 로 도망가지 않는 이유는 이 화면의 다른 어떤 글도 그렇게 쓰지 않기
+ * 때문이다. 받침이 있으면 `으로`, 없거나 ㄹ 이면 `로` — 한글 음절의 종성은
+ * 코드포인트에서 바로 나오므로 사전도 예외 목록도 필요 없다.
+ *
+ * 티어 이름 다섯 개(최저·낮음·보통·높음·최대)에만 쓰이지만, 이름이 바뀌어도
+ * 문장이 어색해지지 않는다는 것이 규칙으로 쓴 이유다.
+ */
+function withRo(word) {
+  const last = word.codePointAt(word.length - 1);
+  const isHangul = last >= 0xac00 && last <= 0xd7a3;
+  if (!isHangul) return `${word}로`;
+  const jong = (last - 0xac00) % 28;
+  // 0 = 받침 없음, 8 = ㄹ. 둘 다 `로` 를 받는다.
+  return jong === 0 || jong === 8 ? `${word}로` : `${word}으로`;
 }
 
 const _flightPoint = new Vector3();
@@ -291,7 +343,21 @@ async function boot(canvas) {
    * each of which owns its own scene. Setting it per material covers all of them
    * from one place.
    */
-  retro.setEnvironment(buildEnvironment(viewport.renderer));
+  // 반환값을 받지 않는다. 이 문서는 해체되지 않는다 — 경기를 떠나는 것은
+  // `location.assign` 이고 그 순간 문서 전체가 사라진다. `sky` 와 `lights` 도
+  // 같은 이유로 `dispose` 가 불리는 자리가 없다.
+  createEnvironment(viewport.renderer, retro);
+
+  /**
+   * 티어가 바뀌었을 때 이 문서가 직접 해야 하는 것: 씬의 그림자 캐스터.
+   *
+   * 나머지는 각자 자기 것을 안다 — 뷰포트는 배율, 컴포저는 샘플 수, 리그는 맵
+   * 크기, 재질 공장은 클리어코트, 텍스처 모듈은 상한. 캐스터만은 **씬을 아는
+   * 쪽**이 해야 하고, 이 게임은 모드가 바뀔 때마다 필드 뷰를 통째로 갈아끼우므로
+   * 그걸 아는 것은 여기뿐이다. 뷰가 자기 구독을 들고 있으면 해제를 빠뜨리는
+   * 자리가 뷰의 수만큼 생긴다 — `core/quality.refreshShadowCasters` 를 보라.
+   */
+  onQualityChange(() => refreshShadowCasters(scene));
 
 
   // ── the cap, measured once ───────────────────────────────────────────────
@@ -524,6 +590,36 @@ async function boot(canvas) {
    */
   const modal = new ModalLayer({ canvas, resolution: viewport.resolution, config: CONFIG });
   viewport.onResize(({ resolution }) => modal.setResolution(resolution));
+
+  /**
+   * 첫 매치에서 한 번 재고, 못 버티면 한 칸 내린다. `core/FirstRunProbe.js`.
+   *
+   * 여기 있는 이유는 `modal` 때문이다 — 알리는 방법은 문서마다 다르고, 이 문서의
+   * 방법은 이것이다. 메뉴 쪽에는 재고 있을 첫 매치가 없으므로 프로브도 없다.
+   *
+   * 되돌리기가 그냥 친절이 아니다: `setTier` 가 `userSet` 을 켜므로, 되돌린
+   * 사람은 그 한 번으로 이후의 모든 자동 개입에서 빠져나간다. 사용자의 결정이
+   * 측정을 이긴다는 규칙이 그 한 줄로 지켜진다.
+   */
+  const firstRunProbe = new FirstRunProbe({
+    settings: graphicsSettings,
+    onDemote: ({ from, to, fpsLow }) => {
+      modal
+        .confirm({
+          title: '그래픽 품질을 낮췄습니다',
+          body:
+            `이 기기에서 화면이 초당 ${Math.round(fpsLow)}프레임까지 떨어져 ` +
+            `${TIER_NAMES[from]}에서 ${withRo(TIER_NAMES[to])} 한 단계 내렸습니다.\n` +
+            '설정 화면에서 언제든 바꿀 수 있습니다.',
+          confirmLabel: '확인',
+          cancelLabel: '되돌리기',
+        })
+        .then((ok) => {
+          if (!ok) graphicsSettings.setTier(from);
+        })
+        .catch(() => {});
+    },
+  });
 
   if (online?.opponent?.mark) {
     const seat = online.opponentSeat;
@@ -1525,6 +1621,16 @@ async function boot(canvas) {
   const metrics = debugRequested ? new MetricsOverlay({ bootMs: performance.now() }) : NO_METRICS;
 
   /**
+   * What the frame costs WITHOUT the AI, so the search can be given the rest.
+   *
+   * Unconditional, unlike `metrics` above: this is not an instrument, it is how
+   * the search is sized, and a build without `?debug=1` is exactly the build
+   * that has to be fast. It is fed from the same two numbers `metrics.endFrame`
+   * is handed at the bottom of the tick. See `ThinkBudget`.
+   */
+  const thinkBudget = new ThinkBudget();
+
+  /**
    * The tuning panel, behind `?debug=1`.
    *
    * It is a hundred sliders over the top-right quarter of the screen, and it is
@@ -1554,6 +1660,7 @@ async function boot(canvas) {
         victory,
         audio,
         audioSettings,
+        graphicsSettings,
         // Structural sliders keep the seed: dragging 뚜껑 크기 rebuilds the world
         // on every step, and rerolling the orbs each time would change the thing
         // being judged along with the thing being dragged.
@@ -1815,6 +1922,8 @@ async function boot(canvas) {
   // ── loop ─────────────────────────────────────────────────────────────────
   let raf = 0;
   let last = 0;
+  /** 클램프 전의 프레임 간격, ms. `frame` 이 쓰고 `tick` 이 읽는다. */
+  let rawFrameMs = 0;
   /** 1 = the HUD and the hand are up, 0 = a shot is being drawn. See `tick`. */
   let uiFade = 1;
   /** Whether the victory sequence has already been started for this match. */
@@ -1913,7 +2022,10 @@ async function boot(canvas) {
     // physics above because it steps a DIFFERENT world (a snapshot restored into
     // its own `RAPIER.World`), so it never shows up in `physics.steps`.
     const aiT0 = performance.now();
-    controller.update(dt, { match });
+    // How much of THIS frame it may have, worked out from what the last few
+    // frames cost WITHOUT it. See `ThinkBudget` — it changes how long the search
+    // takes and nothing about what it decides.
+    controller.update(dt, { match, thinkBudget });
     const aiMs = performance.now() - aiT0;
     const aiThinking = !!controller.isAi && controller.phase !== 'idle';
 
@@ -2246,8 +2358,15 @@ async function boot(canvas) {
      * that clamp allows 6 steps — so anything but zero here means something
      * other than `frame` is driving the accumulator.
      */
+    const tickMs = performance.now() - tickT0;
+    // Fed BEFORE the overlay and unconditionally, because this one is load
+    // bearing: it is what sizes the next frame's search slice.
+    thinkBudget.note(tickMs, aiMs, dt * 1000);
+    // 클램프 **전**의 간격을 준다. 클램프된 값은 50 ms 를 넘지 않으므로 그걸로는
+    // 느린 기기를 영원히 찾지 못한다. `FirstRunProbe.note` 에 근거가 있다.
+    firstRunProbe.note(rawFrameMs, aiMs);
     metrics.endFrame({
-      tickMs: performance.now() - tickT0,
+      tickMs,
       physicsMs,
       steps,
       backlogSec: match._acc ?? 0,
@@ -2273,6 +2392,10 @@ async function boot(canvas) {
     // what the simulation gets; this is what actually happened, and the gap
     // between the two is exactly the time the game is losing.
     metrics.beginFrame(now);
+    // 같은 간격을 `tick` 도 봐야 한다 — 자동 강등이 재는 것이 이 값이다.
+    // 클로저 변수인 것은 `aiMs` 가 `tick` 안에서야 정해지기 때문이고, 그 둘이
+    // 같은 프레임의 것이어야 판단이 성립한다.
+    rawFrameMs = last ? now - last : 0;
 
     // Clamped at both ends, same as the viewer's: a hidden tab that comes back
     // hands you a multi-second jump, and feeding that to the accumulator would

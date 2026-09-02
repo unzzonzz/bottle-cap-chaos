@@ -9,6 +9,7 @@ import {
 } from 'three';
 import { BOARD_ASPECT, FRAME, MAX_FRAME_WIDTH, updateFrame } from './frame.js';
 import { PALETTE } from './palette.js';
+import { onQualityChange, QUALITY } from './quality.js';
 
 /**
  * Colour management ON.
@@ -44,8 +45,19 @@ export const DISPLAY_ASPECT = 4 / 3;
  *
  * `MetricsOverlay` is how this gets revisited: raise it only against a measured
  * 1% low, never on the assumption that more is better.
+ *
+ * ── 이제 티어가 이 값을 **내린다**. 올리지는 않는다 ─────────────────────────
+ * `QUALITY.pixelRatioCap` 의 최대 티어 값이 정확히 이 2 이고, 아래 티어들이
+ * 1.5·1.25·1 로 내려간다. 위 문단의 판단 — 2 위로는 보이지 않는다 — 은 그대로
+ * 남아 있으므로 이 상수는 사라지지 않고 **천장**으로 남는다: `resolve` 가 티어
+ * 값과 이것 중 작은 쪽을 쓴다. 표에 3 을 적는 것으로는 이 판단을 못 뒤집는다.
  */
 const PIXEL_RATIO_CAP = 2;
+
+/** 인자, 티어, 천장 셋 중 실제로 쓰이는 값. 두 호출부가 같은 식을 쓰게 한다. */
+function resolvePixelRatioCap(override) {
+  return Math.max(1, Math.min(PIXEL_RATIO_CAP, override ?? QUALITY.pixelRatioCap));
+}
 
 /**
  * Owns the WebGLRenderer and every sizing concern. Knows nothing about what
@@ -61,13 +73,31 @@ export class Viewport {
    *   cap viewer leave it off, because both lay out against a 4:3 canvas top to
    *   bottom and neither has a board to keep square.
    */
-  constructor({ canvas, portrait = false, pixelRatioCap = PIXEL_RATIO_CAP }) {
+  constructor({ canvas, portrait = false, pixelRatioCap = null }) {
     this.canvas = canvas;
     this.portrait = portrait;
-    this.pixelRatioCap = Math.max(1, pixelRatioCap);
+    /**
+     * 인자로 준 값이 이기고, 없으면 티어가 정한다.
+     *
+     * 인자가 남아 있는 것은 캡 뷰어처럼 설정을 꿰지 않는 진입점 때문이 아니라 —
+     * 그쪽은 `QUALITY` 의 초기값을 그대로 받아 오늘의 그림이 나온다 — 이 클래스가
+     * 렌더 파이프라인의 조립부이지 정책의 소유자가 아니기 때문이다.
+     */
+    this._pixelRatioOverride = pixelRatioCap;
+    this.pixelRatioCap = resolvePixelRatioCap(pixelRatioCap);
 
     this.renderer = new WebGLRenderer({
       canvas,
+      /**
+       * 켜 둔다. **티어에 걸지 않는다.**
+       *
+       * 컨텍스트 속성이라 생성 후에는 바꿀 수 없다는 것이 첫 번째 이유이고, 그보다
+       * 중요한 두 번째 이유는 이것이 무엇을 부드럽게 하는가다: 월드는 오프스크린
+       * 타겟에 그려지므로 여기 AA 가 닿지 않고(`Composer` 의 `samples` 가 그 몫),
+       * 이 플래그가 실제로 다루는 것은 기본 프레임버퍼 — 즉 **UI** 다. 조준 활,
+       * 당김 선, 오차 콘, 카드 테두리가 전부 그쪽에 그려진다. 최저 티어에서
+       * 꺼야 할 것은 월드의 MSAA 이지 UI 의 계단이 아니다.
+       */
       antialias: true,
       alpha: false,
       stencil: false,
@@ -84,7 +114,14 @@ export class Viewport {
      * gives the HDR headroom; a tone mapper would spend it.
      */
     this.renderer.toneMapping = NoToneMapping;
-    this.renderer.shadowMap.enabled = true;
+    /**
+     * 렌더러 쪽 그림자 스위치. 티어가 0 을 주면 그림자 패스 자체가 돌지 않는다.
+     *
+     * 광원의 `castShadow` 와 맵 크기는 `lighting.js` 가 쥐고 있고, 이건 그보다
+     * 위의 스위치다 — 둘 다 있어야 하는 이유는 하나를 끄면 다른 하나가 의미를
+     * 잃기 때문이 아니라, 리그가 씬의 것이고 이 플래그는 렌더러의 것이기 때문이다.
+     */
+    this.renderer.shadowMap.enabled = QUALITY.shadowMapSize > 0;
     /**
      * `PCFShadowMap`. `PCFSoftShadowMap` 이 아니다.
      *
@@ -121,6 +158,29 @@ export class Viewport {
     this._onResize = () => this._fit();
     window.addEventListener('resize', this._onResize);
     window.addEventListener('orientationchange', this._onResize);
+
+    /**
+     * 티어가 바뀌면 배율 상한이 바뀌고, 그러면 드로잉 버퍼 크기가 바뀐다.
+     *
+     * `_fit` 을 그대로 다시 태우는 것이 핵심이다 — 리사이즈와 품질 변경이 버퍼
+     * 크기를 정하는 방식이 둘로 갈리면, 그 둘이 어긋났을 때 증상은 "창을 한 번
+     * 흔들면 고쳐지는" 종류가 된다. 리스너들도 같은 알림을 받으므로 컴포저의
+     * 타겟까지 한 경로로 따라온다.
+     */
+    this._offQuality = onQualityChange(() => {
+      this.pixelRatioCap = resolvePixelRatioCap(this._pixelRatioOverride);
+      this.renderer.shadowMap.enabled = QUALITY.shadowMapSize > 0;
+      /**
+       * 그림자 패스를 한 번 강제로 돌린다.
+       *
+       * 게임 문서는 `shadowMap.autoUpdate` 를 꺼 두고 뚜껑이 움직였을 때만 켠다
+       * (`main.js`, `ArenaView.moved`). 그러니 티어를 바꿔 맵 크기가 달라져도
+       * 아무것도 움직이지 않으면 다음 패스가 영영 오지 않고, 화면에는 옛 크기의
+       * 그림자가 남는다 — 정지 화면에서 티어를 만졌을 때 정확히 그렇게 됐다.
+       */
+      this.renderer.shadowMap.needsUpdate = true;
+      this._fit();
+    });
 
     this._fit();
   }
@@ -244,6 +304,7 @@ export class Viewport {
   }
 
   dispose() {
+    this._offQuality?.();
     window.removeEventListener('resize', this._onResize);
     window.removeEventListener('orientationchange', this._onResize);
     this._listeners.clear();

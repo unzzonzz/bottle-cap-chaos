@@ -10,6 +10,7 @@ import {
   ShaderMaterial,
 } from 'three';
 import { orbShellTexture, orbMarkTexture } from './orbTextures.js';
+import { SHADOW_RANK, tagShadow } from '../core/quality.js';
 
 /**
  * The mystery orbs, drawn.
@@ -178,6 +179,15 @@ export class OrbView {
 
     const shellMat = this._makeShellMaterial();
     const shell = new Mesh(this.shellGeometry, shellMat);
+    /**
+     * 오브는 판 위에 **떠 있다**. 그래서 그림자가 할 말이 있다.
+     *
+     * 뚜껑·공보다 한 단계 아래인 것은 그 말이 판정에 쓰이지 않기 때문이다 —
+     * 오브는 지나가면 먹히는 것이지 어디에 붙어 있는지가 규칙에 들어가지 않는다.
+     * 렌더 품질만 티어에 걸리고 **개수와 위치는 건드리지 않는다**: 그쪽은
+     * 게임플레이이고, 품질 설정이 닿으면 안 되는 것이다.
+     */
+    tagShadow(shell, SHADOW_RANK.ORB);
     // Its own child so the SHELL can spin while the mark below does not.
     const spin = new Group();
     spin.add(shell);

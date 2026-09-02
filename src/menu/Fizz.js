@@ -113,13 +113,22 @@ function solveAge(distance, growth) {
   return a;
 }
 
+/**
+ * 최대 티어의 거품 수. 사이트 수 곱하기 사이트당 거품 수.
+ *
+ * 이름이 붙은 것은 품질 티어가 여기에 배율을 걸기 때문이다 — `Bottle` 이
+ * `QUALITY.fizzScale` 을 곱해 `setCount` 로 넣는다. 최대에서 이 값 그대로인 것이
+ * 중요하다: 품질 설정은 깎는 장치이지, 기본값에서 화면을 바꾸는 장치가 아니다.
+ */
+export const FIZZ_COUNT = 156;
+
 export class Fizz {
   /**
    * @param {import('../core/GlossMaterial.js').GlossMaterials} retro
    * @param {object} tuning  the live `MENU_CONFIG.bottle` block
    * @param {number} count   sites times bubbles per site
    */
-  constructor({ retro, tuning, count = 156 }) {
+  constructor({ retro, tuning, count = FIZZ_COUNT }) {
     this.tuning = tuning;
     this.count = count;
 
@@ -129,19 +138,7 @@ export class Fizz {
     // never occlude each other into hard edges.
     this.material = createSpriteMaterial(retro, { map: this.map, blend: 'add' });
 
-    const pos = new Float32Array(count * 4 * 3);
-    const uv = new Float32Array(count * 4 * 2);
-    const index = new Uint16Array(count * 6);
-    for (let i = 0; i < count; i++) {
-      const v = i * 4;
-      uv.set([0, 0, 1, 0, 1, 1, 0, 1], i * 8);
-      index.set([v, v + 1, v + 2, v, v + 2, v + 3], i * 6);
-    }
-
-    this.geometry = new BufferGeometry();
-    this.geometry.setAttribute('position', new Float32BufferAttribute(pos, 3));
-    this.geometry.setAttribute('uv', new Float32BufferAttribute(uv, 2));
-    this.geometry.setIndex(new BufferAttribute(index, 1));
+    this.geometry = buildQuads(count);
 
     this.mesh = new Mesh(this.geometry, this.material);
     // Never culled: the vertices move every frame and a bounding sphere computed
@@ -157,6 +154,29 @@ export class Fizz {
     this._right = new Vector3();
     this._up = new Vector3();
     this._inv = new Quaternion();
+  }
+
+  /**
+   * How many bubbles there are. The quality tier's one knob on this class.
+   *
+   * ── 왜 `active` 를 줄이는 것으로는 부족한가 ────────────────────────────────
+   * `update` 는 이미 `intensity` 에 따라 앞쪽 몇 개만 살리고 나머지를 한 점으로
+   * 접는다. 접힌 사각형은 면적이 0 이라 채우기 비용은 없지만, **CPU 루프는
+   * 그대로 돈다** — 매 프레임 `this.count` 번의 나눗셈, 거듭제곱, 쿼터니언
+   * 적용이다. 이 클래스에서 실제로 비싼 것이 그쪽이므로 버퍼 자체를 줄인다.
+   *
+   * 지오메트리를 다시 만드는 것은 티어를 바꿀 때 한 번뿐이고, 사이트 배치도
+   * `setProfile` 로 다시 푼다 — 거품 하나하나가 `hash(i, …)` 로 결정되므로 수가
+   * 줄면 남는 것은 앞쪽 부분집합이고, 줄기(theta)의 분포는 그대로 유지된다.
+   */
+  setCount(count) {
+    const n = Math.max(4, Math.round(count));
+    if (n === this.count) return;
+    this.count = n;
+    this.geometry.dispose();
+    this.geometry = buildQuads(n);
+    this.mesh.geometry = this.geometry;
+    if (this.profile) this.setProfile(this.profile);
   }
 
   /**
@@ -287,4 +307,27 @@ export class Fizz {
     this.material.dispose();
     this.map.dispose();
   }
+}
+
+/**
+ * `count` 개의 빌보드 사각형. 위치는 매 프레임 채워지므로 여기서는 비워 둔다.
+ *
+ * 생성자와 `setCount` 가 같은 함수를 쓴다 — 두 곳이 같은 버퍼 모양을 각자
+ * 만들면, 어긋났을 때 증상은 티어를 한 번 바꾼 뒤에만 나타나는 인덱스 오류다.
+ */
+function buildQuads(count) {
+  const pos = new Float32Array(count * 4 * 3);
+  const uv = new Float32Array(count * 4 * 2);
+  const index = new Uint16Array(count * 6);
+  for (let i = 0; i < count; i++) {
+    const v = i * 4;
+    uv.set([0, 0, 1, 0, 1, 1, 0, 1], i * 8);
+    index.set([v, v + 1, v + 2, v, v + 2, v + 3], i * 6);
+  }
+
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new Float32BufferAttribute(pos, 3));
+  geometry.setAttribute('uv', new Float32BufferAttribute(uv, 2));
+  geometry.setIndex(new BufferAttribute(index, 1));
+  return geometry;
 }

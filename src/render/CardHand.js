@@ -1,8 +1,8 @@
 import { Group, Mesh, MeshBasicMaterial, PlaneGeometry, Vector3 } from 'three';
 import { CARD_BY_ID } from '../game/cards/cardCatalog.js';
-import { cardFaceTexture, cardBackTexture } from './cardTexture.js';
-import { PALETTE } from '../core/palette.js';
-import { SIZE, SPACE } from '../core/tokens.js';
+import { accentOf, cardFaceTexture, cardBackTexture, cardGlowTexture } from './cardTexture.js';
+import { PALETTE, toRgb } from '../core/palette.js';
+import { RADIUS, SIZE, SPACE } from '../core/tokens.js';
 
 /**
  * One player's hand, as meshes.
@@ -124,6 +124,17 @@ QUAD.translate(0, 0.5, 0);
 /** How the springs are integrated, in seconds. */
 const SUB_STEP = 1 / 240;
 
+/**
+ * 카드의 accent 를 0..1 셋으로. 소멸의 빛이 그 색으로 퍼진다.
+ *
+ * 색은 `cardTexture.accentOf` 에서 온다 — 카드 면을 물들이는 그 값이다. 여기서
+ * 다시 고르면 팔레트에 없는 카드에서 면과 빛이 다른 색을 갖게 된다.
+ */
+const ACCENT_RGB = (c) => {
+  const [r, g, b] = toRgb(accentOf(c.data));
+  return [r / 255, g / 255, b / 255];
+};
+
 const _v = new Vector3();
 
 function smoothstep(x) {
@@ -210,6 +221,20 @@ export class CardHand {
      */
     this.safeInsets = { top: 0, right: 0, bottom: 0, left: 0 };
 
+    /**
+     * 도착과 소멸의 빛. 손 하나에 **한 장**이다.
+     *
+     * 카드마다 메시를 달면 손패가 다섯 장일 때 쓰이지 않는 쿼드가 다섯 장 있게 되고,
+     * 뽑기는 한 번에 한 장이라 그 중 넷은 영원히 안 쓰인다. 같은 프레임에 둘이
+     * 도착하는 경우 — 한 턴에 오브 두 개를 스치는 일은 실제로 있다 — 빛은 나중 것에
+     * 붙는다. 두 자리에 동시에 필요한 물건이 아니라, 빛이 하나면 도착도 하나로
+     * 읽히기 때문이다. 소멸도 같은 한 장을 쓰고(`_place` 를 보라), 같은 이유로
+     * 마지막 한 장이 이긴다.
+     */
+    this._glow = new Mesh(QUAD, this.materials.create(cardGlowTexture(SIZE.card.w, SIZE.card.h)));
+    this._glow.visible = false;
+    this.root.add(this._glow);
+
     this._grab = { x: 0, y: 0 };
   }
 
@@ -291,8 +316,12 @@ export class CardHand {
    * is held at the END of the list where it is out of the fan's way.
    *
    * @param {{key: number, cardId: string}[]} instances
+   * @param {Set<number>|null} [landed]
+   *   Keys whose FLIGHT ended this frame. See `_beginLanding` — an ordinary
+   *   arrival (the opening deal, a hand rebuilt after a swap) is not a landing
+   *   and must not play one.
    */
-  syncTo(instances) {
+  syncTo(instances, landed = null) {
     const byKey = new Map(this.cards.map((c) => [c.key, c]));
     const wanted = new Set(instances.map((i) => i.key));
 
@@ -346,6 +375,54 @@ export class CardHand {
       c.s.value = t[i].s;
       c.a.value = t[i].a;
       c.homeY = t[i].restY;
+      if (landed && landed.has(c.key)) this._beginLanding(c);
+    }
+  }
+
+  /**
+   * 날아온 카드가 부채꼴에 앉는 순간.
+   *
+   * ── 여기가 비어 있었다 ────────────────────────────────────────────────────
+   * `CardFlight` 는 뒷면으로 날아와서, 끝나면 메시를 지우고 `pendingKeys` 를 풀고,
+   * 다음 sync 에서 부채꼴이 앞면으로 열렸다. 그 파일의 헤더는 그것을 "the reveal
+   * happens for free" 라고 적었는데, free 라는 것은 **뒤집기가 없다**는 뜻이다.
+   * 뒷면으로 화면을 가로질러 온 카드가 앞면으로 그냥 나타났다. 무엇을 찾았는지
+   * 알게 되는 순간이 있기는 한데 그 순간에 아무 일도 일어나지 않았다.
+   *
+   * 세 가지가 일어난다. 새 경로는 하나도 없다:
+   *
+   *   뒤집기   AI 의 공개가 쓰는 것과 같은 수평 스케일 통과다. 반쯤에서 쿼드의 폭이
+   *            0 이 되고 거기서 텍스처가 바뀌므로, 뒷면이 앞면이 되는 순간은 둘 다
+   *            보이지 않는 순간이다. 크로스페이드는 둘을 동시에 보여 주고, 그건
+   *            뒤집힘이 아니라 녹아 바뀜이다.
+   *   밀림     이웃 카드의 스프링에 속도를 한 번 준다. 목표를 옮기는 것이 아니라
+   *            **한 번 흔드는** 것이고, 부채꼴은 이미 언더댐프드라 밀렸다가 되돌아
+   *            온다. 카드가 자리를 만들며 들어가는 것으로 보이는 것은 그 되돌아옴이다.
+   *            `snapKick` 이 카드의 크기 채널에 하는 일과 같은 종류다.
+   *   빛       도착한 자리에서 짧게 퍼지는 흰 빛. 프레임으로 센다.
+   *
+   * ── 뒤집기는 앞면인 손에서만 ──────────────────────────────────────────────
+   * 상대의 손패는 엎어져 있다. 거기서 뒤집으면 뒷면에서 뒷면으로 가는 통과라,
+   * 카드가 한 번 납작해졌다 돌아오는 것 외에 아무것도 말하지 않는다. 밀림과 빛은
+   * 양쪽 다 한다 — 그 둘은 "한 장 늘었다"이고 그건 엎어진 손에서도 사실이다.
+   */
+  _beginLanding(c) {
+    const fx = this.config.cardFx;
+    if (!this.faceDown) {
+      c.landFlip = 1;
+      c.faceUp = false;
+    }
+    c.landGlow = Math.max(0, Math.round(fx.landGlowFrames));
+
+    const at = this.cards.indexOf(c);
+    if (at < 0) return;
+    for (let i = 0; i < this.cards.length; i++) {
+      const o = this.cards[i];
+      if (o === c || o.flying > 0) continue;
+      const d = i - at;
+      // 멀수록 덜 밀린다. 손패 전체가 같은 만큼 밀리면 부채꼴이 통째로 옮겨간
+      // 것으로 보이고, 자리를 내주는 것으로는 보이지 않는다.
+      o.x.vel += Math.sign(d) * (fx.landPushAmount / Math.abs(d));
     }
   }
 
@@ -406,6 +483,10 @@ export class CardHand {
       /** Refusal shake: 1 at the moment of refusal, decaying to 0. */
       shake: 0,
       shakeX: 0,
+      /** 착지 뒤집기: 도착 순간 1, 0 으로 내려간다. See `_beginLanding`. */
+      landFlip: 0,
+      /** 도착 빛에 남은 **프레임** 수. 초가 아닌 이유는 `cardFx` 의 주석에 있다. */
+      landGlow: 0,
     };
   }
 
@@ -550,6 +631,8 @@ export class CardHand {
    */
   update(dt, { place, raise, live, lock, usable, sealFade = 0, reveal = null }) {
     const cfg = this.config.cards;
+    /** 그리기 전용 노브. `cards` 와 달리 `configHash` 에 들어가지 않는다. */
+    const fxCfg = this.config.cardFx;
     this.place = place;
     this.raise = raise;
     this.live = live;
@@ -633,10 +716,33 @@ export class CardHand {
     /** @type {typeof this.cards} */
     const done = [];
 
+    // 한 장뿐이므로 매 프레임 끄고 시작한다. 착지 중인 카드가 `_place` 에서 켠다.
+    this._glow.visible = false;
+
     for (let i = 0; i < this.cards.length; i++) {
       const c = this.cards[i];
       const t = targets[i];
       c.homeY = t.restY;
+
+      /**
+       * 착지 뒤집기와 도착 빛. 스프링 분기와 **나란히** 돈다.
+       *
+       * 분기 안에 넣지 않는 것은, 뒤집는 동안에도 카드가 자기 슬롯으로 스프링해야
+       * 하기 때문이다. 뒤집기는 위치를 만들지 않는다 — `flipWidth` 하나와 어느
+       * 면을 보이느냐뿐이다.
+       */
+      if (c.landFlip > 0) {
+        c.landFlip = Math.max(0, c.landFlip - dt / Math.max(0.05, fxCfg.landFlipSeconds));
+        const k = 1 - c.landFlip;
+        // `|cos(pi t)|`, `_reveal` 과 같은 식이다: 양 끝에서 폭이 가득 차고 정확히
+        // 가운데에서 0 이 된다. `1 - |cos|` 은 그 반대라 카드가 접혔다 펴진다.
+        c.flipWidth = Math.max(0.02, Math.abs(Math.cos(Math.PI * k)));
+        // 폭이 0 인 그 프레임에 면을 넘긴다. null 은 "손패를 따른다" 이므로,
+        // 넘긴 뒤에는 이 카드도 그냥 손패의 한 장이 된다.
+        c.faceUp = k >= 0.5 ? null : false;
+        if (c.landFlip === 0) c.flipWidth = 1;
+      }
+      if (c.landGlow > 0) c.landGlow -= 1;
 
       // Asked every frame rather than latched, because the answer changes under
       // the player's hand: chaos lands, and the trajectory card in the opponent's
@@ -778,23 +884,102 @@ export class CardHand {
     c.mesh.scale.set(sx, sy, 1);
     c.mesh.renderOrder = order;
 
+    /**
+     * 그림자.
+     *
+     * ── 쿼드가 카드보다 크다 ────────────────────────────────────────────────
+     * 흐림은 셰이더가 거리로 만들고(`CardMaterial` 의 `SHADOW_FRAG`), 그 흐림이
+     * 퍼질 자리는 쿼드 안에 있어야 한다. 카드와 같은 크기의 쿼드는 카드 경계에서
+     * 그림자를 잘라내고, 잘린 흐림은 흐림이 아니라 그라디언트로 끝나는 사각형이다.
+     *
+     * 흐림 반경이 카드의 **그려지는** 크기를 따라간다 — 호버로 확대된 카드는 더
+     * 크게 뜬 것이므로 더 넓은 그림자를 만든다. `flipWidth` 는 빼고 잰다: 뒤집히는
+     * 중에 그림자의 흐림까지 납작해지면 카드가 눌린 것으로 보인다.
+     */
+    const fxCfg = this.config.cardFx;
+    const blur = Math.max(0.5, fxCfg.shadowBlur * ((w * c.s.value) / SIZE.card.w));
+    const radius = RADIUS.card * ((w * c.s.value) / SIZE.card.w);
+
     // Offset along the card's own axes, so a tilted card's shadow tilts with it.
     const sin = Math.sin(c.a.value);
     const cos = Math.cos(c.a.value);
     const ox = cfg.shadowOffsetX;
-    const oy = cfg.shadowOffsetY;
+    // 그립이 아래 모서리라 쿼드를 키우면 위로만 자란다. 절반을 도로 내려 카드와
+    // 같은 중심에 놓는다 — 그림자의 오프셋은 그 위에 더해지는 것이지, 흐림의
+    // 여백이 오프셋 노릇을 해서는 안 된다.
+    const oy = cfg.shadowOffsetY - blur;
     c.shadow.position.set(
       px + ox * cos - oy * sin,
       c.y.value + ox * sin + oy * cos,
       c.mesh.position.z - 0.005,
     );
     c.shadow.rotation.z = c.a.value;
-    c.shadow.scale.set(sx, sy, 1);
+    c.shadow.scale.set(sx + blur * 2, sy + blur * 2, 1);
     // Half a layer under its own card rather than a whole one: the levels are
     // whole numbers at rest, so a shadow a full step down would land exactly on
     // the layer of the card below it and the two would be tied.
     c.shadow.renderOrder = order - 0.5;
-    c.shadowMat.uniforms.uOpacity.value = cfg.shadowOpacity * alpha;
+    const su = c.shadowMat.uniforms;
+    su.uOpacity.value = cfg.shadowOpacity * alpha;
+    su.uSize.value.set(sx, sy);
+    su.uRadius.value = radius;
+    su.uBlur.value = blur;
+
+    /**
+     * 카드 뒤의 빛. 같은 한 장이 두 가지 일을 한다: **도착**과 **소멸**.
+     *
+     * 도착은 흰빛으로 좁게 퍼지고, 소멸은 카드의 accent 색으로 넓게 퍼진다.
+     * 색이 하나 다르다는 것 말고는 같은 그림이고, 그건 우연이 아니라 의도다 —
+     * 카드가 손패에 들어오고 나가는 것은 같은 문의 양쪽이다.
+     *
+     * ── 소멸이 왜 필요했나 ─────────────────────────────────────────────────
+     * `Match.playCard` 는 효과가 시작되는 즉시 상태에서 카드를 지운다. 그래도
+     * 카드가 증발하지 않는 것은 `flying` 인 것만 `syncTo` 가 파괴하지 않기
+     * 때문이고 — 그 계약을 깨면 카드가 그 프레임에 사라진다 — 그래서 낸 카드는
+     * 화면 가운데로 가서 옅어진다. 옅어지기만 하는 것이 문제였다: 페이드는
+     * 물건이 없어지는 그림이 아니라 물건이 **투명해지는** 그림이다. accent 색이
+     * 그 자리에서 한 번 퍼지면 카드가 흩어진 자리가 남는다.
+     *
+     * ── 텍스처는 매 프레임 다시 물어본다 ──────────────────────────────────
+     * 캐시 적중은 맵 조회 하나고, 그것이 패널의 해상도 슬라이더가 캐시를 비우고
+     * 지나갔을 때 살아남는 유일한 방법이다 — 해제된 텍스처는 오류가 아니라 그냥
+     * 아무것도 안 그리는 것이라 조용히 사라진다. `CardLayer._updateSeals` 가
+     * 같은 이유로 같은 일을 한다.
+     */
+    const glowing = c.landGlow > 0 || c.flying > 0;
+    if (glowing) {
+      const tex = cardGlowTexture(SIZE.card.w, SIZE.card.h);
+      const gu = this._glow.material.uniforms;
+      let g;
+      let spread;
+      if (c.flying > 0) {
+        // 소멸. 카드가 옅어지는 만큼 빛이 퍼지고, 그 둘의 합이 일정해 보인다.
+        const k = smoothstep(Math.min(1, c.flying));
+        g = Math.max(0, 1 - k) * 0.85;
+        spread = 1 + k * 0.9;
+        gu.uTint.value.set(...ACCENT_RGB(c));
+      } else {
+        // 도착. 좁게, 짧게, 희게. 프레임으로 센다 — `cardFx` 의 주석에 이유가 있다.
+        g = c.landGlow / Math.max(1, Math.round(fxCfg.landGlowFrames));
+        g *= g;
+        spread = 1 + (1 - g) * 0.35;
+        gu.uTint.value.setScalar(1);
+      }
+      const gw = sx * (tex.userData.width / SIZE.card.w) * spread;
+      const gh = sy * (tex.userData.height / SIZE.card.h) * spread;
+      const gy = -(gh - sy) / 2;
+      gu.uMap.value = tex;
+      gu.uOpacity.value = g * opacity;
+      this._glow.position.set(
+        px - gy * sin,
+        c.y.value + gy * cos,
+        c.mesh.position.z - 0.004,
+      );
+      this._glow.rotation.z = c.a.value;
+      this._glow.scale.set(gw, gh, 1);
+      this._glow.renderOrder = order - 0.25;
+      this._glow.visible = true;
+    }
 
     // Grown by the hit margin on every side, about the same grip point, so the
     // extra room is even rather than hanging off the top.
@@ -811,6 +996,29 @@ export class CardHand {
 
     const u = c.mat.uniforms;
     u.uOpacity.value = alpha;
+
+    /**
+     * 테두리 홀로그램의 **위상**은 카드가 화면 어디에 어떤 각도로 있느냐다.
+     *
+     * 직교 카메라에서 시야각 이리데선스가 왜 안 되는지는 `CardMaterial` 헤더에
+     * 있다. 여기서 할 일은 그 대신 쓰는 두 값을 넘겨 주는 것뿐이고, 둘 다 바로
+     * 위에서 메시를 놓는 데 쓴 그 값이다 — 두 번째 계산 경로를 만들면 언젠가
+     * 띠가 카드에서 떨어져 나온다.
+     *
+     * 뒷면은 거의 빛나지 않는다. `cardBackTexture` 의 주석에 근거가 있다: 상대의
+     * 손패는 화면 위쪽에 늘 떠 있어서 대비를 일부러 낮춰 뒀고, 그 다섯 장이
+     * 무지개로 빛나면 판 위에서 눈이 계속 그쪽으로 간다.
+     *
+     * 무장하면 올라간다. 슬롯이 밝아지는 것과 같은 말을 카드 쪽에서 한 번 더 하는
+     * 것이고, 그 중복은 의도다 — 무장은 손이 카드를 보고 있을 때 일어난다.
+     */
+    u.uCardSize.value.set(sx, sy);
+    u.uCardRadius.value = radius;
+    u.uCardPos.value.set(px, c.y.value);
+    u.uCardAngle.value = c.a.value;
+    u.uHolo.value =
+      (c.texFace ? fxCfg.holoStrength : fxCfg.holoBackStrength) *
+      (c.armed ? Math.max(0, fxCfg.holoArmedBoost) : 1);
 
     /**
      * The card being turned over is exempt from every drain there is.
@@ -884,6 +1092,52 @@ export class CardHand {
       : cardBackTexture(want);
   }
 
+  /**
+   * 무장 문턱까지 얼마나 왔는가. 0 = 부채꼴, 1 = 문턱.
+   *
+   * ── 문턱은 여기서 한 번만 표현된다 ────────────────────────────────────────
+   * `_checkArmed` 의 판정도, 드롭 가이드의 밝기도, 가이드가 그려지는 **높이**도
+   * 전부 이 한 식에서 나온다. 셋이 각자 같은 항을 다시 적으면 언젠가 하나만
+   * 고쳐지고, 그러면 가이드가 카드가 실제로 무장되는 곳이 아닌 데를 가리킨다 —
+   * 그건 표지판이 없는 것보다 나쁘다. 플레이어가 그것을 믿기 때문이다.
+   *
+   * 1 을 넘어서도 잘리지 않는다. 자르는 것은 읽는 쪽의 일이고, 판정은 `>= 1` 로
+   * 물어야 원래의 `>=` 와 한 글자도 다르지 않다.
+   *
+   * VERTICAL travel from where the fan holds it. Not proximity to a target in
+   * the middle of the screen: a target is a small thing to find, and it makes
+   * the same gesture succeed or fail depending on which end of the hand the
+   * card came from.
+   */
+  _armFraction(c, h) {
+    const to = this.config.cards.useLiftFactor * h;
+    if (!(to > 0)) return 0;
+    return (c.y.value - c.homeY) / to;
+  }
+
+  /**
+   * 지금 끌리고 있는 카드의 진행도, 0..1. 아무것도 없으면 0.
+   *
+   * ── 왜 불리언이 아니라 진행도인가 ─────────────────────────────────────────
+   * `useGuideTexture` 의 주석이 스스로 문제를 이렇게 적었다 — "보이지 않는 문턱은
+   * 실패해 봐야만 알게 되는 문턱이다." 슬롯이 그려지면서 문턱의 **위치**는 보이게
+   * 됐지만, 얼마나 왔는지는 여전히 안 보였다: 가이드는 세 단계 이산이라 무장하는
+   * 순간에만 한 번 바뀌었고, 그때는 이미 알 필요가 없다.
+   *
+   * 진행도에 연동하면 카드를 끌어 올릴수록 슬롯이 밝아진다. 비용은 0 이다 —
+   * 텍스처는 그대로 정적이고 모양을 담당하며, 유니폼이 세기를 담당한다.
+   *
+   * 정렬 드래그에서는 0 이다. 그때 카드는 낼 수 있는 곳으로 가고 있지 않다.
+   * 막힌 카드도 0 이다 — `_checkArmed` 가 그 카드를 절대 무장시키지 않으므로,
+   * 밝아지는 슬롯은 오지 않을 확인을 약속하는 것이 된다.
+   */
+  get armProgress() {
+    const c = this.dragging;
+    if (!c || c.blocked || this.dragMode === 'sort') return 0;
+    const h = this.config.cards.width * CARD_ASPECT;
+    return Math.max(0, Math.min(1, this._armFraction(c, h)));
+  }
+
   _checkArmed(c, h) {
     const cfg = this.config.cards;
     // A blocked card never arms, however far it is dragged. It still MOVES with
@@ -893,11 +1147,7 @@ export class CardHand {
       c.armed = false;
       return;
     }
-    // VERTICAL travel from where the fan holds it. Not proximity to a target in
-    // the middle of the screen: a target is a small thing to find, and it makes
-    // the same gesture succeed or fail depending on which end of the hand the
-    // card came from.
-    const armed = c.y.value - c.homeY >= cfg.useLiftFactor * h;
+    const armed = this._armFraction(c, h) >= 1;
     if (armed && !c.armed) c.s.vel += cfg.snapKick;
     c.armed = armed;
   }
@@ -1228,5 +1478,9 @@ export class CardHand {
   dispose() {
     for (const c of this.cards) this._destroy(c);
     this.cards.length = 0;
+    // 카드가 아니라 손의 것이라 위 루프가 잡지 못한다. 재질 자체는
+    // `CardMaterials.dispose` 가 추적해 두고 있지만, 메시는 여기서 떼야 한다.
+    this.root.remove(this._glow);
+    this._glow.material.dispose();
   }
 }

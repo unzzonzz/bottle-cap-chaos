@@ -882,10 +882,23 @@ export const CONFIG = {
     vertexSnap: 1.0,
     /** How far the grey goes on a hand that cannot act. 1 is fully desaturated. */
     greyStrength: 1.0,
-    /** The offset dark quad standing in for a drop shadow. Frame pixels. */
-    shadowOffsetX: 3,
-    shadowOffsetY: -4,
-    shadowOpacity: 0.5,
+    /**
+     * 그림자가 카드에서 떨어지는 거리와 진하기. 프레임 픽셀.
+     *
+     * ── 값만 바뀌었다. 키는 그대로다 ────────────────────────────────────────
+     * `cards` 는 `SYNCED_CONFIG_PATHS` 안이라 키를 더하거나 빼면 `configHash` 가
+     * 바뀌고 구버전 클라이언트와 매칭이 거절된다. 흐림 반경은 그래서 `cardFx` 쪽에
+     * 있다 — 이름은 `cardFx.shadowBlur` 다.
+     *
+     * 각진 검은 쿼드를 밀어 놓은 것이 아니라 부드러운 얼룩이 되면서 세 값이 전부
+     * 다른 답을 갖는다. 흐린 그림자는 같은 알파에서 훨씬 무겁게 보이므로 0.5 에서
+     * 0.3 으로 내렸고, X 는 0 이다 — `tokens.ELEVATION` 의 모든 단계가 아래로만
+     * 떨어지고, 카드만 오른쪽으로 비켜 있으면 화면에 광원이 둘 있게 된다. Y 는
+     * `ELEVATION.raised.dy` 와 같은 3 (이 좌표계에서 아래는 음수다).
+     */
+    shadowOffsetX: 0,
+    shadowOffsetY: -3,
+    shadowOpacity: 0.3,
     /** Slack around a card's edge for the raycast, in frame pixels. */
     hitMargin: 8,
     /** Draw those hit areas. */
@@ -1054,6 +1067,106 @@ export const CONFIG = {
   cardFx: {
     /** Vertex snap for the effects, separate from the game's and the cards'. */
     vertexSnap: 1.0,
+
+    // ── the card FACE: hologram, shadow, drop guide ──────────────────────
+    /**
+     * 왜 카드의 시각 노브가 `cards` 가 아니라 여기 있는가.
+     *
+     * `cards` 는 `protocol.js` 의 `SYNCED_CONFIG_PATHS` 에 들어 있다. 거기에 키를
+     * 하나라도 더하면 `configHash` 가 바뀌고, 구버전 클라이언트와 매칭이 거절된다 —
+     * 그림 하나 고치자고 네트워크 호환을 깨는 것이다. `cardFx` 는 그 목록에 없고,
+     * 이 블록의 모든 값은 순수하게 그리기다. 시뮬레이션은 하나도 읽지 않는다.
+     *
+     * 반대로 `cards` 쪽의 기존 키는 **값만** 움직인다. `guideOpacity` 와
+     * `guideArmedOpacity` 가 여전히 가이드의 두 끝을 정하고, 새로 생긴 것은 그 둘
+     * 사이를 잇는 방법뿐이다.
+     */
+    /**
+     * 테두리 홀로그램의 세기. 앞면 기준.
+     *
+     * 가산이라 배경이 밝을수록 덜 보인다. 0.45 는 흰 유리 위에서 테두리를 따라
+     * 파스텔 띠가 지나가는 것이 보이고 글자에는 닿지 않는 값이다. 그 이상은 카드가
+     * 젖은 것처럼 보이기 시작한다.
+     */
+    holoStrength: 0.45,
+    /**
+     * 뒷면의 세기. 앞면의 4분의 1 이하다.
+     *
+     * `cardTexture.cardBackTexture` 의 주석에 근거가 있다 — 상대의 손패는 화면
+     * 위쪽에 늘 떠 있어서 대비를 일부러 낮춰 뒀고, 빗금을 진하게 칠했더니 다섯 장이
+     * 회색 덩어리가 됐다는 기록이 남아 있다. 그 다섯 장이 무지개로 빛나면 판 위에서
+     * 눈이 계속 그쪽으로 간다. 0 이 아닌 것은 코팅된 카드라는 사실은 남기기 위해서다.
+     */
+    holoBackStrength: 0.1,
+    /**
+     * 무장한 카드의 배수. 카드가 문턱을 넘으면 테두리가 확실히 켜진다.
+     *
+     * `cards.guideArmedOpacity` 가 슬롯 쪽에서 하는 말을 카드 쪽에서 한 번 더 하는
+     * 것이고, 그 중복은 의도다: 무장은 손이 카드를 보고 있을 때 일어나므로, 슬롯만
+     * 밝아지면 시선 밖에서 확인이 일어난다.
+     */
+    holoArmedBoost: 2.0,
+    /** 단위 길이당 위상. 카드 대각선에 한 바퀴 남짓 들어가는 값. */
+    holoScale: 0.035,
+    /**
+     * 무지개의 채도. 0 이면 흰빛, 1 이면 완전 포화.
+     *
+     * 0.42. 완전 포화 무지개는 네온이고 이 화면에 네온은 없다 — 에어로의 이리데선스는
+     * 비눗방울이지 LED 가 아니다.
+     */
+    holoSaturation: 0.42,
+    /** 테두리 띠의 폭. 카드의 짧은 변에 대한 비율. */
+    holoRimWidth: 0.05,
+    /** 아무도 손대지 않는 손패가 죽은 그림이 되지 않을 만큼의 드리프트. rad/s. */
+    holoDriftPerSecond: 0.5,
+
+    /**
+     * 카드 그림자의 흐림 반경. 프레임 픽셀, 카드 폭 150 기준.
+     *
+     * `tokens.ELEVATION.raised.blur` 와 같은 10 이다. 이 화면의 다른 판이 전부 그
+     * 값으로 떠 있으므로, 카드만 다른 높이에 있으면 손패가 UI 와 다른 층에서 온
+     * 것으로 보인다. 카드가 호버로 커지면 이 값도 같은 비율로 커진다 — 큰 물건은
+     * 큰 그림자를 만든다.
+     */
+    shadowBlur: 10,
+
+    // ── the drop guide ───────────────────────────────────────────────────
+    /**
+     * 무장하는 프레임에 한 번 터지는 링이 남는 프레임 수.
+     *
+     * 초가 아니라 **프레임**인 이유는 `smashFlashFrames` 와 같다: 이 길이의 창은
+     * 주사율이 다르면 다른 프레임 수에 걸리고, 그 차이가 "보임"과 "아무것도 아님"의
+     * 차이다.
+     *
+     * 그리고 이것은 `guideArmedGrow` 를 대신하는 것이 아니라 **확인**이다. 진행도가
+     * 연속으로 밝아지다가 1 에서 한 번 튀어야, 놓쳤는지 아닌지가 애매하지 않다.
+     */
+    guideBurstFrames: 6,
+    /** 그 링이 가이드 밖으로 퍼지는 정도. 배수. */
+    guideBurstGrow: 0.22,
+
+    // ── 뽑기의 착지 ──────────────────────────────────────────────────────
+    /**
+     * 날아온 카드가 부채꼴에 도착하며 뒤집히는 데 걸리는 시간.
+     *
+     * `CardFlight` 는 뒷면으로 날아온다 — 찾아낸 것이 무엇인지는 도착해서 알아야
+     * 한다 — 그리고 예전에는 비행이 끝나면 메시가 사라지고 다음 sync 에서 앞면이
+     * 부채꼴에 **나타났다**. 뒤집는 동작이 없으니 뒤집혔다는 사실도 없었다.
+     *
+     * AI 의 공개가 쓰는 것과 같은 수평 스케일 통과다 — `CardHand._reveal` 을 보라.
+     * 0.22 는 도착의 일부로 읽히고, 그 이상이면 부채꼴이 열리기를 기다리게 된다.
+     */
+    landFlipSeconds: 0.22,
+    /**
+     * 착지가 이웃 카드를 미는 거리. 프레임 픽셀.
+     *
+     * 스프링의 목표를 한 프레임 흔드는 것이지 위치를 옮기는 것이 아니다 — 부채꼴은
+     * 이미 언더댐프드라, 목표가 한 번 튀면 이웃이 밀렸다가 되돌아온다. 카드가 자리를
+     * 만들며 들어가는 것으로 보이는 것은 그 되돌아옴이다.
+     */
+    landPushAmount: 26,
+    /** 도착한 자리에 짧게 퍼지는 흰 빛이 남는 프레임 수. */
+    landGlowFrames: 8,
 
     // ── the chaos stars ──────────────────────────────────────────────────
     /**
@@ -1532,6 +1645,57 @@ export const CONFIG = {
      * carrying it. A thinking frame is now indistinguishable from an idle one.
      */
     frameBudgetMs: 6,
+    /**
+     * What a THINKING frame is allowed to cost, in total. 0 = the flat slice.
+     *
+     * ── the number above is a share of a frame nobody measured ──────────────
+     * `frameBudgetMs` is one constant against every refresh rate, and it is
+     * wrong at both ends. Measured on an M3 at 120 Hz with the game's own work
+     * at about 4 ms of an 8.3 ms frame: thinking frames ran 10–25 ms, so the
+     * search was getting 62% of the wall clock — 3.1 s to spend 1.9 s of solver
+     * — while the frame was already over its vsync period anyway. Filling the
+     * vsync period instead is worse, not better: at 120 Hz that leaves 4 ms and
+     * the AI gets SLOWER than it is now.
+     *
+     * What is actually true of these frames is that nothing is moving. Nothing
+     * has been fired, no cap is in flight, no card is out; the only animation is
+     * the camera easing into the turn's framing. So the right target is a frame
+     * LENGTH, and 60 Hz is the one a moving camera still reads smoothly at.
+     * `ThinkBudget` hands the search whatever is left of it once the rest of the
+     * frame has taken its measured share, which adapts to the device instead of
+     * assuming one.
+     *
+     * ── 17 and not 16.7, because it is rounded DOWN to whole refreshes ───────
+     * `requestAnimationFrame` is aligned to vsync, so the target has to land on a
+     * multiple of the display's period or the frame spills into the next one and
+     * the search pays a whole interval for a fraction of a millisecond —
+     * `ThinkBudget` has the measurement. 17 is the smallest number that takes two
+     * intervals on a 120 Hz panel and one on a 60 Hz panel, which is 16.7 ms on
+     * both; 16 would take ONE interval at 120 Hz and halve the budget there.
+     *
+     * Measured over the two AI fixtures — knockout / football, search wall clock
+     * per turn, with the frame quantised to vsync the way rAF actually
+     * quantises it and the game's own work modelled at 4 ms:
+     *
+     *                       60 Hz panel                120 Hz panel
+     *     off (flat 6 ms)   5.40 s / 5.35 s  38% duty  5.31 s / 5.30 s  38%
+     *     17 ms             2.82 s / 2.78 s  71% duty  2.83 s / 2.80 s  71%
+     *
+     * The thinking frame lands at 16.7 ms on both panels either way — the search
+     * takes the slack rather than the frame rate. `tools/bench/think-frames.mjs`
+     * is what produced those rows.
+     *
+     * How much it is worth depends on what the frame costs WITHOUT the search,
+     * which is the whole reason it is measured rather than assumed. On a desktop
+     * at 120 Hz whose render is 1.5 ms the flat slice already fit inside one
+     * refresh interval and the gain is small; it is largest exactly where it is
+     * wanted, on a 60 Hz panel or a device whose frame is not nearly free.
+     *
+     * `npm run det:ai` digests are unmoved at 2b19511a / 449d0891, because the
+     * decision is fixed by `maxCandidates` and this only changes how many frames
+     * it is spread over. Set it to 0 to hand the flat slice back.
+     */
+    thinkFrameMs: 17,
     /**
      * Physics steps run before the search checks the clock again.
      *
@@ -2721,6 +2885,180 @@ export const CONFIG = {
       strength: 0.45,
       radius: 0.6,
     },
+    /**
+     * 그래픽 품질 다섯 단계. **개발자의 표이고, 저장되지 않는다.**
+     *
+     * 플레이어가 고른 것은 `core/GraphicsSettings.js` 의 문서에 있다 — 여기 있는
+     * 것은 그 숫자 하나를 무엇으로 푸는가이고, `CONFIG` 는 이 프로젝트 어디에도
+     * 저장되지 않는다는 규율(`AudioSettings.js` 머리말)이 그대로 적용된다.
+     * 부팅 경로가 이 배열을 `core/quality.configureQuality` 에 꽂는다.
+     *
+     * ── `view` 아래인 것이 온라인 안전성이다 ─────────────────────────────────
+     * `SYNCED_CONFIG_PATHS`(`net/protocol.js`)는 physics·shot·turn·cards·orbs·
+     * curling·football·knockout·arena·cap 뿐이고 `view` 는 없다. 그러니 여기
+     * 어떤 값을 바꿔도 `configHash` 가 움직이지 않고, 품질이 다른 두 기기가 서로
+     * 붙는다. 반대로 말하면 이 표에서 시뮬레이션 값을 건드리는 순간 그 검사가
+     * 못 잡는 비호환이 생긴다 — 특히 `ball` 과 `collider` 는 목록에 없으면서
+     * `RolloutArena._baseDamping()` 이 읽는 값이다. 여기 그 이름이 나오면 안 된다.
+     *
+     * ── 마지막 칸은 **오늘 출시되는 그림 그대로**여야 한다 ───────────────────
+     * 품질 설정은 깎는 장치이지 더하는 장치가 아니다. 최대를 지금보다 위로 올리면
+     * 기본값을 쓰는 모든 기기의 화면이 바뀌는데, 그건 품질 노브가 아니라 아트
+     * 변경이다. 그래서 각 열의 마지막 값은 이 파일과 `core/` 가 오늘 쓰고 있는
+     * 값과 같고, `core/quality.js` 의 `QUALITY` 리터럴이 같은 값을 들고 있다.
+     * 둘이 어긋나면 표를 고쳐라.
+     *
+     * ── 표에 **없는** 두 줄, 그리고 없는 이유 ────────────────────────────────
+     * `PCFSoftShadowMap` 은 three 0.185 에서 폐기됐다 — 지정하면 콘솔에 경고를
+     * 남기고 `PCFShadowMap` 으로 조용히 대체된다(`WebGLShadowMap.js`). 부드러움은
+     * `sun.shadow.radius` 가 담당하므로 그림자 줄은 **크기만** 티어에 건다.
+     * `Viewport` 의 같은 자리에 이미 같은 근거가 적혀 있다.
+     *
+     * 대기 원근/거리 페이드는 이 프로젝트에 존재하지 않는다. 씬에 `Fog` 가 없고
+     * 모든 재질이 `fog: false` 로 만들어진다. 없는 효과를 티어를 채우려고 새로
+     * 만드는 것은 품질 노브가 아니라 신규 아트다.
+     *
+     * ── `worldTexture` 는 최저에서만 실제로 문다 ─────────────────────────────
+     * 이 프로젝트의 월드 텍스처는 넷이고 전부 512 로 저술되어 있다 —
+     * `boardTexture`, `pitchTexture`, `metalTexture`, `cap/capTexture`. 상한이지
+     * 목표가 아니므로, 512 인 티어부터 위로는 아무것도 달라지지 않는다. 실제로
+     * 줄어드는 것은 최저의 256 한 칸뿐이다. 1024 를 위 세 칸에 적어 둔 것은
+     * 저술 크기가 올라가는 날 상한이 먼저 걸려 있지 않게 하기 위해서다.
+     *
+     * ── 실측 (§8.5) ──────────────────────────────────────────────────────────
+     * M3 Pro / Chrome / 알까기, 에뮬레이트 뷰포트 3400x2300. 이 크기는 일부러
+     * 터무니없다 — 실제 창(716x866 캔버스, dpr 2)에서는 **다섯 티어가 전부
+     * 120 fps 로 vsync 에 붙어** 구별되지 않기 때문이다. 티어의 비용 차이를 보려면
+     * GPU 를 실제로 병목으로 만들어야 하고, 아래가 그 상태의 값이다.
+     * `MetricsOverlay`(lil-gui 패널은 숨김), 12초 관측:
+     *
+     *     티어    드로잉 버퍼    fps     1% low   drop   sat   tick
+     *     최저    3067x2300     117.3    78.1      1     0    0.57 ms
+     *     낮음    3834x2875      82.6    39.4      1     0    0.33 ms
+     *     보통    4601x3450      33.2    11.5     16     0    0.43 ms
+     *     높음    6134x4600      19.1     7.0    202     0    0.59 ms
+     *     최대    6134x4600      13.9     5.0    188     0    1.10 ms
+     *
+     * `sat` 은 다섯 티어 모두 0 이다 — 물리는 어느 티어에서도 프레임 예산을
+     * 놓치지 않았다. `drop` 이 아래로 갈수록 커지는 것은 프레임이 50 ms 클램프를
+     * 넘긴 횟수이고, 28 메가픽셀을 그리라고 시킨 결과이지 결함이 아니다.
+     *
+     * 인접한 두 칸이 전부 유의미하게 다르다. 높음↔최대는 MSAA 2 대 4 뿐인데,
+     * 축구에서 같은 버퍼(4266x3200)로 3회씩 재면 36.1 / 36.1 / 36.2 대
+     * 28.7 / 28.6 / 28.7 fps 로 26% 차이다 — 아래 최대 칸의 주석을 보라.
+     *
+     * @type {Array<object>}
+     */
+    graphics: [
+      // 0 · 최저
+      {
+        pixelRatioCap: 1,
+        msaaSamples: 0,
+        bloom: false,
+        bloomScale: 0.25,
+        shadowMapSize: 0,
+        shadowCasters: 0,
+        glass: false,
+        clearcoat: 0,
+        envSize: 48,
+        anisotropy: 1,
+        worldTexture: 256,
+        bottleColumns: 32,
+        fizzScale: 1 / 3,
+        bokeh: 0,
+      },
+      // 1 · 낮음
+      {
+        pixelRatioCap: 1.25,
+        msaaSamples: 0,
+        bloom: false,
+        bloomScale: 0.25,
+        shadowMapSize: 0,
+        shadowCasters: 0,
+        glass: false,
+        clearcoat: 0,
+        envSize: 96,
+        anisotropy: 1,
+        worldTexture: 512,
+        bottleColumns: 48,
+        fizzScale: 0.5,
+        bokeh: 0,
+      },
+      // 2 · 보통 — 블룸·그림자·환경맵·투과 유리가 한꺼번에 켜지는 칸이다.
+      {
+        pixelRatioCap: 1.5,
+        msaaSamples: 2,
+        bloom: true,
+        bloomScale: 0.25,
+        shadowMapSize: 1024,
+        shadowCasters: 1,
+        glass: true,
+        clearcoat: 0,
+        envSize: 128,
+        anisotropy: 4,
+        worldTexture: 512,
+        bottleColumns: 72,
+        fizzScale: 1,
+        bokeh: 3,
+      },
+      // 3 · 높음 — MSAA 만 최대보다 한 단계 낮다. 아래 최대 칸의 주석을 보라.
+      {
+        pixelRatioCap: 2,
+        msaaSamples: 2,
+        bloom: true,
+        bloomScale: 0.5,
+        shadowMapSize: 2048,
+        shadowCasters: 2,
+        glass: true,
+        clearcoat: 1,
+        envSize: 256,
+        anisotropy: 16,
+        worldTexture: 1024,
+        bottleColumns: 72,
+        fizzScale: 1,
+        bokeh: 6,
+      },
+      /**
+       * 4 · 최대 — 오늘의 그림.
+       *
+       * ── 높음과의 차이가 캐스터뿐이면 안 됐다. 재 보고 알았다 ────────────────
+       * 처음에는 지시서의 표 그대로 두 칸을 `shadowCasters` 하나만 다르게 뒀다.
+       * 높음은 뚜껑·공·오브까지, 최대는 골대·펜스까지 그림자를 던진다 — 눈으로는
+       * 골대 그림자가 잔디에 눕는 것으로 읽히므로 가짜 차이는 아니다. 그런데
+       * **비용이 재지지 않았다.** 축구, 4266x3200 버퍼, 3회씩:
+       *
+       *     높음(캐스터 오브까지)   27.9 / 28.5 / 27.9 fps
+       *     최대(캐스터 전부)       28.7 / 28.6 / 28.7 fps
+       *
+       * 최대가 오히려 미세하게 빨랐다. 즉 잡음 안이고, 이유는 분명하다:
+       * `main.js` 가 `shadowMap.autoUpdate` 를 꺼 두고 `ArenaView.moved` 가
+       * 움직인 프레임에만 켠다. 정지 화면에서 그림자 패스는 아예 돌지 않으므로,
+       * 거기에 정적인 골대를 몇 개 더 넣어도 대부분의 프레임에서 0 이다.
+       *
+       * 그건 "다섯 단계 중 둘이 같다" 는 것이고, 지시서 §9.7 이 사용자를 속이는
+       * 것이라고 부르는 상태다. 그래서 **MSAA 를 여기서 가른다**: 높음이 2,
+       * 최대가 4. 최대는 오늘 출시되는 값 그대로이고 — 이 표의 규칙이다 — 높음이
+       * 한 단계 내려간다. 리졸브 비용은 타겟 면적에 정직하게 비례하므로 재진다.
+       * 캐스터 줄은 그대로 남는다: 재지지는 않아도 보이는 차이이고, 둘 다 있는
+       * 편이 한쪽만 있는 것보다 낫다.
+       */
+      {
+        pixelRatioCap: 2,
+        msaaSamples: 4,
+        bloom: true,
+        bloomScale: 0.5,
+        shadowMapSize: 2048,
+        shadowCasters: 3,
+        glass: true,
+        clearcoat: 1,
+        envSize: 256,
+        anisotropy: 16,
+        worldTexture: 1024,
+        bottleColumns: 72,
+        fizzScale: 1,
+        bokeh: 6,
+      },
+    ],
     topDown: true,
     /**
      * Off by default now that the caps carry their panel artwork and the board

@@ -84,19 +84,29 @@ export class HumanController {
  * not expressible.
  *
  * ── none of it is a "thinking" delay ───────────────────────────────────────
- * "인위적인 '생각 중' 딜레이를 추가하지 마라. 이 연출이 그 역할을 한다." The
- * search is ~330 ms of measured work and it runs during `think`, underneath the
- * camera still easing into the turn's framing — so the screen is doing something
- * for the whole of it. Every other phase is showing the player something they
- * need in order to know what just happened.
+ * "인위적인 '생각 중' 딜레이를 추가하지 마라. 이 연출이 그 역할을 한다." Nothing
+ * below waits on purpose: the search runs during `think`, underneath the camera
+ * still easing into the turn's framing, and every other phase is showing the
+ * player something they need in order to know what just happened.
+ *
+ * `think` is the longest of them and it is real work rather than a beat —
+ * measured at about two seconds of solver on a 64-candidate search, which is
+ * why what it costs in WALL CLOCK is a question of its own. See `ThinkBudget`:
+ * the share of each frame the search gets is what turns those two seconds into
+ * the wait, and it used to be a constant that suited neither a 60 Hz phone nor
+ * a 120 Hz desktop.
  *
  * ── 강타 forces a second search, and that is not optional ───────────────────
  * The card multiplies the impulse by 1.5 and the cone by 1.5, so the shot the
  * first search chose is not the shot that would now fire. Planning once and
  * playing the card afterwards would have the AI take a boosted version of a move
  * it selected unboosted — which on this board is how a good shot becomes a cap
- * sailing off the far edge. The re-plan runs under the card's own effect
- * animation and the gap, so it costs no visible time.
+ * sailing off the far edge.
+ *
+ * It used to run after every card on the argument that it was hidden under the
+ * effect animation. It is not — `replan` is a phase of its own with nothing on
+ * screen — so it now runs only when the search's own inputs have moved, which is
+ * still not a check on which card was played. See `_replan`.
  */
 export class AiController {
   /**
@@ -118,6 +128,8 @@ export class AiController {
     /** Milliseconds of search this turn, both passes. Read by the panel. */
     this.thinkMs = 0;
     this._replanned = false;
+    /** The card state the current plan was searched under. See `_replan`. */
+    this._searchInputs = null;
 
     /**
      * What the aim overlay draws while the pull grows, or null.
@@ -195,6 +207,11 @@ export class AiController {
     this.cardsPlayed = [];
     this.thinkMs = 0;
     this._replanned = false;
+    /**
+     * What the search reads about this seat's cards, as it stands BEFORE any of
+     * them is played. `_replan` compares against it — see `searchInputs`.
+     */
+    this._searchInputs = this.planner.searchInputs(match, this.player);
     this.aim = null;
     this.highlight = -1;
     this.planner.begin({
@@ -235,6 +252,12 @@ export class AiController {
    * @param {number} dt   render seconds
    * @param {object} ctx
    * @param {import('../Match.js').Match} ctx.match
+   * @param {import('./ThinkBudget.js').ThinkBudget} [ctx.thinkBudget]
+   *   What the frame costs without the search, so the slice can be sized against
+   *   this machine rather than against a constant. Absent — every headless
+   *   caller, `ai-harness.mjs` included — the planner falls back to the flat
+   *   `ai.frameBudgetMs`, because there is no frame to measure and nothing to
+   *   keep smooth.
    * @param {(cardId: string) => void} [ctx.onRevealCard]  start the flip animation
    * @param {() => boolean} [ctx.revealDone]
    */
@@ -268,9 +291,9 @@ export class AiController {
 
   // ── the search ────────────────────────────────────────────────────────────
 
-  _think({ match }) {
+  _think({ match, thinkBudget }) {
     const t0 = performance.now();
-    const done = this.planner.tick();
+    const done = this.planner.tick(thinkBudget?.msFor(this.planner.tuning));
     this.thinkMs += performance.now() - t0;
     if (!done) return;
 
@@ -328,23 +351,44 @@ export class AiController {
   /**
    * Search again, now that the card is in effect.
    *
-   * Only 강타 changes the shot, and only 강타 needs this — but it is run after
-   * ANY card rather than being special-cased on the id. Two reasons: the check
-   * would be a second place that knows which cards are physical, and it would be
-   * wrong the moment a card is added. The cost is one search under an effect
-   * animation that is already playing, and for the other four the second search
-   * returns the same answer as the first because nothing it reads has changed.
+   * Only 강타 changes the shot, and only 강타 needs this — but it is not
+   * special-cased on the id. Two reasons: the check would be a second place that
+   * knows which cards are physical, and it would be wrong the moment a card is
+   * added.
+   *
+   * ── what IS asked is whether the search's own inputs moved ────────────────
+   * The original cost of re-planning after all five was argued as free — "one
+   * search under an effect animation that is already playing" — and that was
+   * true when a search was 330 ms. It is not: `replan` is a phase of its own,
+   * nothing is on screen for it, and a 강타+궤적 turn ran three back-to-back
+   * searches with the player watching a still board through all of them.
+   *
+   * `AiPlanner.searchInputs` reads the four things the search consults about the
+   * hand — the two multipliers, whether the cone is knowable, and whether the
+   * boost probe runs. Unchanged means the second search would build the same
+   * queue, step the same worlds and rank them the same way, which is what the
+   * paragraph above already claimed happens for the other four cards. So it is
+   * skipped rather than run and discarded, and a card that moves any of the four
+   * — including one added later — re-plans exactly as it did before.
    */
   _replan(ctx) {
     const { match } = ctx;
     if (!this.planner.running && !this._replanned) {
       this._replanned = true;
+      const inputs = this.planner.searchInputs(match, this.player);
+      if (inputs === this._searchInputs) {
+        // Nothing the search reads has moved. Keep the plan and go straight to
+        // asking whether this position wants a SECOND card — which is the only
+        // part of the re-plan that had anything left to do.
+        return this._chooseCard(match);
+      }
+      this._searchInputs = inputs;
       this.thinkMs = 0;
       this.planner.begin({ match, player: this.player, shotSeed: this._shotSeed });
       return;
     }
     const t0 = performance.now();
-    const done = this.planner.tick();
+    const done = this.planner.tick(ctx.thinkBudget?.msFor(this.planner.tuning));
     this.thinkMs += performance.now() - t0;
     if (!done) return;
     const pick = this.planner.choose(this._shotSeed);

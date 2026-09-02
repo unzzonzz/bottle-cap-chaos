@@ -111,7 +111,23 @@ export class TurnSettle {
     // to know when a turn will not end.
     this.peaks = arena.peaks();
 
-    if (arena.atRest()) this.quiet++;
+    /**
+     * Handed the peaks that were just taken, rather than letting `atRest` take
+     * its own.
+     *
+     * ── the same reading was being taken twice, every step of every rollout ──
+     * `atRest()` opens with `const peaks = this.peaks()`, so the line above and
+     * the line below used to walk all nine bodies and cross the WASM boundary
+     * for a `linvel` and an `angvel` on each — twice, for one step, for an
+     * answer that cannot have changed in between. Free on the live turn, which
+     * runs one settle at a time; not free in the SEARCH, which runs this loop
+     * about ninety times a turn over some seventy steps each.
+     *
+     * The value passed is the value `atRest` would have computed, so this is a
+     * pure removal of duplicate work — `npm run det:ai` digests unmoved at
+     * 2b19511a / 449d0891.
+     */
+    if (arena.atRest(this.peaks)) this.quiet++;
     else this.quiet = 0;
 
     if (this.quiet >= Math.max(1, Math.round(t.quietSteps))) {

@@ -6,6 +6,7 @@ import {
   LineSegments,
   Mesh,
   PlaneGeometry,
+  Vector3,
 } from 'three';
 import { CapSwap } from '../game/cards/CapSwap.js';
 import { FxMaterials } from './FxMaterial.js';
@@ -31,12 +32,19 @@ import { PALETTE } from '../core/palette.js';
  * the scanline sweep and the edge flash, which are about the frame rather than
  * about the pitch.
  *
- * Both end up in the same low-resolution render target, before the retro pass —
- * see the note in `CardLayer` — so a stun star gets the identical dither lattice
- * and the identical five bits a channel as the turf under it. There is no branch
- * anywhere that exempts an effect from the chain, and that is the point: an
- * effect that looked smoother than the game would read as a different program
- * running on top of it.
+ * ── 그래서 둘은 서로 다른 파이프라인을 받는다 ─────────────────────────────
+ * 이 자리에는 "둘 다 같은 저해상도 렌더 타겟에 들어가 레트로 패스 이전에 그려지므로
+ * 스턴 별이 잔디와 똑같은 디더 격자와 채널당 5비트를 받는다"고 적혀 있었다. 그
+ * 파이프라인은 없다. 저해상도 타겟도, 디더도, 양자화도 남아 있지 않다.
+ *
+ * 지금 사실인 것은 이렇다. `world` 는 게임 씬이므로 **블룸을 받는다** — 가산으로
+ * 그려지는 별과 링은 브라이트 패스가 찾는 바로 그 입력이라, 판 위에서 실제로
+ * 빛난다. `screen` 은 카드 씬이므로 **받지 않는다**: 카드 씬은 블룸 밖이고
+ * (`CardLayer` 헤더에 이유가 있다), 전폭 효과에 블룸이 걸리면 번지는 것이 효과가
+ * 아니라 화면 전체다.
+ *
+ * 이 갈림은 우연이 아니라 각 효과가 무엇에 관한 것이냐를 따른다. 뚜껑 위의 표시는
+ * 판 위의 물건이고, 프레임을 쓸고 지나가는 띠는 그림에 일어나는 일이다.
  *
  * ── it runs on the render clock and writes nothing back ─────────────────────
  * Every number in this file is derived from wall-clock seconds and from state it
@@ -44,23 +52,67 @@ import { PALETTE } from '../core/palette.js';
  * and the cap "shake" is a mesh offset applied after the physics transform has
  * been written — the body does not move, the drawing of it does.
  *
- * ── the period techniques, and only those ───────────────────────────────────
- * Billboarded alpha sprites, additive blending, a stepped sprite sheet, palette
- * cycling on a tint uniform, UV scrolling on a tiling dash, and one full-frame
- * band swept once. No bloom, no particle system, no gradient, no blur. All of
- * those exist and all of them would be one line, which is exactly why the rule
- * has to be written down rather than left to taste.
+ * ── 무엇으로 만들어도 되고, 무엇으로는 안 되는가 ────────────────────────────
+ * 이 목록의 예전 근거는 "시대의 기법만"이었다 — 빌보드 알파 스프라이트, 가산
+ * 블렌딩, 스텝 스프라이트 시트, 팔레트 사이클, UV 스크롤, 전폭 1회 스윕. 그 근거는
+ * 폐기됐다. 하지만 목록을 그냥 지우면 안 된다. 예전 주석이 스스로 밝힌 이유가
+ * 그대로 남아 있기 때문이다 — "전부 존재하고 전부 한 줄이면 되기 때문에, 이 규칙은
+ * 취향에 맡기지 않고 적어 둬야 한다." 지우기만 하면 다섯 카드 전부에 파티클이 붙는다.
+ *
+ * 그래서 근거를 새로 적는다.
+ *
+ *   허용                          왜
+ *   빌보드 스프라이트, 가산       싸고, 겹쳐도 정렬 문제가 없다. 판 위에서 블룸을
+ *                                 받으므로 세기를 낮춰도 빛으로 읽힌다
+ *   부드러운 방사 그라디언트      팔레트가 밝아져 밴딩이 없다. `fxTextures` 의 링과
+ *                                 오라가 이미 그렇게 다시 그려져 있다
+ *   스프라이트 시트               한 텍스처, 유니폼 하나로 프레임을 고른다
+ *   팔레트 사이클                 **서로 다른 주기가 정보다** — 아래를 보라
+ *   UV 스크롤                     정점 하나 움직이지 않고 흐른다
+ *   전폭 1회 스윕                 프레임에 일어나는 일을 프레임으로 말한다
+ *
+ *   금지                          왜
+ *   파티클 시스템                 다섯 효과 × 수백 파티클은 모바일 예산 밖이다.
+ *                                 `budget` 의 `sat` 이 0 이어야 한다
+ *   블러 패스                     카드 씬은 블룸 밖이고, 두 번째 흐림 체인을 세울
+ *                                 이유가 없다. 흐림이 필요하면 텍스처에 굽는다
+ *   전폭 효과의 블룸              화면 전체가 번진다. `screen` 이 카드 씬인 이유다
+ *   지속 효과의 부드러운 페이드   오라와 별은 **상태 표시**다. 페이드는 그 상태가
+ *                                 끝나가는 중이라고 말하는데, 상태는 끝나가지 않는다
+ *   화면 흔들림 증가              v2 §25
+ *
+ * ── 스텝은 남기는 것과 없애는 것이 갈린다 ──────────────────────────────────
+ * 여기 있는 양자화는 거의 전부 "시대의 기법"에서 나왔으므로 전부 재검토 대상이지만,
+ * 전부 없애는 것은 틀린 답이다. 기준은 하나다 — **스텝이 기계적 성격을 표현하면
+ * 남기고, 해상도 한계를 흉내 내는 것이면 없앤다.**
+ *
+ *   남는다   혼란 별의 궤도와 프레임(둘이 **같이** 스텝해야 한다. 따로 놀면
+ *            스프라이트가 모션에 뒤처져 보인다), 강타의 수축 링(부드러운 수축은
+ *            트윈이고 스텝은 기계가 장전되는 것이다), 원모어의 프레임 2박자와
+ *            침묵 해제의 2박자(두 번 치는 것이 정보다), 침묵의 도장(일격이다)
+ *   없앴다   팔레트 사이클의 하드 스텝(CLUT 흉내였다), 뚜껑의 답례 펄스 둘
+ *            (강타·원모어. 힘이 도착하는 것은 기계가 아니라 몸이다), 원모어의
+ *            뚜껑 섬광(대신 짧아졌다)
  */
 
 /** Unit quad, centred. Billboards are placed by their middles. */
 const QUAD = new PlaneGeometry(1, 1);
 
 /**
- * The chaos palette, cycled through on a stepped timer.
+ * The chaos palette. Walked through smoothly, on its own period.
  *
- * A CLUT rotation is what this is imitating, so the entries are few and the
- * steps between them are hard. Cool-to-warm rather than a hue sweep, because a
- * full rainbow reads as a modern shader effect no matter how few steps it has.
+ * ── 스텝이 없어진 것은 흉내 낼 하드웨어가 없기 때문이다 ────────────────────
+ * 항목 사이를 딱딱 건너뛰었고, 근거는 CLUT 로테이션의 흉내였다. 그 근거가 사라진
+ * 뒤에 남는 것은 색이 튀는 별 하나뿐이고, 튀는 것 자체는 아무것도 말하지 않는다 —
+ * 혼란은 뚜껑이 **계속** 걸고 있는 상태라, 그 표시는 도는 것이지 깜빡이는 것이
+ * 아니다.
+ *
+ * 사라지지 않은 것은 **길이**다. 다섯 항목인 것은 강타의 넷, 침묵의 셋과 서로
+ * 소이기 위해서고, 그건 두 카드를 동시에 건 뚜껑에서 두 표시가 한 박자로 보이지
+ * 않게 하는 장치다. 길이를 바꾸더라도 서로 소를 유지하라.
+ *
+ * Cool-to-warm rather than a hue sweep, because a full rainbow reads as a modern
+ * shader effect no matter how few steps it has.
  */
 const CHAOS_PALETTE = [
   [1.0, 1.0, 1.0],
@@ -76,6 +128,9 @@ const CHAOS_PALETTE = [
  * Four entries against chaos's five, so the two cycles never line up even when
  * both are on screen — an armed cap under 혼란 has both a star and an aura, and
  * two markers pulsing in unison would read as one effect.
+ *
+ * 이쪽도 부드럽게 걷는다. 오라는 한 턴 내내 깔려 있는 **상태 표시**고, 상태 표시가
+ * 딱딱 색을 갈면 무언가가 방금 일어난 것으로 읽힌다.
  */
 const SMASH_PALETTE = [
   [1.0, 0.94, 0.78],
@@ -92,9 +147,38 @@ const SWAP_LINE_COLOR = PALETTE.fx.swapLine;
 /** Rings drawn at both ends of every swapped pair. */
 const MAX_SWAP_RINGS = 32;
 
+/** Scratch. 오라와 링이 같은 색을 받으므로 프레임마다 한 번만 푼다. */
+const _tint = new Vector3();
+
 function smoothstep(x) {
   const t = Math.min(1, Math.max(0, x));
   return t * t * (3 - 2 * t);
+}
+
+/**
+ * 팔레트를 한 바퀴 걷는다. 이웃한 두 항목 사이를 보간해서.
+ *
+ * 목록의 길이가 곧 주기이고, 그 길이들이 서로 소인 것이 이 파일의 장치다 —
+ * `CHAOS_PALETTE` 의 주석을 보라. 보간은 그 위상 관계를 바꾸지 않는다: 같은 속도로
+ * 같은 순환을 도는데 사이가 이어져 있을 뿐이다.
+ *
+ * `%` 뒤에 한 번 더 `+ n` 을 거치는 것은 음수 방어가 아니라 습관이다 — `_now` 는
+ * 단조 증가라 음수가 될 수 없지만, 이 함수가 다른 시계에 붙는 날 조용히 틀리는
+ * 대신 조용히 맞기를 바란다.
+ *
+ * @param {number[][]} list  RGB 0..1 셋의 목록
+ * @param {number} now       seconds
+ * @param {number} rate      cycles per second, over the WHOLE list
+ * @param {import('three').Vector3} out
+ */
+function cyclePalette(list, now, rate, out) {
+  const n = list.length;
+  const at = (((now * rate * n) % n) + n) % n;
+  const i = Math.floor(at);
+  const a = list[i];
+  const b = list[(i + 1) % n];
+  const t = smoothstep(at - i);
+  return out.set(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t);
 }
 
 export class CardFx {
@@ -598,13 +682,10 @@ export class CardFx {
       if (camera) s.mesh.quaternion.copy(camera.quaternion);
       FxMaterials.setFrame(s.mat, step, frames);
 
-      // Palette cycling, on its own slower step so the colour is not simply the
-      // frame number in disguise.
-      const p = CHAOS_PALETTE[
-        Math.floor(this._now * cfg.paletteCyclesPerSecond * CHAOS_PALETTE.length) %
-          CHAOS_PALETTE.length
-      ];
-      s.mat.uniforms.uTint.value.set(p[0], p[1], p[2]);
+      // Palette cycling, on its own slower period so the colour is not simply the
+      // frame number in disguise. 궤도와 프레임은 스텝이고 이것만 부드럽다 —
+      // 그 둘은 기계적 회전이고, 색은 회전이 아니기 때문이다.
+      cyclePalette(CHAOS_PALETTE, this._now, cfg.paletteCyclesPerSecond, s.mat.uniforms.uTint.value);
       s.mat.uniforms.uOpacity.value = 1;
       s.mesh.visible = true;
     }
@@ -689,25 +770,35 @@ export class CardFx {
     }
 
     const cfg = this.config.cardFx;
-    // Short and hard: full at the start, gone by a third of the way through.
-    // A flash that fades out over its whole duration is a glow, not a flash.
-    const k = Math.max(0, 1 - burst.t * 3);
-    const stepped = Math.ceil(k * 4) / 4;
+    /**
+     * Short and hard: full at the start, gone before the effect is.
+     *
+     * ── 계단이 사라지고 대신 짧아졌다 ─────────────────────────────────────
+     * `ceil(k * 4) / 4` 였다. 근거는 시대의 기법이었고, 그것이 사라진 뒤에 남는
+     * 것은 네 칸으로 끊기며 꺼지는 빛뿐이다 — 그건 섬광이 아니라 저속 촬영이다.
+     *
+     * 그런데 계단을 그냥 빼면 같은 길이의 페이드가 되고, "화면 전체를 페이드로
+     * 끄지 마라"는 이 파일의 규칙이 뚜껑 위에서 그대로 반복된다. 그래서 계단을
+     * 뺀 만큼 창을 좁혔다: 4분의 1 지점에서 이미 없다. 제곱으로 떨어뜨리는 것도
+     * 같은 이유로, 앞쪽이 강하고 꼬리가 없어야 섬광이다.
+     */
+    const k = Math.max(0, 1 - burst.t * 4);
+    const level = k * k;
 
     for (let i = 0; i < this.flashes.length; i++) {
       const f = this.flashes[i];
       // `_marks`, not `capOwner`: a cap that has gone off the board is still a
       // body at a position, and flashing it lights up a corpse.
-      if (!this._marks(burst.player, i) || stepped <= 0) {
+      if (!this._marks(burst.player, i) || level <= 0.004) {
         f.mesh.visible = false;
         continue;
       }
       const com = this.arena.capCom(i);
       f.mesh.position.set(com.x, com.y + cfg.ringHeight, com.z);
-      f.mesh.scale.setScalar(cfg.ringSize * (1 + (1 - stepped) * 0.8));
+      f.mesh.scale.setScalar(cfg.ringSize * (1 + (1 - k) * 0.8));
       if (camera) f.mesh.quaternion.copy(camera.quaternion);
       f.mat.uniforms.uTint.value.set(...ONEMORE_TINT);
-      f.mat.uniforms.uOpacity.value = stepped;
+      f.mat.uniforms.uOpacity.value = level;
       f.mesh.visible = true;
     }
   }
@@ -734,10 +825,8 @@ export class CardFx {
     // effect ending and holds until the shot expires the card. It is the only
     // thing on screen that says "you are still holding this".
     const armed = new Set(this.smashCaps);
-    const tint = SMASH_PALETTE[
-      Math.floor(this._now * cfg.smashPaletteCyclesPerSecond * SMASH_PALETTE.length) %
-        SMASH_PALETTE.length
-    ];
+    cyclePalette(SMASH_PALETTE, this._now, cfg.smashPaletteCyclesPerSecond, _tint);
+    const tint = _tint;
     for (let i = 0; i < this.auras.length; i++) {
       const a = this.auras[i];
       if (!armed.has(i) || !this.arena) {
@@ -748,7 +837,7 @@ export class CardFx {
       a.mesh.position.set(com.x, com.y + cfg.smashAuraHeight, com.z);
       a.mesh.scale.setScalar(cfg.smashAuraSize);
       if (camera) a.mesh.quaternion.copy(camera.quaternion);
-      a.mat.uniforms.uTint.value.set(tint[0], tint[1], tint[2]);
+      a.mat.uniforms.uTint.value.copy(tint);
       a.mat.uniforms.uOpacity.value = Math.max(0, cfg.smashAuraStrength);
       a.mesh.visible = true;
     }
@@ -781,7 +870,7 @@ export class CardFx {
       r.mesh.position.set(com.x, com.y + cfg.ringHeight, com.z);
       r.mesh.scale.setScalar(size);
       if (camera) r.mesh.quaternion.copy(camera.quaternion);
-      r.mat.uniforms.uTint.value.set(tint[0], tint[1], tint[2]);
+      r.mat.uniforms.uTint.value.copy(tint);
       // Brighter as it closes: the energy is going INTO the cap, so the last
       // frame before it vanishes is the strongest one.
       r.mat.uniforms.uOpacity.value = 0.35 + (1 - stepped) * 0.65;
@@ -911,25 +1000,36 @@ export class CardFx {
       touched = true;
     }
 
-    // The answering pulse, on the BACK half of the effect — after the ring has
-    // finished closing. The order is the whole statement: the force gathers,
-    // then it lands. Stepped, like the one-more pulse, for the same reason.
+    /**
+     * The answering pulse, on the BACK half of the effect — after the ring has
+     * finished closing. The order is the whole statement: the force gathers,
+     * then it lands.
+     *
+     * ── 여기의 계단은 없앴고, 링의 계단은 남겼다 ─────────────────────────────
+     * 둘 다 `ceil` 이었고 근거도 같았다. 그런데 두 가지가 서로 다른 것을 말한다.
+     * 수축하는 링은 **기계**다 — 무언가가 장전되고 있고, 장전은 딱딱 걸린다.
+     * 뚜껑이 부풀었다 돌아오는 것은 기계가 아니라 **맞은 몸**이고, 세 칸으로
+     * 끊기며 부푸는 몸은 없다.
+     *
+     * 계단이 하던 다른 일 — "이건 방금 일어난 일이지 숨쉬기가 아니다" — 는 사인이
+     * 아니라 **한 번만** 도는 것과 앞이 무거운 곡선이 맡는다. 아래의 `k * k` 다.
+     */
     if (burst?.cardId === 'smash' && this._marks(burst.player, index)) {
       const cfg2 = this.config.cardFx;
       const close = Math.max(0.05, Math.min(1, cfg2.smashRingFraction));
       const after = (burst.t - close) / Math.max(0.05, 1 - close);
       if (after > 0) {
         const k = Math.max(0, 1 - after * 1.8);
-        scale *= 1 + (Math.ceil(k * 3) / 3) * cfg2.smashPulseAmount;
+        scale *= 1 + k * k * cfg2.smashPulseAmount;
         touched = true;
       }
     }
 
     if (burst?.cardId === 'onemore' && this._marks(burst.player, index)) {
-      // One pulse, stepped. Not a sine: a smooth breath reads as an idle
-      // animation rather than as a thing that just happened.
+      // 강타의 답례 펄스와 같은 곡선, 같은 이유다. 한 번 부풀고 돌아온다 — 사인이
+      // 아닌 것은 그대로다: 매끄러운 호흡은 방금 일어난 일이 아니라 상시 애니메이션이다.
       const k = Math.max(0, 1 - burst.t * 2.5);
-      scale *= 1 + Math.ceil(k * 3) / 3 * cfg.pulseAmount;
+      scale *= 1 + k * k * cfg.pulseAmount;
       touched = true;
     }
 

@@ -6,6 +6,8 @@ import {
   Vector2,
 } from 'three';
 import { PALETTE } from './palette.js';
+import { onQualityChange, QUALITY } from './quality.js';
+import { trackTextureClone } from './textures.js';
 
 /**
  * Every world surface in the game, as `MeshPhysicalMaterial`.
@@ -49,6 +51,23 @@ import { PALETTE } from './palette.js';
 /** `gloss` 0 -> matte, 1 -> wet. The two ends of the roughness ramp. */
 const ROUGH_MATTE = 0.85;
 const ROUGH_WET = 0.22;
+
+/**
+ * 환경맵이 **없을 때** `metalness` 에 곱하는 값. 가독성 하한이지 스타일이 아니다.
+ *
+ * `metalness` 는 "이 표면은 albedo 를 확산으로 내놓지 않고 환경을 비춘다" 는
+ * 진술이다. 비출 것이 없으면 뚜껑은 확산 38% 짜리(1 − 0.62) 어두운 원반이 된다 —
+ * 광원 세 개의 정반사만 남는다. 그건 "덜 예쁘다" 가 아니라 **1P 와 2P 를 색과
+ * 명도로 구별한다** 는 조항이 깨지는 것이다. 0.25 를 곱하면 확산이 85% 로
+ * 돌아오고, 남은 금속기와 직접광의 하이라이트가 곡면을 읽히게 한다. 즉 "금속
+ * 없음" 이 아니라 **칠한 금속**이고, 최저 티어에서 유리가 `menuMaterials` 에서
+ * 받는 대접(§가짜 유리)과 같은 종류의 대체다.
+ *
+ * 출시되는 표는 이 길을 쓰지 않는다 — 다섯 티어 전부 `envSize` 가 0 보다 크다.
+ * 왜 "없음" 을 넣었다가 뺐는지는 `environment.buildEnvironment` 머리말에 있다.
+ * 이 상수는 그 값을 다시 0 으로 적는 사람을 위한 바닥이다.
+ */
+const NO_ENV_METALNESS = 0.25;
 
 /**
  * The rim term, injected into the standard shader.
@@ -125,8 +144,14 @@ export class GlossMaterials {
       envIntensity: 1.0,
       /** The cool edge light. See `RIM_MAIN`. */
       rimStrength: 0.35,
-      /** Scales each material's own clearcoat. 0 kills the wet layer entirely. */
-      clearcoatAmount: 1.0,
+      /**
+       * Scales each material's own clearcoat. 0 kills the wet layer entirely.
+       *
+       * 품질 티어가 여기에 쓴다 — 보통 이하가 0 이다. 디버그 패널도 여기에
+       * 쓰므로 마지막에 쓴 쪽이 이기고, 티어를 만지면 티어가 다시 이긴다.
+       * 패널은 개발 도구이니 그 순서가 맞다.
+       */
+      clearcoatAmount: QUALITY.clearcoat,
       /** Scales the gloss ramp. 0 makes everything matte without re-tuning. */
       glossAmount: 1.0,
     };
@@ -134,6 +159,7 @@ export class GlossMaterials {
     this.rimColor = new Color(PALETTE.light.rim);
     this._materials = new Set();
     this._environment = null;
+    this._offQuality = onQualityChange(() => this._applyQuality());
     /** Kept only so `setResolution` has something to write. Nothing reads it. */
     this._resolution = new Vector2().copy(resolution ?? new Vector2(1, 1));
   }
@@ -211,6 +237,16 @@ export class GlossMaterials {
     if (map && wantsTransform) {
       texture = map.clone();
       texture.needsUpdate = true;
+      /**
+       * 사본을 `textures.js` 에 알린다. 품질 티어가 캔버스를 다시 그리기 때문이다.
+       *
+       * 원본과 캔버스를 공유하므로 다시 그릴 일은 없지만, three 는 텍스처 객체마다
+       * 업로드 버전을 따로 세므로 사본에도 `needsUpdate` 가 필요하다. 알리지
+       * 않으면 티어를 바꿨을 때 잔디와 보드 — UV 변환을 쓰는 바로 그것들 — 만
+       * 옛 해상도에 남는다. 월드 텍스처가 아닌 사본(UI 쪽)은 레지스트리에 없으므로
+       * 여기 등록해도 다시 그려지지 않고, 쓸데없는 `needsUpdate` 한 번이 전부다.
+       */
+      trackTextureClone(map, texture);
     }
     if (texture && wantsTransform) {
       texture.repeat.set(uvScale[0], uvScale[1]);
@@ -222,7 +258,7 @@ export class GlossMaterials {
       color: new Color(color),
       side: doubleSided ? DoubleSide : FrontSide,
       vertexColors,
-      metalness,
+      metalness: this._metalnessFor(metalness),
       roughness: roughness ?? this._roughnessFor(gloss),
       clearcoat: clearcoat * this.shared.clearcoatAmount,
       clearcoatRoughness,
@@ -256,6 +292,7 @@ export class GlossMaterials {
     });
 
     material.userData.gloss = gloss;
+    material.userData.metalnessBase = metalness;
     material.userData.envIntensity = envIntensity;
     material.userData.clearcoatBase = clearcoat;
     material.userData.rim = rim;
@@ -277,6 +314,11 @@ export class GlossMaterials {
   _roughnessFor(gloss) {
     const g = Math.max(0, Math.min(1, gloss * this.shared.glossAmount));
     return ROUGH_MATTE + (ROUGH_WET - ROUGH_MATTE) * g;
+  }
+
+  /** 비출 것이 있는가에 따라 갈린다. `NO_ENV_METALNESS` 를 보라. */
+  _metalnessFor(metalness) {
+    return this._environment ? metalness : metalness * NO_ENV_METALNESS;
   }
 
   _installRim(material) {
@@ -303,6 +345,9 @@ export class GlossMaterials {
     this._environment = texture;
     for (const m of this._materials) {
       m.envMap = texture;
+      // 환경이 붙거나 떨어지면 금속기의 의미가 달라진다. `apply` 가 그 계산을
+      // 들고 있으므로 여기서는 부르기만 한다.
+      m.metalness = this._metalnessFor(m.userData.metalnessBase ?? m.metalness);
       m.needsUpdate = true;
     }
   }
@@ -312,6 +357,7 @@ export class GlossMaterials {
     for (const m of this._materials) {
       m.envMapIntensity = this.shared.envIntensity * (m.userData.envIntensity ?? 1);
       m.roughness = this._roughnessFor(m.userData.gloss ?? 1);
+      m.metalness = this._metalnessFor(m.userData.metalnessBase ?? m.metalness);
       m.clearcoat = (m.userData.clearcoatBase ?? 0) * this.shared.clearcoatAmount;
       const shader = m.userData.shader;
       if (shader?.uniforms?.uRimStrength) shader.uniforms.uRimStrength.value = this.shared.rimStrength;
@@ -328,7 +374,20 @@ export class GlossMaterials {
     this._resolution.copy(resolution);
   }
 
+  /**
+   * 티어 변경. 클리어코트 한 줄이지만, 그 한 줄이 서른 개 재질에 걸린다.
+   *
+   * `apply()` 가 이미 "공유 노브를 살아 있는 모든 재질에 밀어 넣는" 함수이므로
+   * 새 경로를 만들지 않고 그것을 쓴다 — 디버그 패널이 값을 바꿨을 때와 정확히
+   * 같은 일이 일어나야 하고, 두 경로가 다르면 그 차이는 패널에서만 재현된다.
+   */
+  _applyQuality() {
+    this.shared.clearcoatAmount = QUALITY.clearcoat;
+    this.apply();
+  }
+
   dispose() {
+    this._offQuality?.();
     for (const m of [...this._materials]) m.dispose();
     this._materials.clear();
   }

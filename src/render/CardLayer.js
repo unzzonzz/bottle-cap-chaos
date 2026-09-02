@@ -129,7 +129,7 @@ export class CardLayer {
     this.scene = new Scene();
     this.camera = frameCamera();
 
-    this.materials = new CardMaterials({ resolution });
+    this.materials = new CardMaterials();
 
     /** @type {CardHand[]} index is the player. */
     this.hands = [0, 1].map(
@@ -200,6 +200,52 @@ export class CardLayer {
     this.guide.visible = false;
     this.scene.add(this.guide);
     this._guideKey = '';
+    /** The PADDED size the guide texture wants to be drawn at. See its note. */
+    this._guideDraw = { w: 1, h: 1 };
+
+    /**
+     * 무장하는 순간 한 번 터지는 링. 가이드와 **같은 텍스처**를 쓴다.
+     *
+     * ── 왜 확인이 따로 필요한가 ────────────────────────────────────────────
+     * 슬롯은 이제 게이지다: 카드를 끌어 올릴수록 연속으로 밝아진다. 연속인 것이
+     * 개선이고 동시에 문제다 — 끝에 도달했다는 사실 자체가 그 연속 안에 묻힌다.
+     * 예전에는 `guideArmedGrow` 로 한 번 커지는 것뿐이라 놓쳤는지 아닌지가
+     * 애매했고, 게이지가 되면 그 애매함이 오히려 커진다.
+     *
+     * 그래서 1 에 닿는 프레임에 링 하나가 가이드 밖으로 퍼지며 사라진다. 슬롯의
+     * 모양 그대로라 새 텍스처가 없다 — 같은 그림이 한 번 커지며 없어지는 것이고,
+     * 그것이 "여기 놓으면 된다"의 확인이다.
+     *
+     * ── 프레임으로 센다 ────────────────────────────────────────────────────
+     * `cardFx.smashFlashFrames` 와 같은 이유다: 이 길이의 창은 주사율이 다르면
+     * 다른 프레임 수에 걸리고, 1~2 프레임에서는 그것이 "보임"과 "아무것도 아님"의
+     * 차이다.
+     *
+     * ── 가이드가 사라져도 끝까지 돈다 ──────────────────────────────────────
+     * 무장한 그 순간에 손을 놓는 것은 흔한 일이고, 그러면 카드가 날아가면서
+     * 가이드가 꺼진다. 확인이 그 프레임에 같이 꺼지면 확인한 적이 없는 것이다.
+     * 그래서 터지는 자리를 붙잡아 두고 자기 프레임 수만큼 혼자 돈다.
+     */
+    this.burst = new Mesh(new PlaneGeometry(1, 1), this.materials.create(useGuideTexture(64, 96)));
+    this.burst.visible = false;
+    this.scene.add(this.burst);
+    /** Frames of burst still owed. Counted DOWN in frames, not seconds. */
+    this._burstLeft = 0;
+    /** Where it plays, captured on the latching frame. */
+    this._burstAt = { x: 0, y: 0, w: 1, h: 1, order: 0 };
+    /** Whether the dragged card was armed last frame. The rising edge arms it. */
+    this._wasArmed = false;
+
+    /**
+     * 지난 프레임에 아직 날아오고 있던 카드의 키.
+     *
+     * 이번 프레임에 없어진 것이 **이번 프레임에 착지한 것**이다. 비행이 끝나는
+     * 순간을 `CardFlight` 에서 알려 주게 하지 않는 것은, 그러면 도착 연출이
+     * 비행의 일이 되기 때문이다 — 비행은 그림 하나고, 부채꼴이 열리는 것은 손패의
+     * 일이다. 여기서 두 집합의 차를 보면 어느 쪽도 상대를 알 필요가 없다.
+     */
+    this._wasPending = new Set();
+    this._landed = new Set();
 
     /**
      * The padlock that stands on a sealed hand. One per player.
@@ -246,9 +292,14 @@ export class CardLayer {
     this._reveal = null;
   }
 
-  setResolution(resolution) {
-    this.materials.setResolution(resolution);
-    // The frame can change shape now; the ortho box has to follow it.
+  /**
+   * 프레임이 모양을 바꿀 수 있으므로 직교 상자가 따라가야 한다.
+   *
+   * 재질에는 더 넘기지 않는다. `CardMaterials` 가 해상도를 받던 것은 정점 스냅의
+   * 격자 때문이었고, 스냅과 함께 사라졌다 — 카드는 고정된 프레임 상자 안에 놓이므로
+   * 렌더 타겟이 몇 픽셀이든 레이아웃이 같다.
+   */
+  setResolution(_resolution) {
     refitFrameCamera(this.camera);
   }
 
@@ -284,12 +335,29 @@ export class CardLayer {
    * @param {import('../game/cards/CardHands.js').CardHands} hands
    */
   syncTo(hands, pending = null) {
+    /**
+     * 착지한 키 = 지난 프레임엔 보류였는데 이번 프레임엔 아닌 것.
+     *
+     * 이 차집합이 곧 "비행이 방금 끝났다"이고, 그것과 그냥 손패에 카드가 하나 는
+     * 것 — 첫 배분, 되돌린 무대 — 은 다른 사건이다. 후자에 착지 연출을 붙이면
+     * 판이 열릴 때마다 다섯 장이 한꺼번에 뒤집힌다.
+     */
+    this._landed.clear();
+    for (const k of this._wasPending) {
+      if (!pending || !pending.has(k)) this._landed.add(k);
+    }
+    this._wasPending.clear();
+    if (pending) for (const k of pending) this._wasPending.add(k);
+
     for (const h of this.hands) {
       const held = hands.get(h.player);
       // A card still flying in from the field is not in the fan yet — see
       // `CardFlight`. Filtered here rather than inside the hand so the hand
       // stays a plain mirror of the state it is given.
-      h.syncTo(pending && pending.size ? held.filter((c) => !pending.has(c.key)) : held);
+      h.syncTo(
+        pending && pending.size ? held.filter((c) => !pending.has(c.key)) : held,
+        this._landed.size ? this._landed : null,
+      );
     }
   }
 
@@ -362,12 +430,37 @@ export class CardLayer {
     const cfg = this.config.cards;
 
     this._now += dt;
+    /**
+     * 홀로그램에서 손패 전체가 공유하는 넷. 프레임당 한 번 쓴다.
+     *
+     * 카드마다 다른 것은 **위상**이고 그건 각자의 위치와 각도가 만든다 —
+     * `CardHand._place` 가 그 둘을 넘긴다. 여기 있는 것은 무늬의 성질(띠 간격,
+     * 채도, 테두리 폭)과 시간이고, 그 셋이 카드마다 다르면 다섯 장이 서로 다른
+     * 재질로 만들어진 것으로 보인다.
+     *
+     * 매 프레임 쓰는 것은 패널 때문이다. 생성자에서 한 번만 읽으면 슬라이더를
+     * 움직여도 화면이 변하지 않고, 그건 패널에 대한 거짓말이다. 재질이 유니폼
+     * 객체를 공유하므로 비용은 한 번의 대입 넷이다.
+     *
+     * 시간은 아주 느린 드리프트다. 아무도 손대지 않는 손패가 완전히 정지한 그림이
+     * 되지 않을 만큼만 흐른다.
+     */
+    const fxCfg = this.config.cardFx;
+    const shared = this.materials.shared;
+    shared.uHoloScale.value = fxCfg.holoScale;
+    shared.uHoloSat.value = fxCfg.holoSaturation;
+    shared.uHoloRim.value = fxCfg.holoRimWidth;
+    shared.uHoloTime.value = this._now * fxCfg.holoDriftPerSecond;
+
     this._visible = visible;
     if (!visible) {
       for (const h of this.hands) h.root.visible = false;
       for (const s of this._seals) s.visible = false;
       this.notice.visible = false;
       this.guide.visible = false;
+      this.burst.visible = false;
+      this._burstLeft = 0;
+      this._wasArmed = false;
       // Hover state goes with it, or a pointer that was over a card when the
       // mode changed would keep reporting one that is no longer drawn — and the
       // router asks the cards before it asks the board, so that press would be
@@ -438,6 +531,7 @@ export class CardLayer {
     }
 
     this._updateGuide();
+    this._updateBurst();
     this._updateNotice();
   }
 
@@ -490,6 +584,9 @@ export class CardLayer {
       || card.blocked || card.flying > 0
     ) {
       this.guide.visible = false;
+      // 슬롯이 없으면 무장도 없다. 에지를 남겨 두면 다음에 같은 카드를 집었을 때
+      // 이미 무장한 상태로 시작해 확인이 나오지 않는다.
+      this._wasArmed = false;
       return;
     }
 
@@ -501,21 +598,49 @@ export class CardLayer {
     const w = (cfg.width * cfg.hoverScale + margin * 2) * scale;
     const h = (cardH * cfg.hoverScale + margin * 2) * scale;
 
-    // Re-textured only when the drawn size changes, so the border stays one
-    // texel per pixel instead of being stretched off the grid.
+    /**
+     * Re-textured only when the SLOT size changes, so the border stays one texel
+     * per pixel instead of being stretched off the grid.
+     *
+     * 그려지는 크기는 슬롯보다 크다. 다크 헤일로와 흰 글로우가 퍼질 자리가 텍스처
+     * 안에 있어야 하고, 그 여백만큼 쿼드도 커져야 슬롯의 실제 크기가 `guideMargin`
+     * 이 정한 값 그대로 남는다 — 여백을 무시하고 슬롯 크기로 그리면 빛이 눌려
+     * 들어와 테두리가 다시 굵은 선이 된다. 텍스처가 `userData` 로 그 크기를 준다.
+     */
     const key = `${Math.round(w)}:${Math.round(h)}`;
     if (key !== this._guideKey) {
       this._guideKey = key;
-      this.guide.material.uniforms.uMap.value = useGuideTexture(w, h);
+      const tex = useGuideTexture(w, h);
+      this.guide.material.uniforms.uMap.value = tex;
+      this.burst.material.uniforms.uMap.value = tex;
+      this._guideDraw = { w: tex.userData.width, h: tex.userData.height };
     }
+
+    /**
+     * 문턱까지의 진행도. 미리보기에는 없다 — 아직 끌고 있지 않으므로.
+     *
+     * `CardHand.armProgress` 는 `_checkArmed` 와 **같은 식**에서 나온다. 문턱을
+     * 옮기는 것이 아니라 그 식의 값을 노출하는 것이고, 그래서 여기서 무엇을 하든
+     * 카드가 무장되는 높이는 한 픽셀도 움직이지 않는다.
+     */
+    const p = preview ? 0 : hand.armProgress;
 
     // Where the card's GRIP sits at the instant it arms — the identical
     // expression `_checkArmed` compares against — and the body rises from there.
     const gripY = hand.root.position.y + (card.homeY + cfg.useLiftFactor * cardH) * scale;
-    const grow = card.armed ? 1 + Math.max(0, cfg.guideArmedGrow) : 1;
+    /**
+     * 이산 점프가 아니라 연속이다.
+     *
+     * `guideArmedGrow` 의 주석은 "카드가 선을 넘는 것은 EVENT 고, 매끄럽게 자란
+     * 슬롯은 과정을 보고하는 것"이라고 적어 두었다. 그 문장은 슬롯의 **확대**가
+     * 확인을 맡고 있을 때 맞았다. 이제 확인은 무장 프레임에 터지는 링이 맡고
+     * (`_updateBurst`), 슬롯은 과정을 보고하는 쪽으로 옮겼다 — 보고할 과정이
+     * 실제로 있고, 그것이 보이지 않는 것이 원래의 문제였기 때문이다.
+     */
+    const grow = 1 + Math.max(0, cfg.guideArmedGrow) * p;
 
     this.guide.position.set(0, gripY + (cardH * cfg.hoverScale * scale) / 2, -1);
-    this.guide.scale.set(w * grow, h * grow, 1);
+    this.guide.scale.set(this._guideDraw.w * grow, this._guideDraw.h * grow, 1);
 
     /**
      * Above the resting fan, and ALWAYS below the card being carried.
@@ -551,19 +676,73 @@ export class CardLayer {
 
     const u = this.guide.material.uniforms;
     /**
-     * 미리보기는 **표적이 아니라 예고**라서 옅다.
+     * 미리보기는 **표적이 아니라 예고**라서 옅다. 그 다음은 게이지다.
      *
      * `cards` 는 시뮬레이션 쪽 설정이라 새 키를 넣지 않는다 — `config.cards` 의
-     * 주석에 그 경계가 적혀 있다. 그래서 이미 있는 `guideOpacity` 에서 유도한다:
-     * 드래그를 시작하면 같은 슬롯이 그 자리에서 진해지므로, 두 상태가 서로 다른
-     * 물건이 아니라 같은 것의 두 단계로 읽힌다.
+     * 주석에 그 경계가 적혀 있다. 그래서 이미 있는 `guideOpacity` 와
+     * `guideArmedOpacity` 에서 유도한다: 그 둘이 여전히 양 끝을 정하고, 새로 생긴
+     * 것은 그 사이를 잇는 방법뿐이다.
+     *
+     * 드래그를 시작하면 같은 슬롯이 그 자리에서 진해지므로, 미리보기와 게이지가
+     * 서로 다른 물건이 아니라 같은 것의 두 단계로 읽힌다.
      */
     u.uOpacity.value = preview
       ? cfg.guideOpacity * 0.55
-      : (card.armed ? cfg.guideArmedOpacity : cfg.guideOpacity);
+      : cfg.guideOpacity + (cfg.guideArmedOpacity - cfg.guideOpacity) * p;
     u.uDrain.value = 0;
     u.uTint.value.setScalar(1);
     this.guide.visible = true;
+
+    /**
+     * 무장하는 프레임을 잡는다.
+     *
+     * `card.armed` 는 카드 객체에 남는 값이라 프레임 사이에 비교할 수 있다 —
+     * `CardFx._burst` 처럼 매 프레임 새로 만들어지는 것이 아니다. 그래도 상승
+     * 에지를 여기서 따로 기억하는 것은, 끌고 있는 카드가 프레임 사이에 바뀔 수
+     * 있기 때문이다(놓고 다른 장을 집는다). 그때는 새 카드의 `armed` 가 false 이므로
+     * 에지가 다시 서고, 확인은 카드마다 한 번씩 일어난다.
+     */
+    if (card.armed && !this._wasArmed) {
+      this._burstLeft = Math.max(0, Math.round(this.config.cardFx.guideBurstFrames));
+      this._burstAt = {
+        x: this.guide.position.x,
+        y: this.guide.position.y,
+        w: this._guideDraw.w,
+        h: this._guideDraw.h,
+        order: this.guide.renderOrder,
+      };
+    }
+    this._wasArmed = card.armed;
+  }
+
+  /**
+   * 확인의 링. 잡아 둔 자리에서 자기 프레임 수만큼 혼자 돈다.
+   *
+   * 가이드와 독립인 것이 요점이다 — 무장한 그 순간에 손을 놓으면 카드가 날아가고
+   * 가이드가 꺼지는데, 확인이 같이 꺼지면 확인한 적이 없는 것이 된다.
+   */
+  _updateBurst() {
+    if (this._burstLeft <= 0) {
+      this.burst.visible = false;
+      return;
+    }
+    const frames = Math.max(1, Math.round(this.config.cardFx.guideBurstFrames));
+    const k = this._burstLeft / frames;
+    this._burstLeft -= 1;
+
+    const at = this._burstAt;
+    const spread = 1 + Math.max(0, this.config.cardFx.guideBurstGrow) * (1 - k);
+    this.burst.position.set(at.x, at.y, -1);
+    this.burst.scale.set(at.w * spread, at.h * spread, 1);
+    // 가이드 바로 위. 확인은 슬롯이 하는 말의 마지막 한 마디라 그 위에 놓인다.
+    this.burst.renderOrder = at.order + 0.25;
+    const u = this.burst.material.uniforms;
+    // 제곱으로 떨어뜨려 끝이 끌리지 않는다. 여섯 프레임에 꼬리까지 있으면 그건
+    // 번쩍임이 아니라 짧은 페이드다.
+    u.uOpacity.value = k * k;
+    u.uDrain.value = 0;
+    u.uTint.value.setScalar(1);
+    this.burst.visible = true;
   }
 
   /**

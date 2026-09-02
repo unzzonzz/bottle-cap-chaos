@@ -11,6 +11,7 @@ import { FORMATION_KEYS } from '../game/layout/formations.js';
 import { RATIO } from '../game/layout/pitchMetrics.js';
 import { FRAME as CARD_FRAME } from '../render/CardLayer.js';
 import { clearFxTextureCache } from '../render/fxTextures.js';
+import { onQualityChange, QUALITY, TIER_NAMES } from '../core/quality.js';
 // Both used by the orb-weight folder below and both previously missing, which
 // made `?debug=1` throw a ReferenceError partway through building the panel —
 // so every folder after the weights, this file's own victory section included,
@@ -61,6 +62,7 @@ export function bootPhysicsDebug({
   victory,
   audio,
   audioSettings,
+  graphicsSettings = null,
   onRebuild,
   onModeChange,
   onNewMatch,
@@ -874,6 +876,59 @@ export function bootPhysicsDebug({
     .onChange(() => camera.apply());
   look.add(config.view, 'maxZoom', 1.5, 10, 0.5).name('최대 줌 배율');
 
+  /**
+   * 그래픽 품질 티어. 성능 측정을 하려면 여기서 왕복시켜야 한다.
+   *
+   * 드롭다운이지 슬라이더가 아니다 — 설정 화면의 칩 줄과 달리 여기서 중요한
+   * 것은 "다음 칸" 이 아니라 "저 칸으로" 이고, 다섯 개를 이름으로 보는 편이
+   * 측정 중에 어디 있는지 헷갈리지 않는다.
+   *
+   * 아래 읽기 줄들은 티어가 실제로 무엇으로 풀렸는지를 보여 준다. 표를 고쳤을 때
+   * 그 값이 정말 파이프라인에 도착했는지를 확인할 곳이 필요하고, 그게 없으면
+   * "표는 고쳤는데 화면이 안 바뀐다" 를 코드를 읽어서 판단하게 된다.
+   */
+  const qualityFolder = look.addFolder('그래픽 품질');
+  const qualityProxy = {
+    get tier() {
+      return TIER_NAMES[QUALITY.tier];
+    },
+    set tier(name) {
+      const next = TIER_NAMES.indexOf(name);
+      if (next >= 0) graphicsSettings?.setTier(next);
+    },
+  };
+  const qualityStats = { resolved: '', casters: '' };
+  const qualityRow = qualityFolder.add(qualityProxy, 'tier', [...TIER_NAMES]).name('티어');
+  const qualityResolvedRow = qualityFolder.add(qualityStats, 'resolved').name('해상도 · MSAA · 그림자').disable();
+  const qualityCasterRow = qualityFolder.add(qualityStats, 'casters').name('블룸 · 환경 · 캐스터 · 텍스처').disable();
+  if (!graphicsSettings) qualityRow.disable();
+  qualityFolder
+    .add(
+      {
+        forget: () => {
+          // `reset` 은 저장 키를 지운다 — 기본값을 다시 쓰는 것이 아니라 이 기기가
+          // 설정을 가진 적 없게 만드는 것이다. 자동 강등을 다시 시험할 유일한 방법.
+          graphicsSettings?.reset();
+        },
+      },
+      'forget',
+    )
+    .name('저장 잊기 (자동 강등 재시험)');
+
+  function refreshQuality() {
+    qualityStats.resolved =
+      `x${QUALITY.pixelRatioCap}  ·  MSAA ${QUALITY.msaaSamples}  ·  ` +
+      `그림자 ${QUALITY.shadowMapSize || '끔'}`;
+    qualityStats.casters =
+      `블룸 ${QUALITY.bloom ? QUALITY.bloomScale : '끔'}  ·  환경 ${QUALITY.envSize || '없음'}  ·  ` +
+      `캐스터 ${QUALITY.shadowCasters}  ·  ${QUALITY.worldTexture}px`;
+    qualityRow.updateDisplay();
+    qualityResolvedRow.updateDisplay();
+    qualityCasterRow.updateDisplay();
+  }
+  refreshQuality();
+  onQualityChange(refreshQuality);
+
   // ── camera control ───────────────────────────────────────────────────────
   const cam = gui.addFolder('카메라 조작');
   cam.add(config.view, 'panSpeed', 0.2, 3, 0.05).name('팬 속도 (1 = 정확 추종)');
@@ -1115,14 +1170,17 @@ export function bootPhysicsDebug({
   hand.add(config.cards, 'turnSwapSeconds', 0.1, 2, 0.05).name('턴 전환 시간 (s)');
 
   // ── the look, and the raycast ────────────────────────────────────────────
-  // Separate from the game scene's snap so the two can be compared, not so the
-  // cards can be let off it: at 1 a card jitters exactly as the pitch does, and
-  // that is the whole reason the hand is drawn through this pipeline.
-  hand.add(config.cards, 'vertexSnap', 0, 1, 0.01).name('카드 버텍스 스냅');
+  // `cards.vertexSnap` 의 슬라이더가 여기 있었다. 카드의 정점 스냅은 `CardMaterial`
+  // 에서 사라졌고 — 저해상도 타겟도 nearest 확대도 양자화도 없으므로 카드만 격자에
+  // 물릴 이유가 없다 — 그래서 아무것도 읽지 않는 값이 남았다. 키 자체는 지울 수
+  // 없다: `cards` 는 `SYNCED_CONFIG_PATHS` 안이라 키를 빼면 `configHash` 가 바뀐다.
+  // 슬라이더는 지운다. 움직여도 화면이 변하지 않는 슬라이더는 패널에 대한 거짓말이다.
   hand.add(config.cards, 'greyStrength', 0, 1, 0.01).name('흑백 처리 강도');
   hand.add(config.cards, 'shadowOffsetX', -12, 12, 1).name('그림자 오프셋 X');
   hand.add(config.cards, 'shadowOffsetY', -12, 12, 1).name('그림자 오프셋 Y');
   hand.add(config.cards, 'shadowOpacity', 0, 1, 0.01).name('그림자 농도');
+  // 흐림 반경은 `cardFx` 다 — `cards` 에 키를 더할 수 없기 때문. 슬라이더는
+  // 나머지 세 개 옆에 있어야 셋이 한 물건이라는 것이 보인다.
   hand.add(config.cards, 'hitMargin', 0, 40, 1).name('레이캐스트 여유 (px)');
   hand.add(config.cards, 'showHitAreas').name('레이캐스트 히트 영역 표시');
   hand.add(config.cards, 'blockedGrey', 0, 1, 0.01).name('사용 불가 흑백');
@@ -1139,6 +1197,32 @@ export function bootPhysicsDebug({
   hand.add(config.cards, 'guideOpacity', 0, 1, 0.01).name('가이드 농도 (도달 전)');
   hand.add(config.cards, 'guideArmedOpacity', 0, 1, 0.01).name('가이드 농도 (임계 통과)');
   hand.add(config.cards, 'guideArmedGrow', 0, 0.4, 0.01).name('가이드 확대 (임계 통과)');
+  // 무장 확인. 프레임으로 세는 이유는 `cardFx.guideBurstFrames` 의 주석에 있다.
+  hand.add(config.cardFx, 'guideBurstFrames', 0, 20, 1).name('가이드 확인 링 (프레임)');
+  hand.add(config.cardFx, 'guideBurstGrow', 0, 0.8, 0.02).name('가이드 확인 링 확대');
+
+  /**
+   * 카드 면의 노브.
+   *
+   * `cards` 가 아니라 `cardFx` 에 있다 — 저쪽은 `SYNCED_CONFIG_PATHS` 안이라
+   * 키를 더하면 `configHash` 가 바뀌고 구버전과 매칭이 거절된다. 슬라이더가
+   * 손패 폴더 안에 있는 것과 값이 어느 블록에 있는지는 별개다.
+   */
+  const cardLook = hand.addFolder('카드 면 (그리기 전용)');
+  cardLook.add(config.cardFx, 'holoStrength', 0, 1.5, 0.01).name('테두리 홀로그램 세기');
+  cardLook.add(config.cardFx, 'holoBackStrength', 0, 1, 0.01).name('홀로그램 세기 (뒷면)');
+  cardLook.add(config.cardFx, 'holoArmedBoost', 1, 4, 0.05).name('홀로그램 배수 (무장)');
+  cardLook.add(config.cardFx, 'holoScale', 0.005, 0.2, 0.005).name('홀로그램 띠 간격');
+  cardLook.add(config.cardFx, 'holoSaturation', 0, 1, 0.01).name('홀로그램 채도');
+  cardLook.add(config.cardFx, 'holoRimWidth', 0.01, 0.2, 0.005).name('홀로그램 테두리 폭');
+  cardLook.add(config.cardFx, 'holoDriftPerSecond', 0, 4, 0.05).name('홀로그램 드리프트 (rad/s)');
+  cardLook.add(config.cardFx, 'shadowBlur', 0, 40, 1).name('그림자 흐림 반경 (px)');
+
+  const landLook = hand.addFolder('뽑기 착지');
+  landLook.add(config.cardFx, 'landFlipSeconds', 0.05, 1, 0.01).name('착지 뒤집기 시간 (s)');
+  landLook.add(config.cardFx, 'landPushAmount', 0, 120, 2).name('이웃 밀림 세기');
+  landLook.add(config.cardFx, 'landGlowFrames', 0, 30, 1).name('도착 빛 (프레임)');
+
   refreshTexels();
 
   // ── card effects ─────────────────────────────────────────────────────────

@@ -10,6 +10,7 @@ import {
   Mesh,
 } from 'three';
 import { TURF_TILE, makeTurfTexture } from './pitchTexture.js';
+import { SHADOW_RANK, tagShadow } from '../core/quality.js';
 // The caps' own colours. The goal a player defends is painted in theirs, so the
 // two are the same fact told twice rather than two colour schemes to learn.
 import { PLAYER_COLORS } from './playerColors.js';
@@ -354,6 +355,15 @@ export class PitchView {
 
       const owned = s.defender !== undefined ? goalMaterials[s.defender % 2]?.[s.kind] : null;
       const mesh = new Mesh(geo, owned ?? byKind[s.kind] ?? byKind.fence);
+      /**
+       * 무대 장치. 최대 티어에서만 그림자를 던진다.
+       *
+       * 골대와 펜스는 아무 질문에도 답하지 않는다 — 그림자가 답해야 하는 유일한
+       * 질문("이것이 바닥에 붙어 있나")은 뚜껑과 공의 것이고, 골대는 언제나 붙어
+       * 있다. 그래서 예산이 줄면 여기부터 빠진다. 반대로 최대에서 골대 그림자가
+       * 잔디에 눕는 것은 이 필드에서 가장 눈에 띄는 한 칸의 차이이기도 하다.
+       */
+      tagShadow(mesh, SHADOW_RANK.DRESSING);
       mesh.position.set(s.cx, s.cy, s.cz);
       // The corner fans are the only turned pieces. Same convention the
       // collider uses — a rotation about +Y — so the drawn box sits exactly on

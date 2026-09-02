@@ -7,8 +7,8 @@ import {
   buildLabelGeometry,
   buildLiquidGeometry,
 } from './bottleGeometry.js';
-import { Fizz, G_WORLD } from './Fizz.js';
-import { createGlassMaterial, createSpriteMaterial } from './menuMaterials.js';
+import { Fizz, FIZZ_COUNT, G_WORLD } from './Fizz.js';
+import { applyGlassQuality, createGlassMaterial, createSpriteMaterial } from './menuMaterials.js';
 import {
   burstSheet,
   capLogoTexture,
@@ -18,6 +18,7 @@ import {
   shadowTexture,
 } from './menuTextures.js';
 import { PALETTE } from '../core/palette.js';
+import { onQualityChange, QUALITY } from '../core/quality.js';
 
 /**
  * The bottle on the menu: five meshes, a fixed lean, and two ways of moving.
@@ -303,6 +304,21 @@ export class Bottle {
     this._aim = 0;
 
     this.rebuild();
+
+    /**
+     * 품질 티어. 병은 이 화면에서 티어가 실제로 만지는 것 전부를 들고 있다.
+     *
+     * 유리의 구현(§투과 대 가짜 유리), 원주 분할, 거품 수 — 셋이 한 객체에
+     * 모여 있으므로 구독도 하나다. `rebuild` 가 지오메트리와 사이트 배치를 모두
+     * 다시 푸므로 순서는 재질 먼저, 형상 나중이면 된다.
+     */
+    this._offQuality = onQualityChange(() => {
+      applyGlassQuality(this.glassBackMaterial, this.retro);
+      applyGlassQuality(this.glassFrontMaterial, this.retro);
+      this.fizz.setCount(FIZZ_COUNT * QUALITY.fizzScale);
+      this.rebuild();
+    });
+    this.fizz.setCount(FIZZ_COUNT * QUALITY.fizzScale);
     this.applyLean();
   }
 
@@ -310,7 +326,16 @@ export class Bottle {
 
   /** Throw the meshes away and build them again from `tuning.profile`. */
   rebuild() {
-    const profile = buildBottleProfile(this.tuning.profile);
+    /**
+     * 원주 분할은 저자가 적은 값과 티어의 상한 중 **작은 쪽**이다.
+     *
+     * 천장이지 대체가 아니다. `bottleProfile.BOTTLE_DEFAULTS.columns` 의 72 는
+     * "30 mm 반경에서 2.6 mm 모서리 — 스무딩도 클리어코트 하이라이트도 면을
+     * 드러내지 않는 지점" 이라는 판단이고, 티어가 그 위로 올려 주는 것은 그
+     * 판단을 뒤집는 일이지 품질을 높이는 일이 아니다. 아래로는 내려간다.
+     */
+    const columns = Math.min(this.tuning.profile.columns, QUALITY.bottleColumns);
+    const profile = buildBottleProfile({ ...this.tuning.profile, columns });
     this.profile = profile;
 
     const glass = buildGlassGeometry(profile);
@@ -970,6 +995,7 @@ export class Bottle {
   }
 
   dispose() {
+    this._offQuality?.();
     for (const m of [this.glassBack, this.liquid, this.foam, this.label, this.shadow, this.burst]) {
       m.geometry?.dispose();
     }

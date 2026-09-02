@@ -1,9 +1,15 @@
 import { Color, Group, Mesh, PerspectiveCamera, PlaneGeometry, Scene, Vector3 } from 'three';
 import { GlossMaterials } from '../core/GlossMaterial.js';
-import { buildEnvironment } from '../core/environment.js';
+import { createEnvironment } from '../core/environment.js';
 import { createLightRig } from '../core/lighting.js';
 import { createSky } from '../core/sky.js';
 import { setTextureRenderer } from '../core/textures.js';
+import {
+  onQualityChange,
+  refreshShadowCasters,
+  SHADOW_RANK,
+  tagShadow,
+} from '../core/quality.js';
 import { DISPLAY_ASPECT, Viewport } from '../core/Viewport.js';
 import { SceneComposer } from '../core/Composer.js';
 import { BOARD_ASPECT, FRAME, frameScale } from '../core/frame.js';
@@ -68,10 +74,16 @@ import { MenuAudio } from '../audio/MenuAudio.js';
 /**
  * @param {HTMLCanvasElement} canvas
  * @param {{audio?: import('../audio/AudioSystem.js').AudioSystem,
- *          audioSettings?: import('../audio/AudioSettings.js').AudioSettingsBook}} [deps]
- *   Both are built once in `main.js`, before the branch that chose this page —
- *   see the note there. Absent, every call below is optional-chained and the
- *   menu is exactly what it was.
+ *          audioSettings?: import('../audio/AudioSettings.js').AudioSettingsBook,
+ *          graphicsSettings?: import('../core/GraphicsSettings.js').GraphicsSettingsBook}} [deps]
+ *   All three are built once in `main.js`, before the branch that chose this
+ *   page — see the note there. Absent, every call below is optional-chained and
+ *   the menu is exactly what it was.
+ *
+ *   그래픽만 성질이 조금 다르다: 티어는 `main.js` 가 이미 `configureQuality` 로
+ *   `core/quality.js` 에 꽂아 두었으므로 **파이프라인은 이 인자가 없어도 맞다.**
+ *   여기 넘기는 것은 설정 화면이 고르게 하기 위한 모델이지, 렌더러가 값을 받는
+ *   경로가 아니다.
  */
 /**
  * Which layer an object is drawn on, and therefore whether bloom touches it.
@@ -103,7 +115,7 @@ function asUiLayer(root) {
   return root;
 }
 
-export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
+export function bootMenu(canvas, { audio = null, audioSettings = null, graphicsSettings = null } = {}) {
   const cfg = MENU_CONFIG;
 
   /**
@@ -136,7 +148,7 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
    * each of which owns its own scene. Setting it per material covers all of them
    * from one place.
    */
-  retro.setEnvironment(buildEnvironment(viewport.renderer));
+  createEnvironment(viewport.renderer, retro);
 
 
   // Same fire-and-forget as `main.js`: the menu bakes its plates into cached
@@ -156,6 +168,15 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
   const sky = createSky(scene);
   const lights = createLightRig(scene);
   lights.setExtents({ x: 26, z: 26 });
+
+  /**
+   * 티어가 바뀌었을 때 이 문서가 직접 해야 하는 것: 씬의 그림자 캐스터.
+   *
+   * `main.js` 의 같은 자리와 같은 이유다 — 씬을 아는 쪽만 할 수 있다. 이 화면에서
+   * 그림자를 던지는 것은 병 하나뿐이지만, 그 하나가 최저·낮음에서 사라지고
+   * 보통 이상에서 돌아오는 것이 여기서 처리된다.
+   */
+  onQualityChange(() => refreshShadowCasters(scene));
 
   const camera = new PerspectiveCamera(cfg.camera.fov, DISPLAY_ASPECT, 1, 400);
 
@@ -284,7 +305,10 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
    * 일을 한다.
    */
   bottle.root.traverse((o) => {
-    if (o.isMesh) o.castShadow = true;
+    // 병은 이 화면의 히어로다. 그림자가 있는 티어라면 언제나 던진다 —
+    // `SHADOW_RANK.HERO` 는 경기 화면에서 뚜껑과 공이 받는 것과 같은 등급이고,
+    // 그래야 캡 와이프 양쪽에서 뚜껑의 접지감이 같다.
+    if (o.isMesh) tagShadow(o, SHADOW_RANK.HERO);
   });
   floor.receiveShadow = true;
   menuRoot.add(floor, bottle.root, bottle.shadow, bottle.burst, asUiLayer(items.root));
@@ -1077,6 +1101,8 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
           unitsPerPixel: unitsPerPixel(),
           // The sound rows are only built when there is a model behind them.
           audioSettings,
+          // 같은 규칙. 이 줄이 그래픽 판과 다섯 칸 칩 줄을 만든다.
+          graphicsSettings,
           profile,
           modal,
         });
@@ -1169,6 +1195,8 @@ export function bootMenu(canvas, { audio = null, audioSettings = null } = {}) {
     // ── 사운드 ──
     audio,
     audioSettings,
+    // ── 그래픽 ──
+    graphicsSettings,
   });
 
   /**

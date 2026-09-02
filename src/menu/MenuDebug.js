@@ -3,6 +3,7 @@ import { Mesh, PlaneGeometry, ShaderMaterial } from 'three';
 import { WIPE_FRAME } from './CapWipe.js';
 import { STAGE } from './Transition.js';
 import { CONFIG } from '../game/config.js';
+import { onQualityChange, QUALITY, TIER_NAMES } from '../core/quality.js';
 import { addAudioFolder } from '../audio/audioDebug.js';
 
 /**
@@ -220,6 +221,37 @@ export function bootMenuDebug(ctx) {
   // What replaced the PS1 folder. The chain is one pass now and these are its
   // only three dials — see `core/Composer.js`.
   const bloomCfg = config.view.bloom;
+  /**
+   * 그래픽 품질 티어. 경기 화면의 같은 컨트롤과 같은 것을 한다.
+   *
+   * 메뉴에도 있어야 하는 이유는 이 화면이 티어가 가장 많이 보이는 곳이기
+   * 때문이다 — 유리, 원주 분할, 기포, 보케가 전부 여기 있고 경기 화면에는
+   * 하나도 없다. `?debug=1` 뒤에 있다.
+   */
+  const quality = gui.addFolder('그래픽 품질');
+  const qualityProxy = {
+    get tier() {
+      return TIER_NAMES[QUALITY.tier];
+    },
+    set tier(name) {
+      const next = TIER_NAMES.indexOf(name);
+      if (next >= 0) ctx.graphicsSettings?.setTier(next);
+    },
+  };
+  const qualityStats = { resolved: '' };
+  const qualityRow = quality.add(qualityProxy, 'tier', [...TIER_NAMES]).name('티어');
+  const qualityResolved = quality.add(qualityStats, 'resolved').name('유리 · 분할 · 기포 · 보케').disable();
+  if (!ctx.graphicsSettings) qualityRow.disable();
+  function refreshQuality() {
+    qualityStats.resolved =
+      `${QUALITY.glass ? '투과' : '가짜'}  ·  ${QUALITY.bottleColumns}열  ·  ` +
+      `x${QUALITY.fizzScale.toFixed(2)}  ·  ${QUALITY.bokeh}점`;
+    qualityRow.updateDisplay();
+    qualityResolved.updateDisplay();
+  }
+  refreshQuality();
+  onQualityChange(refreshQuality);
+
   const bloom = gui.addFolder('블룸');
   const applyBloom = () => composer?.configure(bloomCfg);
   bloom.add(bloomCfg, 'enabled').name('켜기').onChange(applyBloom);

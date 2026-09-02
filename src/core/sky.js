@@ -7,6 +7,7 @@ import {
   Vector3,
 } from 'three';
 import { PALETTE } from './palette.js';
+import { onQualityChange, QUALITY } from './quality.js';
 
 /**
  * 배경: 하늘 그라디언트 돔과 그 위의 아주 느린 보케 광점 몇 개.
@@ -46,9 +47,9 @@ const FRAG = /* glsl */ `
   uniform vec3 uLow;
   uniform vec3 uBelow;
   uniform vec3 uBokehColor;
-  uniform vec3 uBokeh[6];   // xyz = 방향
-  uniform float uBokehSize[6];
-  uniform float uBokehAlpha[6];
+  uniform vec3 uBokeh[SEED_COUNT];   // xyz = 방향
+  uniform float uBokehSize[SEED_COUNT];
+  uniform float uBokehAlpha[SEED_COUNT];
   varying vec3 vDir;
 
   void main() {
@@ -68,7 +69,9 @@ const FRAG = /* glsl */ `
     }
 
     // 보케. 가산이고, 알파가 0.06~0.14 라 거의 안 보이는 게 정상이다.
-    for (int i = 0; i < 6; i++) {
+    // 개수는 전처리기 상수다 — 티어를 내리면 이 루프가 컴파일 단계에서 사라진다.
+    // 유니폼 알파를 0 으로 만드는 것으로는 셰이더가 여전히 여섯 번 돈다.
+    for (int i = 0; i < BOKEH_COUNT; i++) {
       float c = dot(d, normalize(uBokeh[i]));
       float disc = smoothstep(1.0 - uBokehSize[i], 1.0, c);
       sky += uBokehColor * disc * uBokehAlpha[i];
@@ -77,6 +80,20 @@ const FRAG = /* glsl */ `
     gl_FragColor = vec4(sky, 1.0);
   }
 `;
+
+/** 손으로 정한 씨앗의 수. 셰이더 배열의 크기이기도 하다. */
+const SEEDS = 6;
+
+/**
+ * 티어에 따라 실제로 도는 광점 개수. **씬에는 여섯 개가 있고, 여덟 개가 아니다.**
+ *
+ * 지시서의 능력 표는 0/0/4/8/8 이라고 적었는데 이 씬의 씨앗은 손으로 정한 여섯
+ * 개다(아래 `seeds`). 없는 것을 새로 만드는 대신 있는 것을 나누었다: 0/0/3/6/6.
+ * 표의 의도 — 최저·낮음은 없고, 보통은 절반, 위는 전부 — 는 그대로다.
+ */
+function bokehCount() {
+  return Math.max(0, Math.min(SEEDS, Math.round(QUALITY.bokeh)));
+}
 
 /**
  * 하늘 돔을 만들어 씬에 넣는다.
@@ -108,6 +125,15 @@ export function createSky(scene, { radius = 200 } = {}) {
   const material = new ShaderMaterial({
     vertexShader: VERT,
     fragmentShader: FRAG,
+    /**
+     * 광점 개수가 전처리기 상수다. 티어가 바뀌면 셰이더를 다시 컴파일한다.
+     *
+     * 비싸 보이지만 티어 변경은 사람이 판을 누를 때만 일어나고, 그 대가로 최저
+     * 티어에서 이 프래그먼트 셰이더가 하늘 픽셀마다 도는 여섯 번의 `dot` +
+     * `smoothstep` 이 통째로 사라진다. 하늘은 화면의 절반이 넘는 유일한 표면이라
+     * 여기서 아끼는 것이 실제로 재진다.
+     */
+    defines: { SEED_COUNT: SEEDS, BOKEH_COUNT: bokehCount() },
     side: BackSide,
     // 하늘은 모든 것의 뒤에 있고 깊이를 남기면 안 된다.
     depthWrite: false,
@@ -132,6 +158,13 @@ export function createSky(scene, { radius = 200 } = {}) {
   mesh.castShadow = false;
   mesh.receiveShadow = false;
   scene.add(mesh);
+
+  const offQuality = onQualityChange(() => {
+    const n = bokehCount();
+    if (material.defines.BOKEH_COUNT === n) return;
+    material.defines.BOKEH_COUNT = n;
+    material.needsUpdate = true;
+  });
 
   let t = 0;
   const axis = new Vector3(0, 1, 0);
@@ -168,6 +201,7 @@ export function createSky(scene, { radius = 200 } = {}) {
   }
 
   function dispose() {
+    offQuality();
     scene.remove(mesh);
     mesh.geometry.dispose();
     material.dispose();

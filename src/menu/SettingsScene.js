@@ -5,6 +5,7 @@ import { toMarkTexture } from '../marks/markTextures.js';
 import { PALETTE } from '../core/palette.js';
 import { ROLE } from '../core/tokens.js';
 import { solvePanel } from './panelLayout.js';
+import { TIER_COUNT, TIER_NAMES } from '../core/quality.js';
 import { gelButton, roundRectPath } from '../ui/glass.js';
 
 /**
@@ -71,7 +72,31 @@ import { gelButton, roundRectPath } from '../ui/glass.js';
 const L = {
   chip: { width: 22, height: 22, gap: 5 },
   steps: 10,
+  /** 그래픽 티어의 칸 수. `core/quality.js` 가 다섯 단계를 정의한다. */
+  graphicsSteps: TIER_COUNT,
 };
+
+/**
+ * 칩 줄의 정의. 볼륨과 그래픽이 **같은 컨트롤**이고 칸 수만 다르다.
+ *
+ * ── 다섯 칸을 열 칸의 폭으로 그리지 않는다 ──────────────────────────────────
+ * 같은 칩 폭으로 다섯 개를 놓으면 줄이 절반만 차고, 그러면 나머지 절반이 아직
+ * 안 만들어진 것으로 읽힌다. 볼륨 줄과 **같은 전체 폭**을 다섯이 나눠 갖는다:
+ * 열 칸의 스팬에서 줄어드는 간격 넷을 빼고 다섯으로 나눈 값 — 22·10 + 5·9 −
+ * 5·4 = 245, 나누기 5 는 49 다.
+ *
+ * 배열로 저술하는 이유는 `layout` 과 `refresh` 와 `pick` 세 곳이 같은 순서를
+ * 알아야 하기 때문이다. 줄이 하나 늘 때 고칠 곳이 한 곳이 된다.
+ */
+const CHIP_ROWS = [
+  { id: 'volume', prefix: 'vol', steps: L.steps, width: L.chip.width },
+  {
+    id: 'graphics',
+    prefix: 'gfx',
+    steps: L.graphicsSteps,
+    width: Math.round((L.steps * L.chip.width + (L.steps - 1) * L.chip.gap - 4 * L.chip.gap) / L.graphicsSteps),
+  },
+];
 
 /**
  * Row order, top to bottom.
@@ -83,8 +108,20 @@ const L = {
  */
 const ROWS = [
   { id: 'volume', kind: 'readout' },
-  // 칩 줄은 이 바로 아래에 들어간다. `_place` 를 보라.
+  // 칩 줄은 이 바로 아래에 들어간다. `layout` 의 `slots` 를 보라.
   { id: 'mute', kind: 'toggle' },
+  /**
+   * 그래픽 품질. 소리 묶음과 계정 묶음 사이가 자연스러운 경계다.
+   *
+   * 볼륨과 같은 `readout` + 칩 줄이다. 이 화면에는 컨트롤 관용구가 정확히 하나 —
+   * 눌림에 답하는 판 — 뿐이고, 칩 줄은 그것을 여러 번 놓은 것이다. 다섯 단계를
+   * 위해 새 관용구(드롭다운, 좌우 화살표, 연속 슬라이더)를 들여올 이유가 없다.
+   *
+   * COMMIT 도 재시작 안내도 없다. 여기서 고른 것은 즉시 적용되고, 즉시 적용되지
+   * 않는 항목이 생긴다면 그건 안내로 덮을 문제가 아니라 고칠 문제다 — 이 화면에
+   * 확인 버튼이 없는 이유가 `FOOTER` 에 적혀 있다.
+   */
+  { id: 'graphics', kind: 'readout' },
   { id: 'nickname', kind: 'action' },
   /**
    * 서버 주소는 `?debug=1` 뒤로 접었다 (PHASE 5 승인 항목 3).
@@ -125,10 +162,20 @@ export class SettingsScene {
    * @param {import('../audio/AudioSettings.js').AudioSettingsBook} [audioSettings]
    *   The sound rows are only built when there is a model behind them, so a
    *   caller that has no audio gets exactly the screen this used to be.
+   * @param {import('../core/GraphicsSettings.js').GraphicsSettingsBook} [graphicsSettings]
+   *   같은 규칙. 모델이 없으면 그래픽 줄도 칩도 만들지 않는다.
    */
-  constructor({ retro, unitsPerPixel, audioSettings = null, profile = null, modal = null }) {
+  constructor({
+    retro,
+    unitsPerPixel,
+    audioSettings = null,
+    graphicsSettings = null,
+    profile = null,
+    modal = null,
+  }) {
     this.root = new Group();
     this.audioSettings = audioSettings;
+    this.graphicsSettings = graphicsSettings;
     /**
      * The nickname model, or null.
      *
@@ -166,7 +213,9 @@ export class SettingsScene {
     this.items = [];
     for (const def of ROWS) {
       // The audio rows need a model behind them; 닉네임 and the two links do not.
-      if (!audioSettings && def.kind !== 'link' && def.kind !== 'action') continue;
+      if (def.id === 'graphics') {
+        if (!graphicsSettings) continue;
+      } else if (!audioSettings && def.kind !== 'link' && def.kind !== 'action') continue;
       // Both profile rows need a model behind them, the same way the audio rows
       // need theirs.
       if ((def.id === 'nickname' || def.id === 'server') && !profile) continue;
@@ -177,9 +226,11 @@ export class SettingsScene {
     /** @type {Array<{id: string, role: string, side: number, mesh: object, maps: object, label: string}>} */
     this.footer = FOOTER.map((def) => this._buildRow(def));
 
-    /** @type {Array<{index: number, mesh: object}>} */
+    /** @type {Array<{row: string, prefix: string, index: number, mesh: object}>} */
     this.chips = [];
-    if (audioSettings) this._buildChips();
+    this._buildChips();
+    /** 줄마다 실제로 그려지는 칩 크기. `layout` 이 채운다. */
+    this._chipSize = new Map();
     this.layout(u);
 
     this._ray = new Raycaster();
@@ -190,6 +241,7 @@ export class SettingsScene {
     this._hovered = null;
 
     this._off = audioSettings?.onChange(() => this.refresh());
+    this._offGraphics = graphicsSettings?.onChange(() => this.refresh());
     this._offProfile = profile?.onChange(() => this.refresh());
     this.refresh();
   }
@@ -214,14 +266,22 @@ export class SettingsScene {
    * state, which is how they end up disagreeing.
    */
   _buildChips() {
-    for (let i = 0; i < L.steps; i++) {
-      const mesh = new Mesh(
-        new PlaneGeometry(1, 1),
-        createSpriteMaterial(this._retro, { map: null }),
-      );
-      this.root.add(mesh);
-      this.chips.push({ index: i, mesh });
+    for (const row of CHIP_ROWS) {
+      if (!this._hasRow(row.id)) continue;
+      for (let i = 0; i < row.steps; i++) {
+        const mesh = new Mesh(
+          new PlaneGeometry(1, 1),
+          createSpriteMaterial(this._retro, { map: null }),
+        );
+        this.root.add(mesh);
+        this.chips.push({ row: row.id, prefix: row.prefix, index: i, mesh });
+      }
     }
+  }
+
+  /** 이 줄의 모델이 있는가. 행과 칩이 같은 답을 써야 한다. */
+  _hasRow(id) {
+    return id === 'graphics' ? !!this.graphicsSettings : !!this.audioSettings;
   }
 
   /**
@@ -237,12 +297,14 @@ export class SettingsScene {
   layout(unitsPerPixel) {
     const u = unitsPerPixel ?? this._u;
     this._u = u;
-    const hasChips = this.chips.length > 0;
+
+    /** 어느 읽기 판 아래에 칩 줄이 붙는가. 정의는 `CHIP_ROWS` 한 곳에 있다. */
+    const chipRowFor = (id) => CHIP_ROWS.find((r) => r.id === id && this._hasRow(id));
 
     const slots = [];
     for (const item of this.items) {
       slots.push({ id: item.id });
-      if (hasChips && item.id === 'volume') slots.push({ id: '#chips', h: L.chip.height });
+      if (chipRowFor(item.id)) slots.push({ id: `#chips:${item.id}`, h: L.chip.height });
     }
 
     const box = solvePanel({ title: true, rows: slots, footer: FOOTER.length });
@@ -259,26 +321,39 @@ export class SettingsScene {
       item.mesh.position.set(0, row.y * u, 0);
     }
 
-    if (hasChips) {
-      const row = at('#chips');
-      /**
-       * 칩 줄은 **내용 폭**에 맞춘다. 세로 축소와는 무관하다.
-       *
-       * 열 개가 나란히 놓이는 유일한 줄이라 가로가 먼저 모자란다. 세로 축소율을
-       * 쓰면 좁고 높은 프레임에서 칩이 이유 없이 작아진다.
-       */
-      const span = L.steps * L.chip.width + (L.steps - 1) * L.chip.gap;
-      const kc = Math.min(1, box.plate.width / span);
-      const cw = Math.max(3, Math.round(L.chip.width * kc));
-      const cg = Math.max(1, Math.round(L.chip.gap * kc));
-      const used = L.steps * cw + (L.steps - 1) * cg;
-      this._chip = { width: cw, height: Math.min(row.h, cw), gap: cg };
-      this.chips.forEach((chip, i) => {
+    /**
+     * 칩 줄은 **내용 폭**에 맞춘다. 세로 축소와는 무관하다.
+     *
+     * 여러 개가 나란히 놓이는 유일한 줄이라 가로가 먼저 모자란다. 세로 축소율을
+     * 쓰면 좁고 높은 프레임에서 칩이 이유 없이 작아진다.
+     *
+     * 두 줄이 **같은 축소율**을 쓴다. 각자 자기 스팬으로 축소하면 좁은 프레임에서
+     * 다섯 칸 줄은 아직 여유가 있고 열 칸 줄만 줄어들어, 두 줄의 전체 폭이
+     * 달라진다 — 같은 폭을 나눠 갖게 한 것이 이 줄들의 요점인데 그게 무너진다.
+     */
+    const span = L.steps * L.chip.width + (L.steps - 1) * L.chip.gap;
+    const kc = Math.min(1, box.plate.width / span);
+    const cg = Math.max(1, Math.round(L.chip.gap * kc));
+    this._chipSize.clear();
+    for (const def of CHIP_ROWS) {
+      if (!this._hasRow(def.id)) continue;
+      const row = at(`#chips:${def.id}`);
+      if (!row) continue;
+      const cw = Math.max(3, Math.round(def.width * kc));
+      const used = def.steps * cw + (def.steps - 1) * cg;
+      const size = { width: cw, height: Math.min(row.h, L.chip.height * kc), gap: cg };
+      this._chipSize.set(def.id, size);
+      let i = 0;
+      for (const chip of this.chips) {
+        if (chip.row !== def.id) continue;
         const x = -used / 2 + cw / 2 + i * (cw + cg);
-        chip.mesh.scale.set(this._chip.width * u, this._chip.height * u, 1);
+        chip.mesh.scale.set(size.width * u, size.height * u, 1);
         chip.mesh.position.set(x * u, row.y * u, 0);
-      });
+        i++;
+      }
     }
+    // 판 텍스처 키가 이 값을 쓴다. 볼륨 줄이 없는 화면에서도 정의되어야 한다.
+    this._chip = this._chipSize.get('volume') ?? L.chip;
 
     const fb = box.footer.button;
     for (const item of this.footer) {
@@ -321,6 +396,16 @@ export class SettingsScene {
         return `마스터 볼륨   ${Math.round((s?.volume ?? 0) * 100)}%`;
       case 'mute':
         return `음소거   ${s?.muted ? '켬' : '끔'}`;
+      /**
+       * 이름이지 숫자가 아니다.
+       *
+       * 볼륨이 판에 퍼센트를 쓰는 자리에 티어의 **이름**을 쓴다. "5/5" 는 다섯
+       * 단계가 몇 단계인지 아는 사람만 읽을 수 있는 값이고, 그건 이 화면을 만든
+       * 사람뿐이다. 칩 줄이 이미 "다섯 중 몇 번째" 를 그림으로 말하고 있으므로
+       * 판이 또 그걸 말할 이유도 없다.
+       */
+      case 'graphics':
+        return `그래픽   ${TIER_NAMES[this.graphicsSettings?.tier ?? 0] ?? ''}`;
       case 'nickname':
         // '없음' rather than a blank: an empty right-hand column reads as a
         // broken row, and "you have not chosen one" is the thing worth saying.
@@ -390,12 +475,21 @@ export class SettingsScene {
 
     const volume = this.audioSettings?.volume ?? 0;
     const muted = !!this.audioSettings?.muted;
+    const tier = this.graphicsSettings?.tier ?? 0;
     for (const chip of this.chips) {
       // Recomputed rather than stored, so there is one source of truth — the
       // same rule `MarkEditor`'s swatches follow.
-      const filled = !muted && volume >= (chip.index + 1) / L.steps - 1e-6;
-      const hot = this._hovered === `vol:${chip.index}`;
-      chip.mesh.material.uniforms.uMap.value = chipTexture(filled, hot ? 'hover' : 'idle', this._chip);
+      //
+      // 두 줄의 채움 규칙이 다르다. 볼륨은 연속량이라 "이 칸까지 도달했는가" 이고,
+      // 그래픽은 서수라 "이 칸 이하인가" 다 — 같은 부등호로 보이지만 볼륨 쪽은
+      // 음소거가 끼어들고 그래픽 쪽은 티어 0 도 한 칸이 차는 값이다.
+      const filled =
+        chip.row === 'graphics'
+          ? chip.index <= tier
+          : !muted && volume >= (chip.index + 1) / L.steps - 1e-6;
+      const hot = this._hovered === `${chip.prefix}:${chip.index}`;
+      const size = this._chipSize.get(chip.row) ?? L.chip;
+      chip.mesh.material.uniforms.uMap.value = chipTexture(filled, hot ? 'hover' : 'idle', size);
     }
   }
 
@@ -414,7 +508,9 @@ export class SettingsScene {
     // The chips are asked first: they are small and they sit between two plates,
     // and registration order is pick order.
     for (const chip of this.chips) {
-      if (this._ray.intersectObject(chip.mesh, false).length) return { id: `vol:${chip.index}` };
+      if (this._ray.intersectObject(chip.mesh, false).length) {
+        return { id: `${chip.prefix}:${chip.index}` };
+      }
     }
     for (const item of [...this.items, ...this.footer]) {
       // A readout is not a control. It must not answer a press, or the row
@@ -462,6 +558,18 @@ export class SettingsScene {
       // no console output and no failed press, which took far longer to find
       // than it should have.
       this._editNickname().catch((err) => console.error('[settings] nickname entry failed', err));
+      return true;
+    }
+
+    /**
+     * 오디오보다 **위**다. 소리 없는 빌드에서도 그래픽은 고를 수 있어야 한다.
+     *
+     * `setTier` 는 값이 같아도 `userSet` 을 켠다 — 최대에서 다시 최대를 고른 것은
+     * "이대로 두겠다" 는 결정이고, 그 뒤로 자동 강등이 끼어들면 그 결정을 덮는
+     * 것이 된다. 근거는 `GraphicsSettings.setTier` 에 있다.
+     */
+    if (id.startsWith('gfx:') && this.graphicsSettings) {
+      this.graphicsSettings.setTier(Number(id.slice(4)));
       return true;
     }
 
@@ -551,6 +659,7 @@ export class SettingsScene {
 
   dispose() {
     this._off?.();
+    this._offGraphics?.();
     this._offProfile?.();
     this.panel.geometry.dispose();
     this.panel.material.uniforms.uMap.value?.dispose();

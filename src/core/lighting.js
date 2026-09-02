@@ -1,6 +1,7 @@
 import { DirectionalLight, HemisphereLight, Object3D } from 'three';
 import { PALETTE } from './palette.js';
 import { BUDGET } from './budget.js';
+import { onQualityChange, QUALITY } from './quality.js';
 
 /**
  * 씬의 조명 리그. 키 하나, 반구광 하나, 림 하나.
@@ -39,7 +40,19 @@ const SUN_DIR = { x: -0.55, y: 0.72, z: 0.42 };
  *
  * 쓰지 않는 인자를 남기지 않는다. 필요해지면 여기 세 줄에 `* k` 를 붙이면 된다.
  */
-export function createLightRig(scene, { shadows = true, shadowMapSize = BUDGET.shadowMapSize } = {}) {
+/**
+ * 실제로 잡히는 그림자 맵 한 변. 0 이면 그림자를 끈다.
+ *
+ * 티어가 원하는 크기와 기기의 천장 중 작은 쪽. 두 판단이 서로 다른 것에 대한
+ * 것이라 둘 다 필요하다 — 티어는 "얼마나 예쁘게", `BUDGET` 은 "이 화면에서 그
+ * 이상은 보이지도 않는데 16 MB 를 쓴다". `budget.js` 머리말에 근거가 있다.
+ */
+function shadowSizeNow() {
+  const want = QUALITY.shadowMapSize;
+  return want > 0 ? Math.min(want, BUDGET.shadowMapSize) : 0;
+}
+
+export function createLightRig(scene, { shadows = true, shadowMapSize = null } = {}) {
   /**
    * 키 라이트. 그림자를 던지는 유일한 광원이다.
    *
@@ -82,8 +95,30 @@ export function createLightRig(scene, { shadows = true, shadowMapSize = BUDGET.s
  */
 const sun = new DirectionalLight(PALETTE.light.sun, 1.4);
   sun.position.set(SUN_DIR.x, SUN_DIR.y, SUN_DIR.z).multiplyScalar(120);
-  sun.castShadow = shadows;
-  sun.shadow.mapSize.set(shadowMapSize, shadowMapSize);
+
+  /**
+   * 그림자 크기를 바꾸는 것은 `mapSize` 한 줄로 끝나지 않는다.
+   *
+   * `light.shadow.map` 은 첫 그림자 패스에서 `mapSize` 를 보고 한 번 잡히고, 그
+   * 뒤로는 `mapSize` 를 아무리 고쳐도 이미 잡힌 타겟이 그대로 쓰인다. 버리고
+   * null 로 만들어야 다음 패스가 새 크기로 다시 잡는다. 이걸 빠뜨리면 증상은
+   * "티어를 내렸는데 메모리가 안 줄고 그림자도 그대로" 이고, 아무 에러도 없다.
+   *
+   * 호출부가 인자로 크기를 준 경우(캡 뷰어처럼 티어를 안 꿰는 진입점)에는 그
+   * 값을 지킨다 — 그래서 `override` 를 들고 있는다.
+   */
+  const override = shadowMapSize;
+  function applyShadowQuality() {
+    const size = override ?? shadowSizeNow();
+    sun.castShadow = shadows && size > 0;
+    if (size > 0 && (sun.shadow.mapSize.x !== size || sun.shadow.mapSize.y !== size)) {
+      sun.shadow.mapSize.set(size, size);
+      sun.shadow.map?.dispose();
+      sun.shadow.map = null;
+    }
+    sun.shadow.needsUpdate = true;
+  }
+  applyShadowQuality();
   /**
    * `bias` 는 음수, `normalBias` 가 실제로 일하는 쪽.
    *
@@ -147,7 +182,17 @@ const sun = new DirectionalLight(PALETTE.light.sun, 1.4);
     sun.shadow.needsUpdate = true;
   }
 
+  /**
+   * 티어 변경. 리그가 스스로 구독한다.
+   *
+   * 두 부팅 경로가 각각 기억해야 할 일을 하나 줄인다 — 씬의 캐스터 재적용은
+   * 씬을 아는 부팅 경로만 할 수 있으므로 저쪽에 남지만, 광원 자신의 크기와
+   * on/off 는 리그가 자기 것으로 안다.
+   */
+  const offQuality = onQualityChange(applyShadowQuality);
+
   function dispose() {
+    offQuality();
     sun.shadow?.map?.dispose();
     scene.remove(sun, hemi, rim, target);
     sun.dispose();

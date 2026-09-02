@@ -27,8 +27,20 @@ import { CARD_ASPECT, cardScale, texelsFor } from './CardHand.js';
  * anticlimax.
  *
  * It costs nothing to do: the back is the same texture the opponent's hand is
- * already drawn with, and the reveal happens for free when the flight ends and
- * the fan opens for the card face-up.
+ * already drawn with.
+ *
+ * ── 그런데 공개는 **공짜가 아니었다** ──────────────────────────────────────
+ * 이 자리에 "비행이 끝나고 부채꼴이 앞면으로 열리면 공개는 공짜로 일어난다"고
+ * 적혀 있었다. free 라는 것은 뒤집기가 **없다**는 뜻이다. 뒷면으로 화면을 가로질러
+ * 온 카드가 메시째 사라지고, 다음 sync 에서 앞면이 부채꼴에 나타났다. 무엇을
+ * 찾았는지 알게 되는 순간이 있기는 한데 그 순간에 아무 일도 일어나지 않았고,
+ * 그래서 비행이 앞면을 아끼며 벌어 둔 것이 도착에서 그냥 쓰이지 않았다.
+ *
+ * 착지는 이제 `CardHand._beginLanding` 이 맡는다 — 뒤집기, 이웃의 밀림, 도착의
+ * 빛. 그 셋이 손패의 일인 것은 부채꼴이 열리는 것이 손패의 일이기 때문이고, 이
+ * 파일은 여전히 **화면을 가로지르는 그림 하나**만 안다. 비행이 끝났다는 사실은
+ * `pendingKeys` 에서 키가 빠지는 것으로 전해진다 — `CardLayer.syncTo` 가 두
+ * 프레임의 차를 본다. 여기서 콜백을 부르면 도착 연출이 비행의 소유가 된다.
  *
  * ── the fan does not open until the card lands ─────────────────────────────
  * The card is held OUT of the fan for the length of the flight, by key. Without
