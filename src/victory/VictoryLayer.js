@@ -14,7 +14,7 @@ import { buttonTexture, notePlateTexture, victoryPlateTexture } from '../ui/hudT
 import { VICTORY_STAGE, VictoryClock } from './VictoryClock.js';
 import { controlScale, controlState, stepControl } from '../ui/motion.js';
 import { PALETTE, toRgb } from '../core/palette.js';
-import { ROLE, SPACE } from '../core/tokens.js';
+import { ROLE, SIZE, SPACE } from '../core/tokens.js';
 
 /**
  * Who won, as a thing that happens on screen.
@@ -113,9 +113,26 @@ const NOTE_GAP = 10;
  * **배열 순서가 곧 화면 순서다.** `layout` 이 왼쪽부터 차례로 놓으므로, 이
  * 규칙을 지키는 일은 두 줄을 맞바꾸는 것이다.
  */
+/**
+ * ── 높이는 토큰에서 온다. 40 은 이 파일이 혼자 정한 숫자였다 ────────────────
+ * 폭은 라벨마다 다르고 그건 위에 적힌 결정이지만, 높이는 라벨과 무관하다 —
+ * 글자 위아래로 얼마나 비우는가는 버튼이라는 부품의 성질이지 그 버튼이 무슨
+ * 말을 하는지의 문제가 아니다. 그래서 폭만 저술값으로 남기고 높이는
+ * `SIZE.buttonFooter` 를 따른다.
+ *
+ * `buttonFooter` 인 이유는 역할이 그것이기 때문이다 — 토큰 주석이 "COMMIT /
+ * RETREAT" 라고 적고 있고, 이 두 개가 정확히 그 둘이다. `ModalLayer` 의
+ * `buttonSecondary`(56) 가 아니라 52 인 것도 같은 이유다: 저쪽은 패널 안의
+ * 일반 버튼이고 이쪽은 화면을 마무리하는 한 줄이다.
+ *
+ * 40 에서 52 로 열두 픽셀이 늘고, `buttonTexture` 의 그림자 여백 6 은 고정이라
+ * 그 열두 픽셀은 전부 글자 위아래의 여백이 된다. 레이아웃은 따라온다 —
+ * `layout` 이 높이를 `k` 로 스케일하고 `tallest` 로 바닥을 다시 잡으므로,
+ * 홈 인디케이터 여유도 새 높이에 맞춰 계산된다.
+ */
 const BUTTONS = [
-  { id: 'exit', label: '메뉴로 나가기', width: 192, height: 40, role: ROLE.RETREAT },
-  { id: 'restart', label: '재시작', width: 120, height: 40, role: ROLE.COMMIT },
+  { id: 'exit', label: '메뉴로 나가기', width: 192, height: SIZE.buttonFooter.h, role: ROLE.RETREAT },
+  { id: 'restart', label: '재시작', width: 120, height: SIZE.buttonFooter.h, role: ROLE.COMMIT },
 ];
 /** Frame pixels between the two plates. */
 const BUTTON_GAP = 18;
