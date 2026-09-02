@@ -1,5 +1,6 @@
 import { RAPIER } from '../physics/rapier.js';
 import { describeCapColliders } from '../physics/capCollider.js';
+import { CapFriction } from '../physics/capFriction.js';
 import { FIXED_DT } from '../physics/PhysicsWorld.js';
 
 /**
@@ -167,6 +168,16 @@ export class Arena {
 
     this.desc = null;
 
+    /**
+     * Which friction each cap's colliders are carrying. Built in `build`.
+     *
+     * Exposed rather than private because the two OTHER worlds need it: the
+     * trajectory preview and every AI rollout step a copy of this world and have
+     * to apply the same rule to it, or the line drawn and the shots searched are
+     * for a cap that grips when the real one skates. See `capFriction.js`.
+     */
+    this.capFriction = null;
+
     this._prev = null;
     this._curr = null;
 
@@ -216,6 +227,20 @@ export class Arena {
       if (p.kind === BODY_KIND.BALL) this._createBall(p);
       else this._createCap(p);
     }
+
+    /**
+     * After the caps exist, and installed on the PHYSICS rather than called from
+     * the turn loop.
+     *
+     * A cap can go over during a card animation, during a goal hold, during the
+     * settle at kickoff — not only during the turn — and every one of those runs
+     * its own stepping loop. The hook is what makes "every step of this world"
+     * true by construction instead of true in the four places somebody
+     * remembered. `rebuild` runs through here again, so a mode change reinstalls
+     * it against the new caps.
+     */
+    this.capFriction = new CapFriction(this.capBodies, this.capColliders, this.desc);
+    this.physics.beforeStep = (world) => this.capFriction.sync(world);
 
     this._prev = new Float32Array(this.bodyCount * 7);
     this._curr = new Float32Array(this.bodyCount * 7);
@@ -559,11 +584,22 @@ export class Arena {
       b.setLinearDamping(phys.linearDamping);
       b.setAngularDamping(phys.angularDamping);
       for (const h of this.capColliders[i]) {
-        const c = this.physics.collider(h);
-        c.setFriction(collider.friction);
-        c.setRestitution(collider.restitution);
+        this.physics.collider(h).setRestitution(collider.restitution);
       }
     }
+
+    /**
+     * Friction is NOT written here, and that is the one difference.
+     *
+     * Which coefficient a cap is on depends on which way up it is, and
+     * `CapFriction` is the single thing that decides that — a second writer
+     * would win until the next time a cap turned over and then silently lose.
+     * So the panel's numbers go onto the description it reads, its cache is
+     * dropped so every cap counts as changed, and the next step writes them.
+     */
+    this.desc.friction = collider.friction;
+    this.desc.flippedFriction = Math.max(0, collider.flippedFriction);
+    this.capFriction?.invalidate();
 
     if (this.hasBall) {
       const cfg = this.config.ball;

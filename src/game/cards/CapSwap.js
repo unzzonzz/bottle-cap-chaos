@@ -125,7 +125,23 @@ export class CapSwap {
       // stands changes. Swapping the quaternions as well would flip a cap that
       // happened to be lying face down onto its front at the far end, which
       // reads as two different caps rather than as one that moved.
-      this.moves.push({ index: a, from: ta, to: tb }, { index: b, from: tb, to: ta });
+      //
+      // ── and because the facing stays, the HEIGHT has to stay with it ────────
+      // A cap's body origin is its HEM, so how high that origin sits is a fact
+      // about which way up the cap is, not about where it is standing: on the
+      // board an upright cap's origin rests at about -0.07 and an upside-down
+      // one's at +0.56, a full cap height apart. Exchanging y along with x and z
+      // therefore planted a flipped cap a whole cap INTO the board — measured,
+      // 100% of it under the surface, taking 30 steps to squeeze back out and
+      // settling 0.035 too deep for good. That is the cap that "파묻힌다".
+      //
+      // Each cap keeps its own y, which is the same sentence as the paragraph
+      // above: the card exchanges where a cap STANDS, and how high a cap floats
+      // is not that.
+      this.moves.push(
+        { index: a, from: ta, to: { x: tb.x, y: ta.y, z: tb.z } },
+        { index: b, from: tb, to: { x: ta.x, y: tb.y, z: ta.z } },
+      );
     }
 
     this.total = Math.max(1, secondsToSteps(this.config.cards.swapSeconds));

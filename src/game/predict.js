@@ -1,4 +1,5 @@
 import { RAPIER } from '../physics/rapier.js';
+import { CapFriction } from '../physics/capFriction.js';
 import { applyIntegrationParams, FIXED_DT } from '../physics/PhysicsWorld.js';
 import { applyResolved, resolveImpulse } from './shot.js';
 
@@ -127,6 +128,7 @@ export class TrajectoryPreview {
     this._world?.free();
     this._world = null;
     this._body = null;
+    this._friction = null;
   }
 
   /**
@@ -195,6 +197,17 @@ export class TrajectoryPreview {
 
     this._world = world;
     this._body = body;
+    /**
+     * The live world's rule, on this copy's own bookkeeping.
+     *
+     * The RULE is shared — one `CapFriction` class, one `arena.desc` — because a
+     * second implementation of it would disagree with the sim precisely on the
+     * shot that turns a cap over, which is the shot worth previewing. The
+     * INSTANCE is not, because its cache holds collider wrappers belonging to
+     * one world, and handing the arena's own instance a second world would make
+     * it rebuild that cache every time the two took turns stepping.
+     */
+    this._friction = new CapFriction(arena.capBodies, arena.capColliders, arena.desc);
     this._steps = 0;
     this._total = Math.max(1, Math.round(window / FIXED_DT));
     /**
@@ -233,6 +246,7 @@ export class TrajectoryPreview {
 
     const t0 = performance.now();
     while (this._steps < end) {
+      this._friction?.sync(this._world);
       this._world.step();
       this._steps++;
       if (this._steps % this._every === 0 || this._steps === this._total) {

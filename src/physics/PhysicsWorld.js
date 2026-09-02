@@ -85,6 +85,27 @@ export class PhysicsWorld {
      */
     this.generation = 0;
 
+    /**
+     * Run against the world immediately before every step, or null.
+     *
+     * ── a hook, not knowledge ────────────────────────────────────────────────
+     * This layer still knows nothing about caps. It knows that SOMETHING may
+     * need to write to the world in the instant before it is stepped, and
+     * `Arena` is what installs the something — currently the orientation
+     * friction, which has to be right for the step that is about to run rather
+     * than for the one that just did.
+     *
+     * A hook rather than a call at each step site because there are five of
+     * them: the turn loop, the card animation, the goal hold, the respawn and
+     * `Arena.settle`. Four of them are quiet phases where nothing flips over,
+     * which is exactly what makes putting the call in them by hand a thing that
+     * gets forgotten the first time a sixth one is added.
+     *
+     * Survives `reset` and `restore` — it belongs to this object, not to the
+     * world those replace.
+     */
+    this.beforeStep = null;
+
     this.world = new RAPIER.World({ x: 0, y: GRAVITY_Y, z: 0 });
     this._applyIntegration();
     this._bodyCache = new Map();
@@ -135,6 +156,7 @@ export class PhysicsWorld {
   }
 
   step() {
+    this.beforeStep?.(this.world);
     // No EventQueue, anywhere. Sensor verdicts are pulled from the narrow phase
     // at turn end instead, so the real sim and the preview sim run through an
     // identical call sequence and cannot diverge over a queue one of them

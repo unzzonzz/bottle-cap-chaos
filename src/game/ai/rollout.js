@@ -1,4 +1,5 @@
 import { RAPIER } from '../../physics/rapier.js';
+import { CapFriction } from '../../physics/capFriction.js';
 import { applyIntegrationParams } from '../../physics/PhysicsWorld.js';
 import { BODY_KIND, ballInSensor, capsInSensor, secondsToSteps } from '../Arena.js';
 import { TurnSettle } from '../TurnSettle.js';
@@ -298,6 +299,9 @@ export class Rollout {
     applyResolved(body, resolveImpulse(shot, config.shot));
 
     this.ra = new RolloutArena(this.world, arena);
+    // One per fork, holding this world's collider wrappers. The rule it applies
+    // is the live one — same class, same `arena.desc`.
+    this.friction = new CapFriction(arena.capBodies, arena.capColliders, arena.desc);
     this.settle = new TurnSettle();
     this.settle.begin(this.ra);
 
@@ -465,6 +469,11 @@ export class Rollout {
     while (this.steps < end) {
       if (deadline && performance.now() >= deadline) return false;
       this.settle.preStep(this.ra);
+      // The same rule the live world runs under, on this fork. A search whose
+      // caps grip where the real ones skate is searching a different game — and
+      // it would be wrong about exactly the outcomes a flipped cap produces,
+      // which are the ones worth finding. See `capFriction.js`.
+      this.friction.sync(this.world);
       this.world.step();
       this.steps++;
 
@@ -564,6 +573,8 @@ export class Rollout {
     this.world?.free();
     this.world = null;
     this.ra = null;
+    // Holds collider wrappers over the memory that was just released.
+    this.friction = null;
   }
 }
 

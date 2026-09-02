@@ -92,6 +92,38 @@ export const COLLIDER_DEFAULTS = {
   /** A real crown cap is about 2.2 g. */
   massGrams: 2.2,
   friction: 0.34,
+  /**
+   * Friction while the cap is lying on its CROWN rather than on its hem.
+   *
+   * ── it is a different surface, so it is a different number ──────────────────
+   * The two faces a cap can lie on are not the same object. The hem is a crimped
+   * edge — twenty-one folded corners standing on the board, biting into it. The
+   * crown is a stamped panel: one smooth disc of sheet metal. A real cap knocked
+   * onto its back skates, and it skates because what is touching the table
+   * changed, not because anything about the cap did.
+   *
+   * Applied to the WHOLE cap rather than to the lid collider alone, and that is
+   * measured rather than assumed. An upended cap's skirt boxes are exactly as
+   * tall as the lid — both end at `height` — so the ring lands with it and takes
+   * 50 of the 55 contacts. Friction on the lid alone therefore reaches almost
+   * nothing: 0.02 on the lid moved a 150 cm/s slide from 32.0 units to 33.7.
+   *
+   * ── what the number buys, measured on the knockout board ────────────────────
+   * Slide from 150 cm/s, against 32.0 units at the hem's 0.34:
+   *
+   *     0.24  44.4  1.4x        0.12   83.0  2.6x
+   *     0.20  52.6  1.6x        0.10   97.1  3.0x
+   *     0.16  64.4  2.0x        0.08  116.7  3.6x
+   *
+   * 0.16 is double, which is the point where a flipped cap reads as being on a
+   * different surface rather than as a cap that was hit slightly harder. Below
+   * about 0.10 a nudge carries it clean across a 56-unit board, which stops being
+   * a hazard and becomes a death sentence for whoever it happened to.
+   *
+   * Combined by MIN while it is in force — see `capFriction.js` — so this is the
+   * coefficient the contact actually gets, on any surface, in any mode.
+   */
+  flippedFriction: 0.16,
   // Low. Metal on metal sounds like it should bounce, but two 2.2 g caps meeting
   // edge-on at a third of a metre a second mostly deform and scrape; a springy
   // restitution here makes caps ping off each other like billiard balls and the
@@ -215,6 +247,7 @@ export function describeCapColliders(dims, cfg = {}) {
     mouthRadius: faceR - t,
     topRadius: topR,
     friction: c.friction,
+    flippedFriction: Math.max(0, c.flippedFriction),
     restitution: c.restitution,
     height,
     radius,
