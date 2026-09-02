@@ -100,8 +100,13 @@ export const MODES = {
        * reason `rotatable` above is one: which games are watched this way is a
        * fact about the game, and `CamTracker` has no business containing the
        * word "football". Football does not name this, so it is undefined there
-       * and the tracker never starts — its ball follow is untouched and is a
-       * different mechanism entirely. See `config.view.track`.
+       * and the tracker never starts — its ball follow is a different mechanism
+       * entirely, and lives in `main.js`.
+       *
+       * A different mechanism, but no longer a differently GOVERNED one: the
+       * player's single "카메라 추적" switch is `config.view.track`, and it now
+       * gates the ball follow as well. This flag still answers only "does the
+       * tracker run in this mode", which is what it has always answered.
        *
        * This mode is the reason the fall snap exists. A cap going over the edge
        * IS the game here, and it happens off to one side of wherever the shot

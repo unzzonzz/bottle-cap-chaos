@@ -1,7 +1,7 @@
 import GUI from 'lil-gui';
 import { describeCapColliders, nestingClearance } from '../physics/capCollider.js';
 import { resetConfig } from '../game/config.js';
-import { MODES, MODE_KEYS } from '../game/modes.js';
+import { MODES, MODE_KEYS, scoreboardFor } from '../game/modes.js';
 // Both for the curling folder's round-stepper: it fires a real shot through the
 // real path, so it needs the same seed source every other unpinned shot uses and
 // the state enum to know whether a turn is open or still being played out.
@@ -219,6 +219,9 @@ export function bootPhysicsDebug({
   // so a local match must be able to reach these without a relay in sight.
   const intro = gui.addFolder('시작 연출');
   intro.add(config.intro, 'enabled').name('연출 사용');
+  // Runs whatever `enabled` says: the document opens on a shut letterbox and
+  // something has to part it. See the note on the key in the config.
+  intro.add(config.intro, 'barSeconds', 0.05, 1.5, 0.02).name('레터박스 열림 (초)');
   intro.add(config.intro, 'selfSec', 0, 3, 0.05).name('본인 등장 (초)');
   intro.add(config.intro, 'opponentSec', 0, 3, 0.05).name('상대 등장 (초)');
   intro.add(config.intro, 'holdSec', 0, 3, 0.05).name('대치 (초)');
@@ -440,6 +443,12 @@ export function bootPhysicsDebug({
   // ── physics ──────────────────────────────────────────────────────────────
   const phys = gui.addFolder('물리');
   phys.add(config.collider, 'friction', 0, 1.5, 0.01).name('뚜껑 마찰').onChange(retune);
+  // 뒤집힌 뚜껑이 딛는 면은 크림프 헴이 아니라 매끈한 상판이다. 위의 마찰과 한 쌍으로
+  // 읽어야 하는 값이라 바로 아래에 둔다 — 0.16 은 정확히 절반, 미끄러지는 거리는 두 배.
+  phys
+    .add(config.collider, 'flippedFriction', 0, 1.5, 0.01)
+    .name('뒤집힌 뚜껑 마찰')
+    .onChange(retune);
   phys.add(config.collider, 'restitution', 0, 1, 0.01).name('뚜껑 반발계수').onChange(retune);
   phys.add(config.arena, 'boardFriction', 0, 1.5, 0.01).name('보드 마찰').onChange(retune);
   phys.add(config.arena, 'boardRestitution', 0, 1, 0.01).name('보드 반발계수').onChange(retune);
@@ -988,7 +997,11 @@ export function bootPhysicsDebug({
   const follow = cam.addFolder('발사 추적 (서바이벌 · 컬링)');
   // The master switch. Off gives the fixed view the two modes had before, with
   // the fall snap and the hand-back off with it.
-  follow.add(config.view, 'track').name('발사 뚜껑 추적');
+  /**
+   * 개발자 쪽 스위치다. 플레이어에게는 설정 화면의 "카메라 추적" 이 있고, 그쪽은
+   * `core/ViewSettings.js` 에 저장된다 — 여기서 끈 것은 이 세션에만 남는다.
+   */
+  follow.add(config.view, 'track').name('발사 뚜껑 추적 (설정 화면에도 있음)');
   /**
    * The spring, and the pair that decides whether this is watchable.
    *
@@ -1532,7 +1545,14 @@ export function bootPhysicsDebug({
             // `forced`, because the match on the board has almost certainly not
             // finished — this is here so both outcomes can be judged without
             // playing two matches out. The loop leaves a forced sequence alone.
-            victory?.begin(index, { forced: true });
+            //
+            // The live scoreboard goes with it, so the number in the band is a
+            // real one rather than a blank: what is judged here has to be what
+            // ships, and the band is half of what ships.
+            victory?.begin(index, {
+              forced: true,
+              board: scoreboardFor(match.mode, match.rules, config),
+            });
             refreshVictory();
           },
         },
@@ -1545,80 +1565,61 @@ export function bootPhysicsDebug({
     .name('■ 연출 내리기');
   winForce.open();
 
-  // Per stage, because they are different lengths of statement: the wait before
-  // the hit and the settle after it are watched, and the charge is read.
+  /**
+   * Per stage, because they are four different lengths of statement.
+   *
+   * The freeze is WATCHED — it is the replay, and the camera is moving through
+   * it — so it is the long one. The result is READ. The two bar movements are
+   * the frame arriving and leaving and want to be quick.
+   */
   const winLen = win.addFolder('단계별 길이');
-  winLen.add(config.victory, 'enterSeconds', 0.1, 2, 0.05).name('1 패자 등장 (s)');
-  winLen.add(config.victory, 'chargeSeconds', 0.1, 1.5, 0.02).name('2 승자 돌진 (s)').onChange(() => refreshWinSpeed());
-  // Frames, not seconds. See the note on `impactFrames` in the config.
-  winLen.add(config.victory, 'impactFrames', 1, 8, 1).name('3 충돌 (프레임)');
-  winLen.add(config.victory, 'resultSeconds', 0.2, 2.5, 0.05).name('4 결과 (s)');
-  winLen.add(config.victory, 'uiSeconds', 0.1, 1.5, 0.05).name('5 UI 등장 (s)');
+  winLen.add(config.victory, 'freezeSeconds', 0.2, 3, 0.05).name('1 정지 · 카메라 (s)');
+  winLen.add(config.victory, 'barSeconds', 0.1, 1.5, 0.02).name('2 레터박스 닫힘 (s)');
+  winLen.add(config.victory, 'resultSeconds', 0.2, 2.5, 0.05).name('3 결과 (s)');
+  winLen.add(config.victory, 'releaseSeconds', 0.1, 1.5, 0.02).name('4 바 물러남 · 버튼 (s)');
   winLen.open();
 
-  const winEnter = win.addFolder('승자 진입');
-  winEnter.add(config.victory, 'enterAngleDeg', 0, 359, 1).name('진입 방향 (° 0=우 90=상)');
-  winEnter.add(config.victory, 'enterDistance', 300, 1200, 10).name('진입 거리 (px)').onChange(() => refreshWinSpeed());
   /**
-   * The entry SPEED, as a readout rather than a fourth dial.
+   * The push-in, and what it is pushing in ON.
    *
-   * The brief asks for a speed control and there are already two numbers that
-   * between them are one: the distance it crosses and the time it is given (that
-   * second one lives with the other stage lengths, because it is also what the
-   * stage costs). Adding an independent speed slider would make three numbers for
-   * two degrees of freedom, and whichever two the code chose to believe, the
-   * third would sit there lying.
-   *
-   * So the speed is derived and shown. Drag either dial and this moves. `peak`
-   * is the interesting one: the charge eases on t^1.55, so the cap arrives a good
-   * half again faster than the average — which is the number that decides whether
-   * the hit reads as thrown or as slid.
+   * The zoom is a multiplier on wherever the match ended, so the readout below
+   * is derived rather than absolute — there is no single number to show, and a
+   * fixed one would be a lie on any board the player had already zoomed.
    */
-  const winSpeed = { line: '' };
-  const winSpeedRow = winEnter.add(winSpeed, 'line').name('진입 속도 (px/s, 파생)').disable();
-  const refreshWinSpeed = () => {
-    const cv = config.victory;
-    const dist = Math.max(0, cv.enterDistance - cv.capScale * 1.35);
-    const secs = Math.max(1e-3, cv.chargeSeconds);
-    const avg = dist / secs;
-    winSpeed.line = `평균 ${avg.toFixed(0)}  ·  도달 순간 ${(avg * 1.55).toFixed(0)}`;
-    winSpeedRow.updateDisplay();
+  const winCam = win.addFolder('카메라 밀어넣기');
+  const winZoom = { line: '' };
+  const winZoomRow = winCam.add(winZoom, 'line').name('줌 (현재 → 목표, 파생)').disable();
+  const refreshWinZoom = () => {
+    const now = camera?.zoom ?? 1;
+    winZoom.line = `${now.toFixed(2)} → ${(now * config.victory.pushZoom).toFixed(2)}`;
+    winZoomRow.updateDisplay();
   };
-  refreshWinSpeed();
-  winEnter.add(config.victory, 'trailCount', 0, 6, 1).name('잔상 개수');
-  winEnter.add(config.victory, 'trailSpacing', 10, 120, 2).name('잔상 간격 (px)');
-  winEnter.add(config.victory, 'trailSize', 8, 120, 2).name('잔상 크기 (px)');
+  refreshWinZoom();
+  winCam.add(config.victory, 'pushZoom', 1, 2.5, 0.01).name('밀어넣기 배수').onChange(refreshWinZoom);
+  winCam
+    .add(config.victory, 'sparkleSeconds', 0, 2, 0.05)
+    .name('승자 반짝임 (s) — CardFx 원모어');
+  winCam.open();
 
-  const winHit = win.addFolder('충돌');
-  winHit.add(config.victory, 'flashFrames', 0, 8, 1).name('플래시 (프레임)');
-  winHit.add(config.victory, 'flashStrength', 0, 1, 0.01).name('플래시 세기');
-  winHit.add(config.victory, 'shakeStrength', 0, 48, 1).name('화면 흔들림 강도 (px)');
-  winHit.add(config.victory, 'shakeSeconds', 0.02, 1, 0.01).name('흔들림 지속 (s)');
-  winHit.add(config.victory, 'shakeHz', 2, 60, 1).name('흔들림 주기 (Hz)');
-  winHit.add(config.victory, 'ringStart', 4, 200, 2).name('링 시작 크기 (px)');
-  winHit.add(config.victory, 'ringEnd', 40, 640, 5).name('링 최대 크기 (px)');
-  winHit.add(config.victory, 'ringSeconds', 0.05, 1.5, 0.01).name('링 확장 시간 (s)');
-
-  const winOut = win.addFolder('패자 이탈');
-  winOut.add(config.victory, 'flipSpeedTurns', 0.1, 6, 0.1).name('뒤집힘 속도 (회/s)');
-  winOut.add(config.victory, 'exitSpeed', 200, 4000, 25).name('이탈 속도 (px/s)');
-
-  const winSettle = win.addFolder('승자 정착');
-  winSettle.add(config.victory, 'overshoot', 0, 260, 2).name('관성 오버슈트 (px)');
-  winSettle.add(config.victory, 'springStiffness', 20, 900, 5).name('스프링 강성');
-  winSettle.add(config.victory, 'springDamping', 1, 80, 0.5).name('스프링 감쇠');
-  winSettle.add(config.victory, 'floatAmount', 0, 40, 1).name('부유 폭 (px)');
-  winSettle.add(config.victory, 'floatHz', 0, 3, 0.05).name('부유 주기 (Hz)');
-
-  const winLook = win.addFolder('배치와 배경');
+  /**
+   * The result band.
+   *
+   * `textY` and `scoreY` are clamped into the letterbox band by `layout()`, so
+   * dragging one past the bars moves it until it touches and then stops. That
+   * is the constraint doing its job rather than the slider being broken — see
+   * the note on the band in `VictoryLayer.layout`.
+   */
   const winRelayout = () => victory?.layout();
-  winLook.add(config.victory, 'groundTiltDeg', 0, 60, 1).name('바닥 기울기 (° 0=탑뷰)');
-  winLook.add(config.victory, 'bgOpacity', 0, 1, 0.01).name('배경 페이드 강도');
+  const winLook = win.addFolder('결과 화면');
+  winLook.add(config.victory, 'bgOpacity', 0, 1, 0.01).name('배경 어둡기');
   winLook.add(config.victory, 'bgFadeSeconds', 0.02, 1.5, 0.01).name('배경 페이드 (s)');
-  winLook.add(config.victory, 'capScale', 16, 120, 1).name('뚜껑 크기 (px/unit)').onChange(() => refreshWinSpeed());
-  winLook.add(config.victory, 'capY', -160, 200, 2).name('뚜껑 Y 위치');
-  winLook.add(config.victory, 'textY', -240, 200, 2).name('텍스트 Y 위치').onChange(winRelayout);
-  winLook.add(config.victory, 'buttonY', -240, 200, 2).name('버튼 Y 위치').onChange(winRelayout);
+  winLook.add(config.victory, 'bubbleCount', 0, 90, 1).name('기포 개수').onChange(() => {
+    victory?.fizz.build(config.victory.bubbleCount, victory.scene);
+  });
+  winLook.add(config.victory, 'bubbleStrength', 0, 2, 0.05).name('기포 밝기');
+  winLook.add(config.victory, 'textY', -200, 200, 2).name('승자 줄 Y').onChange(winRelayout);
+  winLook.add(config.victory, 'scoreY', -200, 200, 2).name('점수판 Y').onChange(winRelayout);
+  winLook.add(config.victory, 'buttonY', -240, 200, 2).name('버튼 Y').onChange(winRelayout);
   winLook.add(config.victory, 'textPulseScale', 0, 0.6, 0.01).name('텍스트 등장 펄스');
   winLook
     .add(config.victory, 'hitMargin', 0, 40, 1)

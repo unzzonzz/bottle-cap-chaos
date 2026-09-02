@@ -10,10 +10,24 @@ import { PLAYER_COLORS } from '../render/playerColors.js';
 import { HudMaterials } from '../ui/HudMaterial.js';
 import { turnPlateTexture } from '../ui/hudTextures.js';
 import { PALETTE } from '../core/palette.js';
+import { letterboxBar } from '../core/Cinematic.js';
 import { SIZE } from '../core/tokens.js';
 
 /**
- * 매칭 성립 — the two players, before the board.
+ * 경기 시작 — the two players, before the board.
+ *
+ * ── it was `net/MatchFoundLayer.js`, and the move is not cosmetic ─────────
+ * It was written for 매칭 성립, the moment an online room fills, which is why it
+ * lived among the sockets. It has never had a line of networking in it — two
+ * caps, two name plates and a clock — and it has opened LOCAL and AI matches for
+ * as long as it has opened online ones. `config.intro` was lifted out of the
+ * online group for exactly this reason and says so.
+ *
+ * The redesign made the misfiling expensive rather than untidy: `src/net/` is
+ * one of the directories this work is forbidden to touch, and the layout below
+ * had to change to fit inside the letterbox. Moving it means that rule stays
+ * meaningful — after this, a diff in `src/net/` really is a change to the
+ * network — instead of being spent on a file that was only there by accident.
  *
  * ── the placement is the point, and it is not decorative ─────────────────
  * The opponent comes in TOP-LEFT and you come in BOTTOM-RIGHT, and those are
@@ -25,6 +39,25 @@ import { SIZE } from '../core/tokens.js';
  *
  * That is why the exit is a MOVE and not a fade. A fade would say "that screen
  * is over"; the slide says "this is where those two things live".
+ *
+ * ── it plays inside the LETTERBOX, and that is a layout constraint ───────
+ * `core/Cinematic.js` has the bars at the letterbox position for the whole of
+ * this sequence, so the band is the frame less `letterboxBar()` at each edge and
+ * everything here has to fit inside it. A bar is a margin, not a UI surface —
+ * "바 안에 글자를 쓰지 마라" — and a name plate half under one is worse than no
+ * name plate.
+ *
+ * `_layout` therefore solves the standoff and the plate drop against the band
+ * rather than taking them as given. It has to be solved and not merely checked,
+ * because the band's height moves with the frame's while the bar does not: on a
+ * landscape phone the frame is 314 tall, the two bars take 112 of it, and the
+ * authored positions put the near player's plate 16 pixels into the bottom one.
+ *
+ * The UI underneath is not merely hidden while this runs, it is UNPRESSABLE —
+ * see `uiGate` in `main.js`. A button you can see and cannot press is
+ * indistinguishable from a broken one, and one you cannot see and CAN press is
+ * worse. Nor does a press do anything ELSE: the sequence is unskippable, so for
+ * its whole length the screen simply does not answer. See `skip`.
  *
  * ── it draws onto the finished frame, like every other overlay ───────────
  * `render` is called after the world's bloom chain, not inside it. It used to be
@@ -58,12 +91,12 @@ const FRAME = SHARED_FRAME;
 const SPOTS = {
   opponent: {
     from: { x: -420, y: 320 },
-    at: { x: -150, y: 96 },
+    at: { x: -150, y: 84 },
     to: { x: -150, y: 300 },
   },
   self: {
     from: { x: 420, y: -320 },
-    at: { x: 150, y: -96 },
+    at: { x: 150, y: -84 },
     to: { x: 150, y: -300 },
   },
 };
@@ -77,16 +110,76 @@ const SPOTS = {
  * 일어난다 — 뚜껑이 갑자기 나타나는 것처럼 보인다.
  */
 const CAP_WIDTH = 132;
-/** How far under a cap its name plate sits. */
-const PLATE_DROP = 96;
-/** The name plate, at the authored frame. */
-const PLATE = { width: 152, height: 26 };
+/**
+ * From a cap's centre to its name plate's centre, in frame pixels.
+ *
+ * DERIVED by `plateDrop` below, because it is not a taste — it is "the plate
+ * hangs clear of the cap". The cap is a disc and the plate is directly under its
+ * middle, so the clearance is the disc's own radius plus half the plate plus
+ * this. Writing the whole distance as a literal is how it went wrong the first
+ * time: 78 was measured against a 26-tall plate and left exactly one pixel, so
+ * raising the plate to the token height put it straight through the cap's hem.
+ */
+const PLATE_GAP = 8;
+
+/**
+ * The name plate. Width is authored; HEIGHT comes from the token.
+ *
+ * ── 26 was a number this file invented, and the type did not fit in it ─────
+ * `turnPlateTexture` insets the pill by 5 and draws `TYPE.label` at 17px, so a
+ * 26-tall plate is a 16-tall pill holding a 17-pixel line: the glyphs were
+ * taller than the box around them and there was no padding above or below them
+ * at all. The in-game turn plate says the same kind of thing with the same type
+ * at `SIZE.turnPlate.h`, and it looks right because 44 is what that type needs.
+ *
+ * How much room a label gets above and below it is a property of the COMPONENT,
+ * not of what the label says — the same argument `VictoryLayer`'s buttons make
+ * for taking their height from `SIZE.buttonFooter`. So the height is the token
+ * and only the width stays authored, because the width really is about the text.
+ */
+const PLATE = { width: 152, height: SIZE.turnPlate.h };
+
+/**
+ * Clearance between the near player's plate and the bottom bar, in frame pixels.
+ *
+ * Without it the stack is solved to exactly touch, and "exactly touching a bar"
+ * is a plate that reads as clipped the moment the vertex snap moves an edge.
+ */
+const BAND_MARGIN = 12;
+
+/**
+ * The plate's drawn size at a given frame scale.
+ *
+ * ── the height has a floor and the width does not ─────────────────────────
+ * 44 scaled by a 421-wide frame is 29, and the label inside it is what has to
+ * survive: `SIZE.turnPlate.h * 0.5` is the point below which the pill's own
+ * inset and the type stop both fitting. The name is the only information on this
+ * screen, so it may shrink and may not disappear.
+ */
+function plateBox(k) {
+  return {
+    width: Math.round(PLATE.width * k),
+    height: Math.max(Math.round(SIZE.turnPlate.h * 0.5), Math.round(PLATE.height * k)),
+  };
+}
+
+/**
+ * From a cap's centre to its plate's centre, at a given frame scale.
+ *
+ * Solved from the DRAWN box rather than from an authored number times `k`,
+ * because the box has a floor: below about half scale the plate stops shrinking
+ * while the cap carries on, so a drop scaled from the authored size would let
+ * the cap's hem sit over its own name.
+ */
+function plateDrop(k) {
+  return (CAP_WIDTH * k) / 2 + PLATE_GAP * k + plateBox(k).height / 2;
+}
 
 const easeOut = (t) => 1 - (1 - t) * (1 - t) * (1 - t);
 const easeIn = (t) => t * t;
 const clamp01 = (t) => Math.min(1, Math.max(0, t));
 
-export class MatchFoundLayer {
+export class IntroLayer {
   /**
    * @param {object} opts
    * @param {import('../core/GlossMaterial.js').GlossMaterials} opts.retro
@@ -191,6 +284,20 @@ export class MatchFoundLayer {
   }
 
   /**
+   * Has the sequence reached its last segment?
+   *
+   * `main.js` reads this to start the bars retreating, so the letterbox opens on
+   * the same window the caps slide to their corners rather than after it. A
+   * getter off the layer's own clock and not a timer of its own: two clocks for
+   * one movement is how the two end up a frame apart on a slow machine.
+   */
+  get exiting() {
+    if (!this.active) return this.done;
+    const t = this._timing;
+    return this.t >= t.self + t.opponent + t.hold;
+  }
+
+  /**
    * Advance. Takes a dt rather than reading a clock, so the sequence runs at the
    * same speed on a 144 Hz display as on a 60 Hz one and can be stepped by hand.
    */
@@ -210,12 +317,17 @@ export class MatchFoundLayer {
   /**
    * Cut to the end.
    *
-   * ── not a player control ─────────────────────────────────────────────────
-   * This was bound to a press and is not any more: the sequence is unskippable
-   * by instruction. What still calls it is `main.js`'s stall guard — a frame
-   * clock that has stopped, which a backgrounded tab really does cause, and
-   * which would otherwise leave a player waiting forever on an animation that
-   * is not advancing.
+   * ── it is NOT a player control ───────────────────────────────────────────
+   * Nothing is bound to a press. That has been decided three times and landed
+   * in the same place twice, so it is worth writing down: the sequence runs once
+   * at the top of a match and is under three seconds, and online it is the
+   * window in which neither player's clock has started — `main.js` sends `ready`
+   * after it resolves — so skipping buys nobody any of their own time and leaves
+   * them on a still frame instead of a moving one.
+   *
+   * The one caller is `main.js`'s stall guard: a frame clock that has stopped,
+   * which a backgrounded tab really does cause, would otherwise leave a player
+   * waiting forever on an animation that is not advancing.
    *
    * Not "stop drawing": the sequence is jumped to its final frame, which is the
    * frame whose whole job is to be continuous with the match behind it. Simply
@@ -228,6 +340,33 @@ export class MatchFoundLayer {
     this._layout();
     this.active = false;
     this.done = true;
+  }
+
+  /**
+   * How much of the authored STANDOFF survives the band.
+   *
+   * ── the drop is not part of what shrinks, and that was the bug ───────────
+   * It was: standoff and drop scaled together, "so the arrangement keeps its
+   * proportions on a short frame". It does not keep them — the cap's RADIUS is
+   * not in that proportion, so shrinking the drop walks the plate up into the
+   * cap it is supposed to hang below. It survived only because the old plate was
+   * 26 tall and the drop had a pixel to give.
+   *
+   * The drop is a clearance and clearances do not scale away. What gives is the
+   * standoff, which is the one number here that is genuinely a taste: how far
+   * from the middle the two seats sit.
+   *
+   * Both ends are solved at once, because the two seats are mirrored — the near
+   * player's PLATE is the lowest thing on screen and the far player's CAP is the
+   * highest, so capping the standoff by whichever is tighter satisfies both.
+   */
+  _fit(k) {
+    const bandHalf = Math.max(1, FRAME.height / 2 - letterboxBar());
+    const room = bandHalf - BAND_MARGIN * k;
+    const byPlate = room - plateDrop(k) - plateBox(k).height / 2;
+    const byCap = room - (CAP_WIDTH * k) / 2;
+    const want = Math.abs(SPOTS.self.at.y) * k;
+    return Math.min(1, Math.max(0, Math.min(byPlate, byCap)) / Math.max(1, want));
   }
 
   _layout() {
@@ -248,8 +387,13 @@ export class MatchFoundLayer {
       const a = easeOut(enter);
       const b = easeIn(out);
       const k = frameScale();
+      const fit = this._fit(k);
       const x = lerp(lerp(spot.from.x, spot.at.x, a), spot.to.x, b) * k;
-      const y = lerp(lerp(spot.from.y, spot.at.y, a), spot.to.y, b) * k;
+      // The band fit applies to the STANDOFF only. `from` and `to` are both off
+      // the frame — the entrance comes in from outside it and the exit leaves
+      // through it — so pulling those in would shorten a movement whose whole
+      // job is to start and end where the eye cannot follow it.
+      const y = lerp(lerp(spot.from.y * k, spot.at.y * k * fit, a), spot.to.y * k, b);
       seat.pivot.scale.setScalar(this._capScale * k);
 
       seat.pivot.position.set(x, y, 0);
@@ -272,8 +416,9 @@ export class MatchFoundLayer {
       const shown = enter > 0 ? 1 - b : 0;
       this._setOpacity(seat.pivot, shown);
 
-      // The name plate rides under its cap.
-      this._syncPlate(player, x, y - PLATE_DROP * k, shown);
+      // The plate hangs a fixed clearance under its cap — see `plateDrop`. The
+      // band fit is NOT applied to it: it is what keeps the plate off the cap.
+      this._syncPlate(player, x, y - plateDrop(k), shown);
 
     }
   }
@@ -286,18 +431,7 @@ export class MatchFoundLayer {
       return;
     }
     const k = frameScale();
-    /**
-     * 이름판에는 바닥이 있다.
-     *
-     * 26 을 프레임 배수로 줄이면 421 프레임에서 17 이 되고, 그 안에는 17px 라벨은
-     * 커녕 유리의 안쪽 여백도 안 들어간다. 이름은 이 화면에 있는 유일한 정보이므로
-     * 줄어들다 사라지면 안 된다 — 폭만 줄이고 높이는 `SIZE.turnPlate.h` 의 절반을
-     * 바닥으로 둔다.
-     */
-    const box = {
-      width: Math.round(PLATE.width * k),
-      height: Math.max(Math.round(SIZE.turnPlate.h * 0.5), Math.round(PLATE.height * k)),
-    };
+    const box = plateBox(k);
     const key = `${name}:${box.width}x${box.height}`;
     if (this._labels[player] !== key) {
       this._labels[player] = key;
@@ -354,7 +488,7 @@ export class MatchFoundLayer {
   render(renderer) {
     if (!this.visible) return;
     // In front by definition rather than by being nearer. Same three lines as
-    // `VictoryLayer.render` and `CapWipe.render`, for the same reason.
+    // `VictoryLayer.render` and `Cinematic.render`, for the same reason.
     renderer.clearDepth();
     renderer.autoClear = false;
     renderer.render(this.scene, this.camera);

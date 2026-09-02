@@ -83,6 +83,17 @@ export const HUD_FRAME = FRAME;
  * `SIZE`/`SPACE` 를 그대로 읽는다 — UI 를 키울 때 고칠 곳이 한 군데여야 한다.
  */
 const SCORE = { width: SIZE.scorePlate.w, height: SIZE.scorePlate.h };
+
+/**
+ * How far a cinematic may have taken the HUD away before it stops answering.
+ *
+ * A half is not a taste: below it a white plate over the board has less contrast
+ * than the board's own highlights, so it is not something a player could aim at
+ * on purpose. The same number `CardLayer` uses, and it has to be — the two are
+ * driven by one scalar, and a hand that stopped taking presses at a different
+ * point from the HUD would be a window in which exactly one was reachable.
+ */
+const INPUT_GATE = 0.5;
 const TURN = { width: SIZE.turnPlate.w, height: SIZE.turnPlate.h };
 /**
  * 아이콘 버튼 지름. **턴 플레이트 높이와 같은 수**이고, 정원이다.
@@ -579,6 +590,25 @@ export class HudLayer {
    *   over the pitch you are aiming across is in the way at exactly the moment
    *   precision matters. Applied last so it cannot argue with the score's own
    *   zoom fade or the buttons' dimming — both still run underneath it.
+   *
+   *   Opacity ONLY. It does not gate the hit test, and that is deliberate:
+   *   "흐린 상태에서도 클릭은 동작한다" is a rule about DIMMING, and a control
+   *   faded under the player's own hand is still a control they meant to press.
+   *   What gates the press is `gate` below.
+   * @param {number} [gate]
+   *   0..1, whether this layer is on screen at all. `Cinematic.uiGate`.
+   *
+   *   ── it gates the HIT TEST, and `fade` does not ─────────────────────────
+   *   Two scalars because they are two different facts. `fade` is the player's
+   *   own bow pushing the readouts out of the way, and it comes back the moment
+   *   they let go. This one is a SEQUENCE owning the screen — the opening, or
+   *   the ending — and while one does, a control that is invisible and still
+   *   answers presses is worse than one that is visible and does not: you
+   *   cannot even tell you hit it. Below `INPUT_GATE` the hit test reports
+   *   nothing.
+   *
+   *   The two are multiplied for the opacity by the caller, never here; see the
+   *   note on the two fades in `main.js`.
    */
   /**
    * @param {(player: number) => string} [labelFor]
@@ -596,6 +626,7 @@ export class HudLayer {
     match,
     gameCamera,
     fade = 1,
+    gate = 1,
     labelFor = null,
     nameFor = null,
     outcomeFor = null,
@@ -603,6 +634,7 @@ export class HudLayer {
   }) {
     const ui = this.config.ui;
     this._fade = fade;
+    this._gate = gate;
 
     if (ui.textureScale !== this._texScale) {
       // Every plate is re-asked for below and the cache has just been emptied,
@@ -957,6 +989,9 @@ export class HudLayer {
    * that was never asked.
    */
   hitAt(clientX, clientY) {
+    // A sequence has the screen: see the note on `gate`. Not `fade`, which is
+    // the player's own hand and leaves everything pressable.
+    if ((this._gate ?? 1) < INPUT_GATE) return null;
     if (this._isReserved(clientX, clientY)) return null;
     const rect = this.canvas.getBoundingClientRect();
     if (rect.width < 1 || rect.height < 1) return null;

@@ -3,8 +3,8 @@
  *
  * ── why this file exists ─────────────────────────────────────────────────────
  * There were SEVEN copies of `{ width: 640, height: 480 }` in this project —
- * `HudLayer`, `CardLayer`, `ModalLayer`, `MatchFoundLayer`, `VictoryLayer`,
- * `CapWipe`, and a default argument in `safeArea` — and not one of them imported
+ * `HudLayer`, `CardLayer`, `ModalLayer`, `IntroLayer`, `VictoryLayer`, the
+ * cap wipe, and a default argument in `safeArea` — and not one of them imported
  * from another. That was harmless while the number was a constant. It stops
  * being harmless the moment the box can change shape, because seven independent
  * constants cannot be changed together.
@@ -388,7 +388,7 @@ export function updateFrame(windowW, windowH) {
  * An orthographic camera covering exactly the frame, origin at its centre.
  *
  * Six layers built this identically — `HudLayer`, `CardLayer`, `ModalLayer`,
- * `MatchFoundLayer`, `VictoryLayer`, `CapWipe` — and none of them had a way to
+ * `IntroLayer`, `VictoryLayer`, `Cinematic` — and none of them had a way to
  * rebuild it, which was fine while the frame was a constant. `near`/`far` and
  * `z` differ between them (the two that animate caps flying in from off-screen
  * need a deep box), so those stay parameters.
@@ -431,11 +431,16 @@ export function refitFrameCamera(cam) {
 /**
  * Half the frame's diagonal — the radius that certainly clears every corner.
  *
- * `VictoryLayer` uses it to know when the losing cap has left the screen and
- * `CapWipe` to know how far the wipe has to reach to cover it. Both had it as a
- * module constant computed once from 640x480; both are wrong the moment the
- * frame gets taller (the cap vanishes while still visible; the wipe leaves a
- * gap). A function, because the answer now changes.
+ * It had two callers and both are gone: the victory screen used it to know when
+ * the losing cap had left the frame, and the cap wipe to know how far it had to
+ * grow to cover one. Both had it as a module constant computed once from
+ * 640x480 and both were wrong the moment the frame got taller, which is why it
+ * became a function.
+ *
+ * Kept, unused, because the fact it states — the radius from the centre that
+ * certainly clears every corner — is the one thing anything covering this frame
+ * from the middle has to know, and re-deriving it is how the stale constant got
+ * written twice the first time.
  */
 export function halfDiagonal() {
   return Math.hypot(FRAME.width, FRAME.height) / 2;

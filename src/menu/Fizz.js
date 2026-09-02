@@ -90,8 +90,17 @@ function hash(i, k) {
   return x - Math.floor(x);
 }
 
-/** a + g a^2 + g^2 a^3 / 3 — the rise integral, with r growing linearly. */
-function risePolynomial(a, growth) {
+/**
+ * a + g a^2 + g^2 a^3 / 3 — the rise integral, with r growing linearly.
+ *
+ * Exported alongside `solveAge` because the victory screen's bubbles run the
+ * same law up a flat frame instead of up a bottle — see `victory/ResultFizz.js`.
+ * The LAW travels; this class does not, because it is bound to a bottle by
+ * construction (`setProfile` lays its sites out on the glass, `envelopeAt` puts
+ * each stream against the wall, and `update` un-rotates the billboard by the
+ * bottle's lean). A victory screen has no bottle to hand any of that.
+ */
+export function risePolynomial(a, growth) {
   return a + growth * a * a + (growth * growth * a * a * a) / 3;
 }
 
@@ -102,7 +111,7 @@ function risePolynomial(a, growth) {
  * (1 + growth a)^2 — the square of the radius ratio, which is the rise speed.
  * Monotonic and smooth, so it converges in three or four steps from any start.
  */
-function solveAge(distance, growth) {
+export function solveAge(distance, growth) {
   let a = distance;
   for (let n = 0; n < 6; n++) {
     const f = risePolynomial(a, growth) - distance;

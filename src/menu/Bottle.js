@@ -79,6 +79,18 @@ import { onQualityChange, QUALITY } from '../core/quality.js';
 const CAP_COLOR = PALETTE.menu.capBrand;
 const LINER_COLOR = PALETTE.metal.liner;
 
+/**
+ * How far the cap hops off the mouth, in mm up the bottle's own axis.
+ *
+ * 34 is about a sixth of the bottle's height, which is far enough that the gap
+ * between the cap and the lip is unmistakable at the size the bottle is drawn
+ * and short enough that the cap is still over the neck when the bars take it.
+ * Any further and it reads as being thrown rather than as being popped.
+ */
+const POP_RISE = 34;
+/** Turns about the cap's own normal over the hop. Under one: a nudge, not a spin. */
+const POP_TURNS = 0.35;
+
 export class Bottle {
   /**
    * @param {import('../core/GlossMaterial.js').GlossMaterials} retro
@@ -399,11 +411,9 @@ export class Bottle {
      * and `+=` would walk the cap a further half-bottle down on each one.
      */
     const capHeight = this.capGeometry.userData.height;
-    this.cap.position.set(
-      0,
-      profile.height * MM - capHeight + this.tuning.capLift * MM + this._centreOffset,
-      0,
-    );
+    /** Where the cap sits when it is on. `popCap` lifts off this and returns to it. */
+    this._capSeatY = profile.height * MM - capHeight + this.tuning.capLift * MM + this._centreOffset;
+    this.cap.position.set(0, this._capSeatY, 0);
 
     this._mouthLocal.set(0, profile.height * MM + this._centreOffset, 0);
     this._baseLocal.set(0, this._centreOffset, 0);
@@ -974,7 +984,43 @@ export class Bottle {
     return out.copy(this._localUp);
   }
 
-  /** Hide the cap at the moment it becomes the wipe's cap. */
+  /**
+   * The hop, stage 2 of the transition.
+   *
+   * ── it leaves the BOTTLE; it does not leave the frame ────────────────────
+   * The cap used to come off here and keep going — across the screen, growing,
+   * until it covered the frame and the document was swapped behind it. That is
+   * the letterbox's job now, and what is left is the part that was always about
+   * this object: the crimp lets go, the cap is thrown a little way up its own
+   * axis, and the eruption goes off underneath it. It is out of sight behind
+   * the closing bars a sixth of a second later, which is why nothing here has
+   * to decide how it lands.
+   *
+   * Along the bottle's OWN axis — `this.cap` is a child of the lean — so a cap
+   * leaving a bottle that is tipped toward the camera goes the way the bottle is
+   * pointing rather than straight up the screen. The tumble is small and about
+   * the cap's own normal, which is the one rotation a crown cap can take without
+   * showing the viewer its edge.
+   *
+   * @param {number} t  0..1 through the hop. Any value outside seats it again.
+   */
+  popCap(t) {
+    if (!(t > 0)) {
+      this.cap.visible = true;
+      this.cap.position.y = this._capSeatY ?? this.cap.position.y;
+      this.cap.rotation.set(0, 0, 0);
+      return;
+    }
+    const k = Math.min(1, t);
+    // Fast off the mouth and easing as it goes — the crimp releasing, not a
+    // thing being lifted. It never comes back down: the bars arrive first.
+    const rise = (1 - (1 - k) * (1 - k)) * POP_RISE * MM;
+    this.cap.position.y = (this._capSeatY ?? 0) + rise;
+    this.cap.rotation.y = k * POP_TURNS * Math.PI * 2;
+    this.cap.visible = true;
+  }
+
+  /** Hide the cap for the frames the bottle is meant to be open. */
   setCapVisible(on) {
     this.cap.visible = on;
   }

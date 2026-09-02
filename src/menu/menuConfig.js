@@ -173,36 +173,60 @@ export const MENU_CONFIG = {
   },
 
   /**
-   * The transition, stage by stage. Summed default is 0.95s, inside the one
-   * second the brief allows, with the covered window at three frames of a 60 Hz
-   * display — the shortest a scene swap can hide behind and still be certain to
-   * be SEEN by the compositor.
+   * The transition, stage by stage.
+   *
+   * Summed default is 0.77s — 0.38 shaking, 0.34 closing, three frames covered —
+   * inside the brief's "1초 이내", which it had not been since the covered frame
+   * grew a wordmark. The press-and-hold makes the total variable upward anyway;
+   * this is the floor.
    */
   transition: {
     shakeSeconds: 0.38,
-    launchSeconds: 0.28,
     /**
-     * How long the cap holds the screen.
+     * Stage 2: how long the letterbox takes to close.
      *
-     * ── it is a BEAT now, not a seam ────────────────────────────────────────
-     * This started at 0.05 — three frames at 60 Hz — because the brief asked
-     * for "완전 차폐 (2~3프레임)" and all it had to do was hide a scene swap.
-     * Three frames is the shortest window a swap can hide behind and it did
-     * that job perfectly.
-     *
-     * Then the cap got the game's logo on it, and the covered frame stopped
-     * being a seam and became the one moment that logo is eight hundred pixels
-     * across. Three frames is 50 ms: long enough to register that something
-     * red filled the screen, nowhere near long enough to READ three words.
-     *
-     * 0.35 puts the whole run at 1.25s, which is over the brief's original
-     * "1초 이내". That budget was written when the cover was a technical
-     * necessity with nothing on it; deliberately showing someone a wordmark and
-     * then not leaving it up long enough to read is worse than being a quarter
-     * second slow. The press-and-hold already made the total variable anyway.
+     * This is the stage's own length. `popSeconds` below is a shorter event
+     * inside it, so raising this gives the bars a slower close without turning
+     * the cap's hop into a slow-motion one.
      */
-    coverSeconds: 0.35,
-    exitSeconds: 0.24,
+    barSeconds: 0.34,
+    /**
+     * The cap's hop off the mouth, inside stage 2.
+     *
+     * ── it used to fly at the camera and take the screen ──────────────────
+     * `launchSeconds` was 0.28 and it was the whole of the cover: the cap grew
+     * until it filled the frame. The letterbox does the covering now, so all
+     * that is left of this is the part that was about the BOTTLE — the cap
+     * comes off the mouth, the eruption goes off behind it, and it is gone
+     * behind the closing bars a sixth of a second later. It never crosses the
+     * frame.
+     *
+     * Shorter than `barSeconds` on purpose. A hop that was still rising when
+     * the frame went opaque would read as an animation cut off rather than one
+     * finished.
+     */
+    popSeconds: 0.15,
+    /**
+     * How long the covered frame holds. Three frames at 60 Hz.
+     *
+     * ── it is a SEAM again, and that is what the number is for ─────────────
+     * This is what it was originally, because the brief asked for "완전 차폐
+     * (2~3프레임)" and all a covered frame had to do was hide a scene swap.
+     * Three frames is the shortest window a swap can hide behind and still be
+     * certain to be SEEN by the compositor, which is the whole requirement.
+     *
+     * It went to 0.35 for a while — seven times the minimum — because the frame
+     * had the game's wordmark on it and 50 ms is nowhere near long enough to
+     * READ three words. The wordmark is gone on instruction, and with nothing
+     * on the frame there is nothing to hold it for: a held frame with nothing
+     * on it is not a beat, it is a pause. So the number goes back to the job.
+     *
+     * It does not gate a NAVIGATION. On that path the bars stay shut while the
+     * next document loads (`uncover: false` in `bootMenu`), so this only decides
+     * how long a same-document scene swap sits behind the colour before the bars
+     * part again.
+     */
+    coverSeconds: 0.05,
   },
 
   /**
@@ -249,28 +273,6 @@ export const MENU_CONFIG = {
     spinDamping: 0.94,
   },
 
-  wipe: {
-    /**
-     * Extra scale over the exact fit, at the covered frame.
-     *
-     * The exact fit is computed from the cap's own panel radius and the frame's
-     * half-diagonal, so 1.0 would already cover it — this is the margin against
-     * the vertex snap, which moves every corner by up to half a low-res pixel
-     * and would otherwise be free to move one INWARD.
-     */
-    coverSafety: 1.1,
-    /** Turns a second while it flies. Not so fast it strobes on the grid. */
-    spinSpeed: 1.35,
-    /** How far the spin axis leans off the flight direction, in degrees. */
-    axisTilt: 15,
-    /** How much bigger it still gets on the way past, over the cover scale. */
-    exitGrowth: 1.22,
-    /** How far it travels on the way out, in frame pixels. */
-    exitTravel: 1180,
-    /** Where it starts, as a fraction of the cover scale. */
-    startScale: 0.05,
-  },
-
   items: {
     /**
      * One FRAMEBUFFER pixel per texel, which is why the type survives. So these
@@ -296,12 +298,16 @@ export const MENU_CONFIG = {
 
   view: {
     /**
-     * The same bloom the game runs, so the two sides of the cap wipe match.
+     * The same bloom the game runs, so the two sides of the letterbox match.
      *
      * The menu is the one screen that is nothing BUT glossy surfaces — glass,
      * liquid, bubbles, a metal cap — so it is where the threshold gets judged.
      * If it looks right here and hazy in a match, the match's lighting is too
      * hot rather than the bloom being wrong.
+     *
+     * The bars themselves are OUTSIDE this — `Cinematic` draws after the chain,
+     * like every other overlay. A bright pass over a hard edge blooms the edge,
+     * and a letterbox with a halo is not a letterbox.
      */
     bloom: {
       enabled: true,

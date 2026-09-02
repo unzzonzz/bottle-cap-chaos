@@ -286,25 +286,28 @@ export function floorPoolTexture() {
 }
 
 /**
- * The cap's top: the game's logo, on the disc that fills the screen.
+ * The cap's top: the game's logo, on a disc.
  *
  * ── it replaces the placeholder, and only where it should ───────────────────
  * `cap/capTexture.js` draws a generic panel — concentric rings, eight spokes and
  * an orientation mark — and that is still exactly right for the PLAYING pieces,
  * which are a customisable slot for a player's own artwork, and for the phase-1
  * viewer, whose spoke is a debugging aid for watching the UVs spin. Neither
- * wants the game's name stamped on it. This one is for the menu's bottle and
- * for the cap that covers the screen, which do.
+ * wants the game's name stamped on it. This one is for the menu's bottle and for
+ * the built-in mark, which do.
  *
- * ── the design is sized for ONE frame ───────────────────────────────────────
- * At the covered frame the panel's radius is the frame's half-DIAGONAL, so the
- * part you actually see is the largest 4:3 rectangle inside the disc — about
- * 102 by 77 of these 128 texels. Everything that has to be read therefore lives
- * inside that box, and everything outside it (the rim rings) exists only for
- * the other end of the scale, where this is a twelve-pixel dot on a bottle.
+ * ── the layout was sized for a frame that no longer exists ─────────────────
+ * The cap wipe used to blow this up until the panel's radius was the frame's
+ * half-DIAGONAL, so the part you saw was the largest 4:3 rectangle inside the
+ * disc — about 102 by 77 of these 128 texels. Everything that has to be read
+ * lives inside that box because of it, and the rim rings outside it were for the
+ * other end of the scale, where this is a twelve-pixel dot on a bottle.
  *
- * Draw the logo out to the disc's edge instead and the covering frame crops the
- * first and last letters off every line.
+ * There is no such frame any more: the wipe is gone and so is the wordmark that
+ * briefly replaced it on the letterbox. The constraint is kept anyway, and not
+ * out of inertia — it is what stops the lockup being a ring of type around an
+ * empty middle, which is what a design laid out to the disc's own edge becomes
+ * at the size this is actually drawn.
  *
  * ── it is the label's design, made round ────────────────────────────────────
  * Same red, same sheared white grotesque, same stacked lockup, same rule above
@@ -312,14 +315,18 @@ export function floorPoolTexture() {
  * because on a disc that is what "follows the curvature" means. Nothing here is
  * anyone's trademark: a red cap with white type on it is the whole of it.
  */
+/** @param {number} [texels] */
 export function capLogoTexture(texels = 512) {
   /**
    * 좌표는 128 기준으로 저술되고, 캔버스에 배율을 건다.
    *
    * ── 왜 512 로 굽나 ──────────────────────────────────────────────────────
-   * 이 그림은 이 프로젝트에서 유일하게 말도 안 되게 확대되는 텍스처다. 캡 와이프의
-   * 덮인 프레임에서 뚜껑 윗면이 화면을 채우므로 800 프레임 픽셀쯤 된다. 128 텍셀로
-   * 구우면 6배 확대이고, 실제로 화면에 계단진 글자가 그대로 보였다.
+   * 이 그림은 축소와 확대를 둘 다 겪는다 — 병 위에서는 열두 픽셀짜리 점이고,
+   * 내 마크 격자에서는 기본 마크 타일로 그 몇 배가 된다. 128 텍셀로 구우면
+   * 확대 쪽에서 계단진 글자가 그대로 보였다.
+   *
+   * 800 픽셀까지 커지던 시절(캡 와이프의 덮인 프레임)에 정한 값이라 지금 쓰임에는
+   * 넉넉하다. 줄일 여지가 있지만, 줄이면 격자 타일에서 다시 재 봐야 한다.
    *
    * 저술 좌표를 512 로 옮기지 않고 배율을 거는 이유는 위의 설계 근거 때문이다 —
    * "읽혀야 하는 것은 128 텍셀 중 102x77 안에 있다" 는 계산이 이 함수의 모든
@@ -370,8 +377,9 @@ export function capLogoTexture(texels = 512) {
     ctx.restore();
   };
 
-  // Rim. Outside the covering frame's crop and invisible there — this is the
-  // half of the design that only ever shows on the bottle.
+  // Rim. Outside the box the lockup is confined to — see the header — so it is
+  // the half of the design that only reads where the disc is drawn whole, which
+  // today is the mark grid's tile.
   ring(60, 3, PALETTE.menu.labelRedDeep);
   ring(52, 2, PALETTE.menu.labelRedLight);
 
@@ -408,9 +416,9 @@ export function capLogoTexture(texels = 512) {
   });
 
   /**
-   * 밉맵을 켠다. 이 그림은 축소와 확대를 **둘 다** 겪는 유일한 텍스처다 — 캡
-   * 와이프에서는 800 픽셀로 커지고, 병 위에서는 열두 픽셀짜리 점이 된다. 밉이
-   * 없으면 후자에서 텍셀 행이 통째로 버려진다(`core/textures.js` 머리말).
+   * 밉맵을 켠다. 이 그림은 축소와 확대를 **둘 다** 겪는 유일한 텍스처다 — 내 마크
+   * 격자에서는 타일만큼 커지고, 병 위에서는 열두 픽셀짜리 점이 된다. 밉이 없으면
+   * 후자에서 텍셀 행이 통째로 버려진다(`core/textures.js` 머리말).
    */
   return toTexture(canvas, { mips: true });
 }

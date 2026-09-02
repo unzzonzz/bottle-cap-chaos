@@ -10,7 +10,7 @@ import { initRapier } from './physics/rapier.js';
 import { PhysicsWorld } from './physics/PhysicsWorld.js';
 import { CONFIG, CONFIG_DEFAULTS } from './game/config.js';
 import { Match, MATCH_STATE } from './game/Match.js';
-import { modeByKey, modeKeyFromPath } from './game/modes.js';
+import { modeByKey, modeKeyFromPath, scoreboardFor } from './game/modes.js';
 import { AimInput } from './game/AimInput.js';
 import { DRAG_MODE, PointerRouter } from './game/PointerRouter.js';
 import { TrajectoryPreview } from './game/predict.js';
@@ -20,7 +20,6 @@ import {
   capDimensions,
   PLAYER_COLORS,
 } from './render/ArenaView.js';
-import { makeCapTopTexture } from './cap/capTexture.js';
 import { MarkBook } from './marks/MarkBook.js';
 import { LocalStorageMarks } from './marks/MarkStorage.js';
 import { MarkTextures } from './marks/markTextures.js';
@@ -34,7 +33,7 @@ import { TrackPathView } from './render/TrackPathView.js';
 import { AiCandidateView } from './render/AiCandidateView.js';
 import { HudLayer, HUD_FRAME } from './ui/HudLayer.js';
 import { VictoryLayer } from './victory/VictoryLayer.js';
-import { WipeOut } from './victory/WipeOut.js';
+import { VICTORY_STAGE } from './victory/VictoryClock.js';
 import { fadeIn, fadeOut } from './ui/pageFade.js';
 import { isAiOpponent, isOnlineOpponent, menuUrl } from './menu/menuRoutes.js';
 import { OnlineSession } from './net/OnlineSession.js';
@@ -42,7 +41,7 @@ import { defaultServerUrl } from './net/Transport.js';
 import { LocalStorageNicknames, Profile } from './profile/NicknameStorage.js';
 import { OnlineMatch } from './net/OnlineMatch.js';
 import { OnlineController } from './net/OnlineController.js';
-import { MatchFoundLayer } from './net/MatchFoundLayer.js';
+import { IntroLayer } from './intro/IntroLayer.js';
 import { ModalLayer } from './ui/ModalLayer.js';
 import { AiController, HumanController } from './game/ai/Controller.js';
 import { ThinkBudget } from './game/ai/ThinkBudget.js';
@@ -56,18 +55,17 @@ import { SafeArea } from './platform/safeArea.js';
 import { hardenWebView } from './platform/webview.js';
 import { bootViewer } from './viewer/bootViewer.js';
 import { bootMenu } from './menu/bootMenu.js';
-import { CapWipe } from './menu/CapWipe.js';
+import { Cinematic } from './core/Cinematic.js';
 import { MENU_CONFIG } from './menu/menuConfig.js';
-import { STAGE, Transition } from './menu/Transition.js';
 import { HANDOVER_FLAG, isHandover, isReturnFromGame } from './menu/menuRoutes.js';
 import { PALETTE } from './core/palette.js';
 import { applyCssPalette } from './ui/cssPalette.js';
 import { whenFontsReady } from './ui/fonts.js';
-import { aimedLaunchDirection, CAP_COLOR } from './menu/Bottle.js';
 import { capLogoTexture } from './menu/menuTextures.js';
 import { AudioSystem } from './audio/AudioSystem.js';
 import { AudioSettingsBook, LocalStorageAudioSettings } from './audio/AudioSettings.js';
 import { GraphicsSettingsBook, LocalStorageGraphicsSettings } from './core/GraphicsSettings.js';
+import { LocalStorageViewSettings, ViewSettingsBook } from './core/ViewSettings.js';
 import {
   configureQuality,
   onQualityChange,
@@ -121,18 +119,23 @@ if (routed) {
 /**
  * Arriving from the menu, mid-transition.
  *
- * Set BEFORE anything else runs and outside `boot`, because `boot` is async —
- * it waits on the WASM — and the whole point of this line is to be in effect
- * during the gap between the menu's document going away and this one's first
- * drawn frame. Painted the cap's own red, that gap is invisible: the menu's
- * last frame was a screen full of that colour and this page's first frame will
- * be too. Left as the default black it is a flash, which is the one thing the
- * covered window exists to prevent.
+ * ── there is nothing to paint any more, and that is the fix ────────────────
+ * Two lines here used to set `documentElement` and `body` to the cap's own red
+ * before anything else ran, because the covered frame the menu left on was a
+ * red cap filling the screen and the gap between the two documents had to be
+ * that same red or it was a flash.
+ *
+ * The frame the menu leaves on is now a shut letterbox, and `Cinematic` closes
+ * it to `PALETTE.bg.skyTop` precisely because that is already `--bcc-void` —
+ * what the line below paints the document, what the browser paints around a
+ * letterboxed canvas, and what `capacitor.config.json` gives the web view. So
+ * the menu's last frame, the gap, and this page's first frame are one colour
+ * with nothing assigned anywhere, and there is no longer an inline style that
+ * has to be kept in agreement with three other files.
  */
 // The stylesheet names `var(--bcc-*)` and nothing else, so this has to run
 // before the letterbox, the page fade or either developer overlay is painted.
-// It is cheap — a dozen `setProperty` calls — and it is deliberately ahead of
-// the handover paint below, which sets inline styles that must win over it.
+// It is cheap — a dozen `setProperty` calls.
 applyCssPalette();
 
 /**
@@ -145,11 +148,6 @@ applyCssPalette();
  */
 whenFontsReady();
 
-const handover = isHandover();
-if (handover) {
-  document.documentElement.style.background = CAP_COLOR;
-  document.body.style.background = CAP_COLOR;
-}
 
 /**
  * Sound, built BEFORE the branch and shared by every destination.
@@ -200,6 +198,27 @@ configureQuality({ table: CONFIG.view.graphics, tier: graphicsSettings.tier });
 graphicsSettings.onChange((book) => setQualityTier(book.tier));
 
 /**
+ * 카메라 추적. 소리·그래픽과 같은 자리에, 같은 이유로.
+ *
+ * ── 왜 여기이고 왜 `CONFIG_DEFAULTS` 에도 쓰는가 ────────────────────────────
+ * 두 문서가 같은 키를 읽는다. 설정 화면은 메뉴 문서에 있고 `CamTracker` 는 경기
+ * 문서에 있으므로, 넘겨줄 것은 없고 각자 부팅하면서 각자 이 줄을 돌린다 — 그래픽
+ * 티어가 화면을 넘어가는 것과 정확히 같은 방식이다.
+ *
+ * `CONFIG_DEFAULTS` 에도 쓰는 것은 `CONFIG.mode` 가 그러는 것과 같은 이유다:
+ * 이건 개발자의 기본값이 아니라 **이 사람이 고른 것**이므로, 패널의 전체 리셋이
+ * 되돌려야 할 대상이 아니다. 안 쓰면 리셋 한 번에 설정 화면은 "끔" 이라고 말하는데
+ * 카메라는 따라가는 상태가 된다.
+ */
+const viewSettings = new ViewSettingsBook(new LocalStorageViewSettings());
+const applyViewSettings = (book) => {
+  CONFIG.view.track = book.trackCamera;
+  CONFIG_DEFAULTS.view.track = book.trackCamera;
+};
+applyViewSettings(viewSettings);
+viewSettings.onChange(applyViewSettings);
+
+/**
  * The web view's own gestures, off — for all three destinations below.
  *
  * At module scope for the same reason `install()` above is: the guards are
@@ -234,7 +253,7 @@ if (new URLSearchParams(location.search).get('view') === 'cap') {
     document.getElementById('app').appendChild(p);
   });
 } else {
-  bootMenu(canvas, { audio, audioSettings, graphicsSettings });
+  bootMenu(canvas, { audio, audioSettings, graphicsSettings, viewSettings });
   /**
    * The far side of a match's fade back to the menu.
    *
@@ -498,8 +517,8 @@ async function boot(canvas) {
   };
 
   /**
-   * On the board the two marks face each other; on the victory screen they both
-   * face the camera. Two bakes of the same book, because a cap's mark has no
+   * On the board the two marks face each other; in the opening sequence they
+   * both face the camera. Two bakes of the same book, because a cap's mark has no
    * up of its own — the panel's UVs are the same projection on every cap, so
    * which way a drawing reads is decided entirely here.
    *
@@ -515,9 +534,14 @@ async function boot(canvas) {
    * than reasoned about — `CanvasTexture` flips Y and the panel's `v` runs
    * against the cap's local +z, and two sign flips are one too many to trust.
    *
-   * ── the victory screen ───────────────────────────────────────────────────
-   * There is only one viewer there, and both caps are being shown TO them, so
+   * ── the opening sequence ─────────────────────────────────────────────────
+   * There is only one viewer there, and both caps are being held up TO them, so
    * "upright from your own seat" stops meaning anything. Everything faces front.
+   *
+   * The victory screen used to take this bake too, back when it was two caps
+   * fighting. It holds no caps now — the board stays on screen and the camera
+   * does the work — so the front-facing bake has one consumer, which is why it
+   * is no longer called `frontMarks`.
    */
   /**
    * Online, this player's mark is book entry 0 whatever seat they were given.
@@ -536,14 +560,14 @@ async function boot(canvas) {
     : null;
 
   const marks = new MarkTextures({ ...markOptions, rotations: [Math.PI, 0], bookSlotFor });
-  const victoryMarks = new MarkTextures({ ...markOptions, rotations: [0, 0], bookSlotFor });
+  const frontMarks = new MarkTextures({ ...markOptions, rotations: [0, 0], bookSlotFor });
 
   /**
    * The opponent's cap art, when they are on another machine.
    *
-   * Applied to BOTH texture sets, because the victory screen shows the same two
-   * caps and would otherwise put a clean cap next to the name of somebody whose
-   * mark was on the board a second earlier.
+   * Applied to BOTH texture sets, because the opening sequence holds up the same
+   * two caps and would otherwise introduce a stranger with a clean cap and then
+   * put their mark on the board a second later.
    *
    * Only the opponent's seat: this player's own mark comes out of their own book
    * exactly as it always has, and overriding it with the copy that went over the
@@ -569,17 +593,21 @@ async function boot(canvas) {
    *
    * Handed `marks`, 1P's mark came out upside down — which is the board's
    * rotation being correct in the wrong place rather than anything being wrong
-   * with the bake. `victoryMarks` is the same artwork, including a mark that
+   * with the bake. `frontMarks` is the same artwork, including a mark that
    * arrived over the wire (`setRemoteMark` below paints both sets), with the
    * rotation this camera wants.
+   *
+   * "자기가 그린 뚜껑이 소개에 뜨는 것은 마크 시스템 전체의 보상이다." This is
+   * the one screen in the game that holds a player's own drawing up at size,
+   * which is why it takes the marks rather than the placeholder panel.
    */
-  const matchFound = new MatchFoundLayer({
+  const introLayer = new IntroLayer({
     retro,
     resolution: viewport.resolution,
     config: CONFIG,
-    panelFor: (player) => victoryMarks.textureFor(player),
+    panelFor: (player) => frontMarks.textureFor(player),
   });
-  viewport.onResize(({ resolution }) => matchFound.setResolution(resolution));
+  viewport.onResize(({ resolution }) => introLayer.setResolution(resolution));
 
   /**
    * The match's questions — leaving, a dropped opponent, a desync — as geometry.
@@ -624,7 +652,7 @@ async function boot(canvas) {
   if (online?.opponent?.mark) {
     const seat = online.opponentSeat;
     marks.setRemoteMark(seat, online.opponent.mark);
-    victoryMarks.setRemoteMark(seat, online.opponent.mark);
+    frontMarks.setRemoteMark(seat, online.opponent.mark);
   }
 
   const view = new ArenaView({
@@ -803,6 +831,22 @@ async function boot(canvas) {
    *   which is what keeps the reset button meaning what it says.
    */
   function faceCurrentPlayer(force = false, { keepZoom = null } = {}) {
+    /**
+     * Not while the ending owns the camera.
+     *
+     * This is an INVARIANT — it is re-asserted every frame, deliberately, so
+     * that no path can leave the view wrong for a whole turn — and that is
+     * exactly why it has to be told when the view is not its business. The
+     * push-in sets a pan and a zoom that this would spend the next second
+     * arguing with, and the argument would be visible: `holdsOwnHalf` would
+     * find the bearing right and leave the framing alone on most frames and not
+     * on others.
+     *
+     * The bookkeeping below is skipped with it, which is safe because a match
+     * that is over changes neither its turn nor its current player, so there is
+     * no handover for the two shown values to miss.
+     */
+    if (victory.active) return false;
     const p = match.rules.currentPlayer;
     /**
      * ── against an AI the bearing is PINNED to the person's own half ────────
@@ -815,42 +859,125 @@ async function boot(canvas) {
      * a turn under a player who never moved seats — they would spend the AI's go
      * looking at their own half from behind.
      *
-     * Only the bearing is pinned. The rest of the framing — the zoom back out,
-     * the pan to centre — still happens on a handover exactly as it does in
-     * local play, which is what keeps `faceCurrentPlayer` one function with one
-     * behaviour and what makes the reset button's target identical in both
-     * modes. See `GameCamera.defaultFraming`.
+     * Against an AI nothing else about the framing is reset either — see the
+     * `keep` decision below. Two people at one board still get the full reset,
+     * which is what keeps `faceCurrentPlayer` one function with one behaviour
+     * and what makes the reset button's target identical in both modes. See
+     * `GameCamera.defaultFraming`.
      */
     const bearing = turnBearing();
     const handover = match.rules.turn !== shownTurn && p !== shownPlayer;
     shownTurn = match.rules.turn;
     shownPlayer = p;
 
-    // A turn that has changed hands resets the framing outright — bearing, zoom
-    // and pan — whatever the last player left behind and whatever cards were
-    // played to get here.
-    //
-    // ── unless there is nobody arriving to reset it FOR ─────────────────────
-    // The reset is a courtesy to the incoming player on a shared screen. Against
-    // an AI the same person is still sitting there, so a mode may ask to keep
-    // the zoom and the pan across the handover — see `MODES.football.camera
-    // .keepZoomVsAi` for why football in particular needs it. The bearing is
-    // still applied either way.
-    //
-    // `force` wins, and that is what keeps the reset button honest: it calls
-    // this with `force` and must always pull the framing back to default.
+    /**
+     * A turn that has changed hands resets the framing outright — bearing, zoom
+     * and pan — whatever the last player left behind and whatever cards were
+     * played to get here.
+     *
+     * ── unless there is nobody arriving to reset it FOR ─────────────────────
+     * The reset is a courtesy to the INCOMING player on a shared screen: the
+     * board turns round, comes back out to the opening zoom and re-centres, so
+     * whoever picks the device up next starts from the same view every time.
+     *
+     * Against an AI there is no incoming player. The same person is still
+     * sitting there looking at the same board, and resetting the view for them
+     * is not a courtesy, it is taking their view away — twice a turn in
+     * knockout, because `CamTracker` rides the thrown cap and then hands the
+     * camera back through here as well.
+     *
+     * ── the pan used to be reset even so, and it is the visible half ────────
+     * `keep` governed only the ZOOM: `{ zoom: false, pan: true }`, on the
+     * grounds that the pan at that moment is where the TRACKER left it rather
+     * than where the player put it, so recentring it undoes the automatic
+     * camera's work and not the player's.
+     *
+     * That is true of where the pan IS and false about what it costs. Every
+     * turn of a survival match against the computer went: ride the cap to
+     * wherever it stopped, then glide all the way back to the middle, then ride
+     * the next cap. The return is the longest single movement in the turn and it
+     * happens between two things the player is watching, so the mode reads as a
+     * camera that will not sit still — reported exactly that way. Leaving the
+     * view where the shot finished is both less motion and the more honest
+     * picture: that IS where the game is.
+     *
+     * The player is not stranded by it. Zooming out to the minimum re-centres on
+     * its own (`GameCamera.update`), the HUD's 기본 구도 button is a forced
+     * reset, and a drag is a drag.
+     *
+     * NOTE: `MODES.knockout.camera.keepZoomVsAi`'s own note still says the
+     * tracker's return "keeps the zoom too and still recentres the pan". That
+     * sentence is now out of date and this is the code, not that.
+     *
+     * `force` wins, and that is what keeps the reset button honest: it calls
+     * this with `force` and must always pull the framing back to default.
+     */
     if (force || handover) {
-      // The pan is ALWAYS recentred here — that is the automatic camera's
-      // contribution and it is exactly what should be undone. Only the zoom is
-      // in question, and only the player ever sets that.
       const keep = keepZoom ?? (!force && aiKeepsZoom());
-      gameCamera.faceTo(bearing, keep ? { zoom: false, pan: true } : undefined);
+      gameCamera.faceTo(bearing, keep ? { zoom: false, pan: false } : undefined);
       return true;
     }
 
     // Otherwise: hold the bearing, and leave the zoom alone.
     if (!gameCamera.holdsOwnHalf(bearing)) gameCamera.faceTo(bearing, { zoom: false });
     return false;
+  }
+
+  /**
+   * What the ending's camera pushes in on: whatever decided the match.
+   *
+   * ── it asks the STATE, not the mode ──────────────────────────────────────
+   * The obvious home for this is a hook on the mode, next to `camera.track` and
+   * `scoreboard`, and that is where it would go if `game/modes.js` were open to
+   * this change. It is not, so the question is asked of the world instead — and
+   * the three answers happen to be distinguishable without a mode name, because
+   * what makes each mode different is exactly what it ends on:
+   *
+   *   a ball        only football has one, and at the end it is in a goal
+   *   `closest`     only curling keeps one, and it is the cap the match is
+   *                 judged on — including when a tiebreaker decided it
+   *   what is left  survival, where winning IS being the last cap standing
+   *
+   * The order matters: football has surviving caps too, so the ball has to be
+   * asked about first. The board's centre is the fallback, which is where the
+   * camera already is.
+   *
+   * @param {number} winner  0, 1, or anything else for a draw
+   * @returns {{x: number, z: number}}
+   */
+  function decisivePoint(winner) {
+    const arena = match.arena;
+    const rules = match.rules;
+
+    if (arena.hasBall) {
+      const ball = arena.ballCom();
+      if (ball) return { x: ball.x, z: ball.z };
+    }
+
+    const closest = rules.closest;
+    if (closest && Number.isInteger(closest.cap)) {
+      const c = arena.capCom(closest.cap);
+      if (c) return { x: c.x, z: c.z };
+    }
+
+    // A draw has no winner to follow, so it takes everything still standing —
+    // which for a draw is the honest subject: what is left is why it is a draw.
+    const caps =
+      winner === 0 || winner === 1
+        ? rules.livingCapsOf(winner)
+        : [...rules.livingCapsOf(0), ...rules.livingCapsOf(1)];
+    if (caps.length) {
+      let x = 0;
+      let z = 0;
+      for (const i of caps) {
+        const c = arena.capCom(i);
+        x += c.x;
+        z += c.z;
+      }
+      return { x: x / caps.length, z: z / caps.length };
+    }
+
+    return { x: 0, z: 0 };
   }
 
   /**
@@ -1038,87 +1165,78 @@ async function boot(canvas) {
   });
 
   /**
-   * The far side of the menu's transition.
+   * The letterbox. The far side of the menu's transition, and every sequence
+   * this document plays afterwards.
    *
-   * ── why any of this is here ──────────────────────────────────────────────
-   * The menu's cap covers the screen, the scene is swapped underneath it, and
-   * the cap flies off to reveal what is now there. For 설정 that swap is two
-   * lines in the menu's own loop. For a game mode it cannot be: this page owns
-   * its own renderer and its own Rapier world, and there is no honest way to
-   * host that inside the menu's page. So the swap is a DOCUMENT change, and
-   * stage 4 has to be picked up on this side — which is all this block does.
+   * ── it opens SHUT, and that is the whole document seam ───────────────────
+   * The menu closed its bars, swapped the document behind them, and went away.
+   * This page has to come up in exactly that state or the join is a cut. So the
+   * bars are snapped closed here, before anything is drawn, and the opening
+   * sequence is what parts them — see `playOpening`.
    *
-   * It is presentation and nothing else. It does not touch the match, the
-   * physics, the rules or the cards; it borrows `retro` for the cap's materials
-   * and draws itself after everything else, into the same bound target, so it
-   * goes through the identical dither and quantiser. `CapWipe` owns its own
-   * overlay camera precisely so this is three lines rather than a rebuild of
-   * the card layer's depth range.
+   * Unconditionally, not only on a handover. A cold `/survival` typed into an
+   * address bar gets the same opening, which is right twice over: every match
+   * begins the same way, and the shut frame also covers the WASM boot that a
+   * cold load spends on a blank canvas. There is nothing left for `isHandover`
+   * to change about how this page looks, and the flag survives only to be
+   * stripped from the address bar below.
    *
-   * `begin` then `skip` is the public way to say "start at the covered frame":
-   * `skip` exists for the player pressing through the animation and lands on
-   * exactly the same instant. See `Transition`.
+   * ── it is presentation and nothing else ──────────────────────────────────
+   * It does not touch the match, the physics, the rules or the cards. It draws
+   * last, into the same bound target as every other overlay, so it goes through
+   * the identical dither and quantiser — and outside the bloom chain, because a
+   * bright pass over a hard bar edge blooms the edge.
    */
-  const wipeIn = handover
-    ? (() => {
-        // The SAME panel artwork the menu's cap was wearing. Without it the cap
-        // is a plain red disc on this side of the navigation and a logo on the
-        // other, so the one frame that is supposed to be seamless is the frame
-        // where the object visibly changes.
-        const panelMap = capLogoTexture();
-        const wipe = new CapWipe({
-          retro,
-          tuning: MENU_CONFIG.wipe,
-          panelMap,
-          color: CAP_COLOR,
-        });
-        const clock = new Transition({ tuning: MENU_CONFIG.transition });
-        let cleared = false;
+  const cinematic = new Cinematic({ resolution: viewport.resolution });
+  cinematic.snap(1);
+  viewport.onResize(({ resolution }) => cinematic.setResolution(resolution));
 
-        // Nothing to hide any more. The HUD used to be DOM over the canvas, so
-        // no amount of cap INSIDE the canvas could cover it and a frame that was
-        // meant to be completely opaque had the score and two buttons sitting on
-        // top of it — it had to be hidden by a body class for the duration. Now
-        // that it is meshes in the overlay, the cap covers it the same way it
-        // covers the pitch, and the workaround has gone with the DOM.
+  /**
+   * Who currently owns the bars, and where the ending's camera is going.
+   *
+   * Declared beside the letterbox rather than down in the loop with the rest of
+   * the per-frame state, because `playOpening` reads the first of them and runs
+   * during boot — a `let` further down the file is still in its temporal dead
+   * zone at that point, which is a `ReferenceError` on the opening frame of
+   * every match.
+   */
+  let victoryHeldBars = false;
+  /**
+   * Who to introduce once the bars have finished opening, or null.
+   *
+   * The two are STRICTLY in order and not merely started together: the bars part
+   * to the letterbox, and THEN the first player arrives. Kicking both off at
+   * once was the first version and it read wrong — by the time the frame had
+   * settled into its letterbox both caps were most of the way in, so the
+   * movement the frame was making and the movement the caps were making
+   * happened on top of each other and neither was an event.
+   *
+   * Spent by `tick` rather than awaited, because the bars are advanced BY tick:
+   * anything resolved from elsewhere would be on a different clock from the one
+   * drawing them.
+   */
+  let pendingIntro = null;
+  /**
+   * Both the point and the zoom, resolved ONCE when the ending is armed. A press
+   * lands the move immediately, and a target recomputed at that moment would be
+   * measured from a camera that had already travelled — the zoom would compound
+   * and the framing would be a notch and a half tighter again. See
+   * `GameCamera.pushIn`.
+   */
+  let victoryShot = null;
 
-        const clearLetterbox = () => {
-          if (cleared) return;
-          cleared = true;
-          // Back to the stylesheet's black. Done at the START of the exit,
-          // while the canvas is still entirely cap, so the bars change colour
-          // on the frame the cap starts moving rather than after it has gone.
-          document.documentElement.style.background = '';
-          document.body.style.background = '';
-          // So a refresh does not replay a transition that has already happened.
-          const url = new URL(location.href);
-          url.searchParams.delete(HANDOVER_FLAG);
-          history.replaceState(null, '', url);
-        };
-
-        clock.begin(null, { onDone: () => wipe.end() });
-        clock.skip();
-        // The same heading the menu's cap was already on, from the same numbers
-        // rather than guessed: a cap that covered the screen travelling up and
-        // left, then left it travelling somewhere else, would read as two
-        // different caps. It is the AIMED pose, not the resting lean — by the
-        // time the cap goes, the bottle has turned to point at the camera.
-        wipe.begin({ x: 0, y: 0 }, aimedLaunchDirection(MENU_CONFIG.bottle));
-        wipe.snapToCover();
-
-        return {
-          render: (r) => wipe.render(r),
-          update(dt) {
-            const s = clock.update(dt);
-            if (s.stage === STAGE.COVER) wipe.cover(dt);
-            else if (s.stage === STAGE.EXIT) {
-              clearLetterbox();
-              wipe.exit(s.t, dt);
-            } else clearLetterbox();
-          },
-        };
-      })()
-    : null;
+  /**
+   * So a refresh does not replay a transition that has already happened.
+   *
+   * The flag only ever meant "the frame you are opening on was left covered by
+   * somebody else", and the bars are shut on every load now — so all this does
+   * is keep the address bar honest.
+   */
+  if (isHandover()) {
+    const url = new URL(location.href);
+    url.searchParams.delete(HANDOVER_FLAG);
+    history.replaceState(null, '', url);
+  }
 
   /**
    * The readouts. Meshes now, not DOM — see `ui/HudLayer` for why it is its own
@@ -1241,27 +1359,21 @@ async function boot(canvas) {
    * (see the guard in `Match.update`), so there is no world left for an
    * animation to disturb even if it wanted to.
    *
-   * ── the cap is the board's cap, and the artwork is handed in ──────────────
-   * The same `capGeometry` the six caps on the pitch are drawn from, the same
-   * `PLAYER_COLORS` the score's bars use, and the same panel placeholder — which
-   * is passed rather than imported by the layer, because the customiser is
-   * coming and this is the seam it arrives through. See `VictoryLayer`.
+   * ── it holds no caps any more, and that is most of the redesign ──────────
+   * It used to be handed `capGeometry`, the board's cap artwork and both teams'
+   * mark textures, because the screen was two caps fighting. There is no fight:
+   * the BOARD stays on screen, this file pushes the camera in on whatever
+   * decided the match, and the layer writes the result over it. All it needs is
+   * the team colours, for the number's own plate.
    *
    * Built before the router, like the HUD, because the router has to test it
    * ahead of everything else and cannot be handed something that does not exist.
    */
-  let wipeOut = null;
   const victory = new VictoryLayer({
     canvas,
     config: CONFIG,
-    retro,
-    capGeometry,
     resolution: viewport.resolution,
     teamColors: PLAYER_COLORS,
-    panelTexture: makeCapTopTexture(),
-    // The same MARKS the board's caps wear, but turned to face the camera —
-    // both of them, whichever won. See the note on `victoryMarks`.
-    teamTextures: [victoryMarks.textureFor(0), victoryMarks.textureFor(1)],
     /**
      * The result, from the seat of whoever is watching.
      *
@@ -1281,15 +1393,15 @@ async function boot(canvas) {
     },
     /**
      * ── LEAVING is a page change, so it fades to black like every other one ──
-     * Not the cap wipe. Restarting and leaving look like the same button from
+     * Not the letterbox. Restarting and leaving look like the same button from
      * here and they are not the same event: a restart swaps the match UNDER the
-     * cover and uncovers it again, which is what the cap is for — it is one
-     * continuous shot and the cap is what hides the join. Leaving throws the
-     * document away, and every other way out of somewhere in this project is the
-     * short black fade: the corner HUD's own 나가기, and the way back out of the
+     * bars and parts them again, which is one continuous shot. Leaving throws
+     * the document away, and every other way out of somewhere in this project is
+     * the short fade: the corner HUD's own 나가기, and the way back out of the
      * settings screen. See `ui/pageFade` for why that one is DOM rather than
      * drawn — it has to cover the letterbox bars and outlive the renderer, and
-     * a cap wipe drawn by a renderer that is about to stop can do neither.
+     * an in-canvas overlay drawn by a renderer that is about to stop can do
+     * neither.
      *
      * `setBusy` still runs, because `.page-fade` is `pointer-events: none` and
      * therefore blocks nothing on its own — see `styles.css`. It is the victory
@@ -1350,39 +1462,73 @@ async function boot(canvas) {
   });
 
   /**
-   * Restart, through the menu's own cap wipe.
+   * Restart, under the letterbox.
    *
-   * The brief asks for the wipe to be reused on the way OUT of the victory
-   * screen and not on the way IN — the sequence has to grow out of the game
-   * darkening, and a cap covering the screen first would hide the very thing it
-   * is announcing.
+   * ── the same bars, run the other way ─────────────────────────────────────
+   * The screen is already sitting behind an open letterbox when 재시작 is
+   * pressed — the sequence ended by parting the bars — so this shuts them, the
+   * world is rebuilt on the covered frame, and `playOpening` unfolds them again
+   * onto the new match. That is the same object and the same movement the menu
+   * used to get here, which is the point: there is one frame in this game and
+   * everything happens inside it.
    *
-   * This is now the only caller: leaving goes through the black fade above, so
-   * the cap only ever has a scene swap to hide, which is the job it was written
-   * for in the menu.
+   * It used to be `WipeOut`, a second cap wipe pointed the other way, with its
+   * own forty-line clock reading `MENU_CONFIG.transition` so the two directions
+   * would stay the same length. Two systems agreeing by hand, replaced by one.
    *
-   * Built on first use rather than at boot: it owns a second cap geometry and a
-   * 128-pixel logo canvas, and a match nobody finishes should not pay for them.
-   * `victory.setBusy` is what stops a second press during the quarter second the
-   * cap takes to cover — without it, 재시작 pressed twice starts two rebuilds and
-   * the second runs against a world the first has already thrown away.
+   * `victory.setBusy` is what stops a second press during the moment the bars
+   * take to close — without it, 재시작 pressed twice starts two rebuilds and the
+   * second runs against a world the first has already thrown away. `_covering`
+   * is the same guard from this side, because the layer is dismissed by the
+   * rebuild and stops answering before the bars have finished opening.
    */
+  let _covering = false;
   function restartFromVictory() {
-    if (wipeOut?.running) return;
+    if (_covering) return;
+    _covering = true;
     victory.setBusy(true);
-    wipeOut ??= new WipeOut({
-      retro,
-      wipe: MENU_CONFIG.wipe,
-      transition: MENU_CONFIG.transition,
-      // The same panel artwork the menu's cap wears, for the same reason the
-      // arriving cap does: one object, seen twice, not two red discs.
-      panelMap: capLogoTexture(),
-      color: CAP_COLOR,
+    router.cancel();
+    cinematic.shut(MENU_CONFIG.transition.barSeconds);
+    // On the covered frame, exactly as the menu's own swap is. `waitForCover`
+    // resolves off the render loop rather than a timer, so the rebuild lands on
+    // a frame that has actually been drawn opaque.
+    waitForCover().then(() => {
+      rebuildAll();
+      _covering = false;
+      playOpening().catch((err) => console.error('[intro] failed', err));
     });
-    wipeOut.begin({
-      // The same aimed heading the menu's cap leaves on, from the same numbers.
-      direction: aimedLaunchDirection(MENU_CONFIG.bottle),
-      onCovered: () => rebuildAll(),
+  }
+
+  /**
+   * Resolve once the bars are fully shut and a frame has been drawn that way.
+   *
+   * Polled rather than driven by a callback on `Cinematic`, for the reason the
+   * intro's own stall guard gives at length: `requestAnimationFrame` stops in a
+   * background tab, and a promise that could only be settled from inside a
+   * render frame would never settle there. `setInterval` keeps running when
+   * throttled, so this arrives late rather than never — and arriving late is
+   * survivable, because nothing is on screen but the covered frame.
+   */
+  function waitForCover() {
+    /**
+     * A wall-clock deadline on top of the bars' own progress, for the same
+     * reason the opening sequence has one: `requestAnimationFrame` stops
+     * entirely in a background tab, so a player who switches away between
+     * pressing 재시작 and the frame going opaque would come back to a shut
+     * letterbox over a match that was never rebuilt, with `_covering` still
+     * refusing every press. `setInterval` keeps running when throttled, so this
+     * arrives late rather than never.
+     *
+     * Generous, because the ordinary path takes `barSeconds` and this must never
+     * fire on a machine that is merely slow.
+     */
+    const deadline = Date.now() + (MENU_CONFIG.transition.barSeconds + 3) * 1000;
+    return new Promise((resolve) => {
+      const poll = setInterval(() => {
+        if (cinematic.bars < 1 && Date.now() < deadline) return;
+        clearInterval(poll);
+        resolve();
+      }, 16);
     });
   }
 
@@ -1403,19 +1549,21 @@ async function boot(canvas) {
     // frames cover the whole canvas. See PointerRouter._boardRect.
     boardRect: () => viewport.boardClientRect(),
     /**
-     * Nothing is pressable while the cap is covering the screen.
+     * Nothing on the BOARD is pressable while a sequence owns the screen.
      *
-     * The outbound wipe swaps the match under its own covered frame, which
-     * dismisses the victory screen — so without this there was a quarter second
-     * of the cap flying off during which a press reached the BOARD, and a press
-     * on one of the freshly built caps fired a real shot into a match the player
-     * could not yet see. See `PointerRouter._blocked`.
+     * Two of them. A restart shuts the bars and rebuilds the match behind them,
+     * so without this there was a moment of the bars parting during which a
+     * press reached the board and one of the freshly built caps fired a real
+     * shot into a match the player could not yet see. And the opening sequence
+     * is on screen over a match that is already sitting in AIM, so a press
+     * during it would start an aim on a board the player cannot properly see.
+     *
+     * A press still SKIPS either sequence. That listener is `playOpening`'s for
+     * the intro, and `VictoryLayer.pointerDown` for the ending — the victory
+     * screen is tested BEFORE this gate, because it is a screen rather than a
+     * board. See `PointerRouter._blocked`.
      */
-    // The opening sequence has the screen while it runs, so a press during it
-    // must not start an aim on the board underneath — the same reason the
-    // victory wipe blocks. A press still SKIPS the sequence; that listener is
-    // `playMatchFound`'s and is unaffected by this.
-    blocked: () => !!wipeOut?.running || !!matchFound?.active,
+    blocked: () => _covering || !!introLayer?.active,
     /**
      * Whether the seat on turn is a person who may act.
      *
@@ -1678,7 +1826,7 @@ async function boot(canvas) {
         // online folder out entirely rather than showing one full of dashes.
         online,
         profile,
-        onReplayIntro: () => playMatchFound(),
+        onReplayIntro: () => playOpening(),
         onForceDesync: () => {
           if (netMatch) netMatch.forceDesync = true;
         },
@@ -1752,7 +1900,7 @@ async function boot(canvas) {
      * for the clock not to exist yet, rather than for it to be paused and
      * resumed and to hope the two clients pause for the same length of time.
      */
-    await playMatchFound();
+    await playOpening();
     online.ready();
   }
 
@@ -1788,26 +1936,78 @@ async function boot(canvas) {
     };
   }
 
-  function playMatchFound() {
-    if (!matchFound) return Promise.resolve();
-    if (CONFIG.intro?.enabled === false) return Promise.resolve();
+  /**
+   * The whole way in: the bars unfold, the two players are introduced, the bars
+   * retreat and the UI fades up.
+   *
+   * ── stage 1 and stage 5 happen whatever `intro.enabled` says ─────────────
+   * The document opens on a shut letterbox, so SOMETHING has to part it. With
+   * the introduction off this is the bars opening and the UI arriving and
+   * nothing else, which is still the right opening: cutting from a covered
+   * frame straight to a live board is the hard cut the bars exist to replace.
+   *
+   * ── it resolves off the render loop, not off a timer ─────────────────────
+   * The loop is already running and is what advances both the bars and the
+   * layer. A sequence driven from here with its own timer would run on a
+   * different clock from the one drawing it, and the two would disagree on any
+   * machine that dropped a frame.
+   *
+   * @returns {Promise<void>} settled when the match is playable
+   */
+  function playOpening() {
+    // The bars are this function's from here on. See the note in `tick`.
+    victoryHeldBars = false;
 
-    matchFound.begin(introNames());
+    const introduce = !!introLayer && CONFIG.intro?.enabled !== false;
+    if (introduce) {
+      // Stage 1. The bars part to the LETTERBOX and the gate stays shut, so the
+      // board is on screen and none of the UI over it is. The introduction
+      // starts when they arrive — `pendingIntro`, spent in `tick` — and what
+      // opens them the rest of the way is that introduction reaching its last
+      // segment, which is the `introLayer.exiting` branch there.
+      cinematic.close(CONFIG.intro.barSeconds);
+      pendingIntro = introNames();
+    } else {
+      // Nobody to introduce, so there is nothing for a letterbox to hold: the
+      // bars go straight from shut to open and the UI comes up with them. Still
+      // the bars, though — "바를 통째로 건너뛰지 마라". Cutting from a covered
+      // frame to a live board is the hard cut they exist to replace, and it is
+      // also what a cold `/survival` would open on.
+      cinematic.open(CONFIG.intro.barSeconds);
+    }
+
+    /**
+     * Cut the whole thing to its end. NOT a player control — see below.
+     *
+     * ── nothing is bound to a press, and that is on instruction ────────────
+     * A window listener sat here for one revision, because 부록 D6.3 asked for
+     * the opening to be skippable. It is gone again on instruction, and the
+     * mechanism is deliberately absent rather than merely unbound: the only
+     * caller is the stall guard, and a live listener that only fires on a dead
+     * frame clock cannot be pressed by accident.
+     *
+     * The board underneath already refuses every press for the whole of this
+     * (`blocked` on the router) and the HUD and the hand are gated to nothing by
+     * `uiGate` — so a press during the opening now does nothing at all, which is
+     * the whole of the rule.
+     *
+     * Online it costs nobody anything, which is worth stating because it is the
+     * only place it could: `ready` is sent after this resolves, and the server
+     * starts no clock until both clients have reported it. Sitting through the
+     * opening is not sitting on your own turn timer.
+     */
+    const cutToEnd = () => {
+      // Called before the bars had finished: there is nothing to introduce yet,
+      // and the introduction must not start after this has ended it.
+      pendingIntro = null;
+      if (introduce) introLayer.skip();
+      // Straight to the frame the sequence would have reached: bars open, gate
+      // up. `snap` rather than a zero-length tween, which would still owe an
+      // `update` before it landed.
+      cinematic.snap(0, { gate: 1 });
+    };
 
     return new Promise((resolve) => {
-      /**
-       * ── it is NOT skippable ──────────────────────────────────────────────
-       * A press used to cut it to the end. Removed on instruction: the sequence
-       * runs once at the top of a match, it is under three seconds, and online
-       * it is also the window in which neither player's clock has started — so
-       * one player skipping ahead buys them nothing and leaves them staring at a
-       * board that is waiting for somebody else's animation to finish.
-       *
-       * The board underneath is already refusing input while this runs
-       * (`blocked` on the router), so a press during it now does nothing at all
-       * rather than doing something surprising.
-       */
-
       /**
        * A wall-clock deadline on top of the sequence's own progress.
        *
@@ -1824,19 +2024,28 @@ async function boot(canvas) {
        * — so a deadline measured against `Date.now()` survives exactly the case
        * that breaks the rAF clock. Generous, because it must never cut short a
        * sequence that is merely playing on a slow machine.
+       *
+       * The budget covers the bars at both ends as well as the introduction,
+       * because they are part of what this is waiting for now.
        */
-      const deadline = Date.now() + (matchFound.duration + 3) * 1000;
+      const span =
+        CONFIG.intro.barSeconds +
+        (introduce ? introLayer.duration : CONFIG.intro.exitSec) +
+        3;
+      const deadline = Date.now() + span * 1000;
       const poll = setInterval(() => {
         const stalled = Date.now() > deadline;
-        if (matchFound.active && !stalled) return;
-        // Not a skip: the sequence is unskippable by the PLAYER. This is the
-        // safety net for a frame clock that has stopped — see the note above.
-        if (stalled) matchFound.skip();
+        const running = (introduce && (pendingIntro || introLayer.active)) || !cinematic.settled;
+        if (running && !stalled) return;
+        // The safety net for a frame clock that has stopped — see above. It is
+        // the ONLY caller of `cutToEnd`: there is no player skip.
+        if (stalled) cutToEnd();
         clearInterval(poll);
         resolve();
       }, 50);
     });
   }
+
   startOnline().catch((err) => console.error('[online] start failed', err));
 
   /**
@@ -1847,7 +2056,7 @@ async function boot(canvas) {
    * and BEFORE `ready`, so the server's clock cannot start while it runs.
    * Kicking off a second one here would play it twice.
    */
-  if (!online) playMatchFound().catch((err) => console.error('[intro] failed', err));
+  if (!online) playOpening().catch((err) => console.error('[intro] failed', err));
 
   /**
    * Write the match's input log out as a file.
@@ -1951,7 +2160,12 @@ async function boot(canvas) {
      * and that has to see the state the previous frame ended in.
      */
     netMatch?.update();
-    matchFound?.update(dt);
+    // The frame has finished arriving; now somebody can walk into it.
+    if (pendingIntro && cinematic.settled) {
+      introLayer.begin(pendingIntro);
+      pendingIntro = null;
+    }
+    introLayer?.update(dt);
 
     /**
      * The bow is drawn only while the router says a shot is being drawn.
@@ -2012,7 +2226,7 @@ async function boot(canvas) {
       // ...and not while the opening sequence is on screen. The AI would
       // otherwise think, choose and fire behind it, and the sequence would hand
       // over to a board where a turn had already been taken.
-      !matchFound?.active
+      !introLayer?.active
     ) {
       controller.begin({ match });
     }
@@ -2051,13 +2265,72 @@ async function boot(canvas) {
         victoryArmed = true;
         router.cancel();
         hud.clearHover();
-        // The mode's own line under the winner, if it has one to give — see
-        // `RuleSet.resolveTurn`'s `resultNote`. Undefined in the two modes whose
-        // result explains itself, and the screen is then exactly as it was.
-        victory.begin(match.winner, { note: match.lastVerdict?.resultNote ?? null });
+        /**
+         * The tracker is let GO of, not merely switched off.
+         *
+         * It hands the camera back when a turn ends — `_release` calls
+         * `faceCurrentPlayer(true)` through its callback — and that reset would
+         * fight the push-in for the whole of stage 1, on its own clock. `reset`
+         * drops the ride and the hand-back together, and the gate below keeps it
+         * from starting another one while the screen is up.
+         */
+        camTracker.reset();
+        victory.begin(match.winner, {
+          // The mode's own line under the winner, if it has one to give — see
+          // `RuleSet.resolveTurn`'s `resultNote`. Undefined in the two modes
+          // whose result explains itself.
+          note: match.lastVerdict?.resultNote ?? null,
+          /**
+           * And the mode's own NUMBER, frozen here.
+           *
+           * The same function the corner HUD has been reading all match, so the
+           * result screen says the thing the scoreboard said rather than a
+           * second opinion about it: 3–0 caps left, 2–1 goals, 2–1 rounds. This
+           * is what the old screen could not do — it played the same two caps
+           * hitting each other whatever the mode was.
+           */
+          board: scoreboardFor(match.mode, match.rules, CONFIG),
+        });
+        victoryShot = {
+          point: decisivePoint(match.winner),
+          zoom: gameCamera.zoom * Math.max(0.01, CONFIG.victory.pushZoom),
+        };
+        gameCamera.pushIn(victoryShot.point, victoryShot.zoom, CONFIG.victory.freezeSeconds);
+        /**
+         * One of the ending's two celebratory beats, and it is borrowed whole.
+         *
+         * `CardFx` already draws a glint and one soft ring over a player's caps
+         * — it is the 원모어 flourish — so the winning caps get that, with no
+         * card behind it. The other beat is the carbonation in `ResultFizz`.
+         * There is no third, and there is no new effect system: a result screen
+         * with its own particle vocabulary is a result screen that looks like a
+         * different program, which is the mistake the old one made.
+         */
+        if (match.winner === 0 || match.winner === 1) {
+          cardFx.play('onemore', match.winner, CONFIG.victory.sparkleSeconds);
+        }
+      }
+      /**
+       * A press through the sequence lands the camera where it was going.
+       *
+       * "눌러서 건너뛰면 그 다음 프레임이 시퀀스가 도달했을 프레임과 동일하다" —
+       * the layer snaps its own values inside `skip`, and this is the half of
+       * that frame the layer does not own.
+       */
+      if (victory.skipped && victoryShot) {
+        gameCamera.pushIn(victoryShot.point, victoryShot.zoom, 0);
+        // And the frame with it. A skip jumps the clock straight past BARS, so
+        // the branch below never runs `close()` and the gate would still be
+        // open — the match's own HUD would come back up beside the result
+        // screen's two buttons, which is the one thing the gate exists to
+        // prevent. `snap` rather than a zero-length tween, which would still
+        // owe an `update` before it landed.
+        cinematic.snap(0, { gate: 0 });
+        victoryShot = null;
       }
     } else {
       victoryArmed = false;
+      victoryShot = null;
       /**
        * The match is no longer over, so the screen saying it was must not be up.
        *
@@ -2072,6 +2345,59 @@ async function boot(canvas) {
        * business taking it back down. See `VictoryLayer.begin`.
        */
       if (victory.active && !victory.forced) victory.dismiss();
+    }
+
+    /**
+     * The letterbox, driven off whichever sequence owns the screen.
+     *
+     * Asked for a TARGET every frame rather than stepped on a stage edge.
+     * `Cinematic.to` is idempotent, so the two are the same thing when nothing
+     * is missed — and unlike an edge this cannot be missed by a frame long
+     * enough to step over a whole stage, which is what a tab coming back from
+     * the background hands the loop.
+     *
+     * RELEASE opens the bars and deliberately does NOT re-open the UI gate. The
+     * match's own HUD says the same things this screen says — the score, and a
+     * 나가기 — and two 나가기 buttons on one frame reads as the game being
+     * broken. `Cinematic` keeps the gate as its own tween for exactly this
+     * case; see the note there.
+     */
+    if (_covering) {
+      /**
+       * The restart owns the bars and nothing else may write them.
+       *
+       * It shut them on purpose and the world is being rebuilt behind them, and
+       * every other branch here would open them again — the ending's, because
+       * the screen is still up until `rebuildAll` dismisses it, and the
+       * hand-back below, because it fires the moment that dismissal lands. This
+       * is checked first rather than added as a condition to each of them: a
+       * gate written three times is a gate that will be written twice.
+       */
+    } else if (victory.active) {
+      const vc = CONFIG.victory;
+      victoryHeldBars = true;
+      if (victory.clock.atOrPast(VICTORY_STAGE.RELEASE)) cinematic.to(0, vc.releaseSeconds);
+      else if (victory.clock.atOrPast(VICTORY_STAGE.BARS)) cinematic.close(vc.barSeconds);
+    } else if (victoryHeldBars) {
+      /**
+       * The screen has gone and the bars are still its. Hand them back.
+       *
+       * Written as "whoever had them, has them no longer" rather than as a call
+       * at each of the three sites that can take the screen away — the loop's
+       * own dismiss on a replayed turn, `rebuildAll`, and the panel's 연출
+       * 내리기. Three call sites is three chances to forget one and leave the
+       * player looking at a shut letterbox with no way out of it.
+       *
+       * `playOpening` clears this on its way in, because a restart shuts the
+       * bars ON PURPOSE and owns them from that moment.
+       */
+      victoryHeldBars = false;
+      cinematic.open(CONFIG.victory.releaseSeconds);
+    } else if (introLayer?.active && introLayer.exiting) {
+      // The way IN: the bars retreat on the same window the two caps slide to
+      // the corners the match keeps their hands in, so the introduction does not
+      // end and then get uncovered — it ends BY being uncovered.
+      cinematic.open(CONFIG.intro.exitSec);
     }
 
     // A goal used to re-deal both hands here. It must not: a hand is carried
@@ -2095,7 +2421,22 @@ async function boot(canvas) {
      * reason — it is the state leaving LIVE that ends the follow, not the ball
      * happening to stop.
      */
-    if (CONFIG.view.followBall && match.state === MATCH_STATE.LIVE && match.arena.hasBall) {
+    if (
+      // ── 설정 화면의 "카메라 추적" 은 이 줄도 끈다 ──────────────────────────
+      // `view.track` 은 오랫동안 `CamTracker` 만 가리켰고, 축구는 그 트래커를
+      // 켜지 않는다 — 축구가 따라가는 것은 공이고 그건 바로 아래의 다른 기전이다.
+      // 그래서 추적을 끈 사람이 축구에서는 아무 변화도 얻지 못했다. 화면에 스위치는
+      // 하나뿐이고 그 스위치가 말하는 것은 "카메라가 알아서 따라가는가" 이므로,
+      // 모드마다 무엇을 따라가든 그 하나가 끈다.
+      //
+      // 턴이 넘어갈 때 시점이 도는 것은 여기에 들어오지 않는다. 그건 따라가는
+      // 것이 아니라 다음 사람에게 판을 건네는 것이고, 끄면 상대편 끝에서 조준하게
+      // 된다 — `faceCurrentPlayer` 를 보라.
+      CONFIG.view.track &&
+      CONFIG.view.followBall &&
+      match.state === MATCH_STATE.LIVE &&
+      match.arena.hasBall
+    ) {
       gameCamera.followTo(match.arena.ballCom());
     } else if (match.state !== MATCH_STATE.LIVE) {
       gameCamera.stopFollow();
@@ -2121,9 +2462,24 @@ async function boot(canvas) {
       live: match.state === MATCH_STATE.LIVE,
       arena: match.arena,
       shooter: match.shooter,
-      enabled: !!match.mode.camera?.track,
+      // ...and not once the ending has the camera. `reset` dropped whatever it
+      // was holding when the sequence armed; this is what stops it starting
+      // another ride, and what keeps its hand-back from firing behind the
+      // push-in. See the `camTracker.reset()` above.
+      enabled: !!match.mode.camera?.track && !victory.active,
       keepZ: match.mode.camera?.keepLineZ?.(match.arena) ?? null,
       reframed,
+      /**
+       * The other half of "nobody is arriving to reset it for".
+       *
+       * `faceCurrentPlayer` above stops moving the pan against an AI, and the
+       * tracker has a SECOND path to the same place: when a turn ends without
+       * changing hands — an extra-turn card — nothing reframes, so it eases the
+       * pan home itself. Left alone that would put the yank back on exactly the
+       * turns the handover no longer yanks, which is worse than either rule on
+       * its own.
+       */
+      keepView: aiKeepsZoom(),
       /**
        * The tracker has finished riding the shot and is handing the view back.
        *
@@ -2215,28 +2571,59 @@ async function boot(canvas) {
     const wantUi = input.aiming ? 0 : 1;
     const uiRate = dt / Math.max(0.02, CONFIG.ui.aimHideSeconds);
     uiFade += Math.max(-uiRate, Math.min(uiRate, wantUi - uiFade));
+
+    /**
+     * ── there are TWO scalars, and they are multiplied ─────────────────────
+     * `uiFade` above is the AIM fade: the player's own bow pushing the readouts
+     * out of the way, back the moment they let go, and pressable throughout
+     * because "흐린 상태에서도 클릭은 동작한다".
+     *
+     * `uiGate` is a SEQUENCE owning the screen — the opening, or the ending.
+     * Different owner, different lifetime, and one extra consequence: while it
+     * is down nothing under it may be pressed, because a control that is
+     * invisible and still answers is worse than one that is visible and does
+     * not. The layers take it separately for exactly that reason; see `gate` on
+     * `HudLayer.update` and `CardLayer.update`.
+     *
+     * Multiplied rather than one overwriting the other. They can legitimately
+     * overlap — a shot half-drawn when the match ends leaves the aim fade
+     * partway home while the bars close over it — and either one winning
+     * outright would make the other's movement vanish.
+     *
+     * NEITHER of them moves anything. `uiFade` was described as parking the
+     * hand and does not: it is `uFade` on the shared card material and an
+     * opacity multiplier in the HUD, both pure alpha. So "버튼의 좌표가 페이드
+     * 중에 한 픽셀도 움직이지 않는다" holds for both terms, by construction
+     * rather than by care.
+     */
+    const uiGate = cinematic.uiGate;
     // After `cards.update` has finished placing the hand, so it multiplies the
     // per-card opacity rather than fighting it. See `CardMaterials.shared`.
-    cards.materials.shared.uFade.value = uiFade;
+    cards.materials.shared.uFade.value = uiFade * uiGate;
 
     /**
      * `gameCamera` rather than a copy of its zoom: the score's visibility asks
      * the camera's OWN `atMinZoom`, which is the same getter `dragMode` uses to
      * decide whether a drag turns the field. See `HudLayer._updateScore`.
      *
-     * The fade goes to 0 for the whole of the victory screen. The score and the
-     * two buttons up there say the same things this screen says, larger and in
-     * the middle, and two 나가기 buttons on one frame is the kind of thing that
-     * reads as the game being broken. It is the fade rather than a new flag
-     * because `HudLayer.update` already hides a plate whose opacity reaches zero
-     * — see the visibility pass at the end of it — so there is nothing to add.
-     * Input is not relying on this: the router stops at the victory screen.
+     * ── the victory screen used to zero this outright, and no longer does ──
+     * `fade: victory.active ? 0 : uiFade` was the old line, and its reasoning
+     * still stands: the score and the two buttons up there say the same things
+     * the result screen says, and two 나가기 buttons on one frame reads as the
+     * game being broken. What has changed is WHO says so. The gate takes the
+     * HUD down as the bars close and holds it down for the rest of the
+     * sequence, so the readouts leave WITH the letterbox instead of blinking
+     * out on the frame the match ended — and the push-in in stage 1 is watched
+     * with the score still up, which is what a replay should look like.
      */
     hud.update({
       dt,
       match,
       gameCamera,
-      fade: victory.active ? 0 : uiFade,
+      // The product, exactly as the hand's `uFade` is. `gate` below is the same
+      // number again and is the PRESS, not the paint — see the two scalars.
+      fade: uiFade * uiGate,
+      gate: uiGate,
       // "PLAYER 2 (AI)". A function of the seat, so the HUD never learns what an
       // AI is — see the note on `HudLayer.update`.
       labelFor: (player) => controllers[player]?.label ?? '',
@@ -2324,6 +2711,8 @@ async function boot(canvas) {
        * with one person there is nobody to swap for.
        */
       pinnedBottom: hasAi() ? localSeat : null,
+      // Opacity is the product above; this is the PRESS. See the two scalars.
+      gate: uiGate,
       // The AI's card, being drawn out of its face-down fan and turned over.
       reveal: aiReveal(),
       /**
@@ -2341,9 +2730,8 @@ async function boot(canvas) {
     // Per frame, unlike the rest of the panel: this one tracks the hand.
     debug.refreshCamera();
 
-    // Presentation only, and last, so they are over the finished frame.
-    wipeOut?.update(dt);
-    wipeIn?.update(dt);
+    // Presentation only, and last, so it is over the finished frame.
+    cinematic.update(dt);
 
     /**
      * And the sound, last of all.
@@ -2457,7 +2845,7 @@ async function boot(canvas) {
     // and waiting — so the state test alone said "a press would grab this" while
     // the router was refusing every press. The ring promised something that
     // could not happen, on a cap the player could not even see properly.
-    const canGrab = match.state === MATCH_STATE.AIM && !p && !matchFound?.active;
+    const canGrab = match.state === MATCH_STATE.AIM && !p && !introLayer?.active;
     const hovered = canGrab && router.hoverCap >= 0 ? router.hoverCap : -1;
     /**
      * ── and the AI's own "this is the one I am about to hit" ────────────────
@@ -2642,8 +3030,9 @@ async function boot(canvas) {
      * card and cannot be pressed, because the card is still winning the press.
      * The three after them are each modal over the last: the victory screen has
      * taken the screen, match-found is handing the screen over, and a modal
-     * question is the last thing on it. The wipes cover everything because they
-     * are the transition out.
+     * question is the last thing on it. The letterbox is over all of them,
+     * because it is the frame everything else is inside — and at a covered
+     * frame it is the only thing on screen.
      */
     composer.setCamera(gameCamera.camera);
     composer.render();
@@ -2654,10 +3043,9 @@ async function boot(canvas) {
     r.render(hud.scene, hud.camera);
     r.render(cards.scene, cards.camera);
     victory.render(r);
-    matchFound?.render(r);
+    introLayer?.render(r);
     modal.render(r);
-    wipeOut?.render(r);
-    wipeIn?.render(r);
+    cinematic.render(r);
     r.autoClear = true;
   }
 
@@ -2703,7 +3091,7 @@ async function boot(canvas) {
     // alongside these, which is the only way to step through an AI turn's
     // phases — several of them are shorter than a frame at 0.2x.
     controllers, setOpponent, faceCurrentPlayer, turnBearing,
-    wipeIn, hud, victory, retro, audio, audioSettings, matchAudio, distanceMarks,
+    cinematic, hud, victory, retro, audio, audioSettings, matchAudio, distanceMarks,
     // The panel itself, so its per-frame readouts — and the rows the flight
     // greys out — can be driven by hand alongside `tick`. It is the stub when
     // the panel is off, so this is always safe to call.
@@ -2713,10 +3101,9 @@ async function boot(canvas) {
     // phone — it returns every number the report wants as plain data, so the
     // figures can be copied out rather than read off a screenshot.
     metrics, safeArea,
-    // A getter, unlike `wipeIn`: this one is built on first use, so a captured
-    // value would be `null` for the whole session.
-    get wipeOut() {
-      return wipeOut;
-    },
+    // The two sequences, so a covered frame and a result band can be stepped
+    // through by hand alongside `tick` — neither is something you can catch by
+    // looking.
+    introLayer, playOpening,
   };
 }

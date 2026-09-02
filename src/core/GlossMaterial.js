@@ -23,8 +23,8 @@ import { trackTextureClone } from './textures.js';
  * ── the API is deliberately the old one ─────────────────────────────────────
  * `new GlossMaterials({ resolution })`, `.create({ color, map, gloss, … })`,
  * `.shared`, `.setResolution()`. Some thirty call sites across `ArenaView`,
- * `PitchView`, `CurlingTableView`, `OrbView`, `Bottle`, `CapWipe`,
- * `MatchFoundLayer`, `VictoryLayer` and the mark editor pass exactly those
+ * `PitchView`, `CurlingTableView`, `OrbView`, `Bottle`,
+ * `IntroLayer`, `VictoryLayer` and the mark editor pass exactly those
  * options, and rewriting all of them at the same time as changing the shading
  * model would have made a rendering bug indistinguishable from a call-site typo.
  * So the surface is kept and the inside is new.

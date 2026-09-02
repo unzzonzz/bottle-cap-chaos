@@ -88,6 +88,15 @@ function smoothstep(x) {
   return t * t * (3 - 2 * t);
 }
 
+/**
+ * How faint the hand may get and still answer a press. See `update`'s `gate`.
+ *
+ * The same number `HudLayer` uses, and it has to be: the two are driven by one
+ * scalar, and a hand that stopped taking presses at a different point from the
+ * HUD would be a window in which exactly one of them was reachable.
+ */
+const INPUT_GATE = 0.5;
+
 export class CardLayer {
   /**
    * @param {HTMLCanvasElement} canvas  for mapping pointer coordinates
@@ -152,6 +161,8 @@ export class CardLayer {
     this._enabled = false;
     /** Whether this mode uses cards at all. See `update`. */
     this._visible = true;
+    /** How much of the hand is on screen. Gates the hit test — see `update`. */
+    this._gate = 1;
     /** Raise progress per hand, 0 tucked into the edge, 1 up and playable. */
     this._raise = [0, 0];
     /** Whether the pointer is anywhere on a hand, per hand. */
@@ -425,10 +436,34 @@ export class CardLayer {
    *   Null in local play, where every line below behaves exactly as it did.
    * @param {{player: number, cardId: string, phase: string, t: number}|null} [reveal]
    *   The AI's card being turned over. See `CardHand.beginReveal`.
+   * @param {number} [gate]
+   *   0..1, how much of the hand is on screen at all.
+   *
+   *   ── it gates the HIT TEST, and nothing else here ──────────────────────
+   *   The OPACITY is applied by the host, straight onto `materials.shared.uFade`
+   *   — see the two scalars in `main.js` — because that uniform already
+   *   multiplies through every card and is the one place a whole-hand fade
+   *   belongs. What the layer needs the number for is the press: the intro and
+   *   the ending fade the hand away and hold it there, and a card you cannot see
+   *   but can still drag is worse than one you can see and cannot. Below
+   *   `INPUT_GATE` there is nothing to hit.
+   *
+   *   Distinct from `enabled`, which greys a hand that is on screen and is the
+   *   right picture for somebody else's turn, and from `visible`, which is a
+   *   mode having no cards at all.
    */
-  update({ dt, currentPlayer, enabled, visible = true, pinnedBottom = null, reveal = null }) {
+  update({
+    dt,
+    currentPlayer,
+    enabled,
+    visible = true,
+    pinnedBottom = null,
+    reveal = null,
+    gate = 1,
+  }) {
     const cfg = this.config.cards;
 
+    this._gate = gate;
     this._now += dt;
     /**
      * 홀로그램에서 손패 전체가 공유하는 넷. 프레임당 한 번 쓴다.
@@ -975,6 +1010,9 @@ export class CardLayer {
     // a raycast is a three.js implementation detail and this is the difference
     // between a shot firing and a press vanishing.
     if (this._visible === false) return null;
+    // And a hand that has been faded away by a cinematic takes none either. See
+    // `gate` on `update`; the aim fade never reaches this on its own.
+    if (this._gate < INPUT_GATE) return null;
     if (this._reserved(clientX, clientY)) return null;
     const rect = this.canvas.getBoundingClientRect();
     if (rect.width < 1 || rect.height < 1) return null;

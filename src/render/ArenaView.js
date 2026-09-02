@@ -185,7 +185,7 @@ export class ArenaView {
        * paint, so it multiplies by white. The placeholder is near-greyscale and
        * is meant to be tinted, so it multiplies by the team colour. Getting
        * these the wrong way round squares the tint — `capTexture.js` states the
-       * contract and `CapWipe` makes the same distinction.
+       * contract and `IntroLayer` makes the same distinction.
        */
       set[CAP_GROUP.PANEL] = panelTextureFor
         ? retro.create({ map: panelTextureFor(player), color: PALETTE.untinted, preset: 'wetMetal' })

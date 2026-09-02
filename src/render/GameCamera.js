@@ -724,6 +724,72 @@ export class GameCamera {
   }
 
   /**
+   * Push in on a point. The victory sequence's camera move, and its only one.
+   *
+   * ── it is the EXISTING path, with a length of its own ────────────────────
+   * No new easing, no second clock and no third way for something to write the
+   * pan: it sets `panTarget`, which the ordinary glide carries, and `_autoZoom`,
+   * which `_settleAuto` already walks with a smoothstep. The one thing added is
+   * `dur`, because `turnViewSec` is how long a HANDOVER takes and a push-in is
+   * not a handover — it is meant to be several times slower and to be watched.
+   *
+   * ── it is presentation, on the wall clock, outside the sim ───────────────
+   * Everything this touches is already outside the state hash: the pan, the
+   * stored zoom and the glide between them are read by nothing the physics can
+   * see, and this runs at a moment when the physics has stopped stepping
+   * anyway. A match played to the same shots with the camera anywhere produces
+   * the same hashes, which is the invariant that lets the sequence move the
+   * view at all.
+   *
+   * ── the zoom is ABSOLUTE, and the caller works it out once ───────────────
+   * The victory sequence wants "a notch and a half in from wherever the player
+   * left it", which is a multiplication — but it may call this twice, because a
+   * press lands the move immediately. Multiplying here would compound: the
+   * second call would read a zoom that had already travelled and push in again
+   * from there. So the caller resolves the factor ONCE, when the sequence is
+   * armed, and both calls are handed the same destination.
+   *
+   * @param {{x: number, z: number}|null} point  where to centre, in world units
+   * @param {number} zoom  the stored zoom to arrive at
+   * @param {number} seconds  0 lands immediately — the skip. See `VictoryClock`.
+   */
+  pushIn(point, zoom, seconds) {
+    // A hand cannot be arguing with this: the match is over and the router has
+    // handed every press to the victory screen. Dropping the follow and the
+    // handover tween anyway, because either would go on writing the same target.
+    this.stopFollow();
+    this._autoAzimuth = null;
+    this.spin = 0;
+
+    const min = this.zoomFloor;
+    const max = Math.max(min, this.maxZoom);
+    const to = Math.min(max, Math.max(min, zoom));
+
+    if (point) {
+      this.panTarget.x = point.x;
+      this.panTarget.z = point.z;
+    }
+
+    if (seconds > 0) {
+      // The point rides ON the tween. See `_settleAuto`: a pan target written
+      // once at minimum zoom is clamped to nothing before the first frame is
+      // drawn, so it has to be re-asserted as the zoom opens the limits up.
+      this._autoZoom = { from: this.zoom, to, t: 0, dur: Math.max(0.05, seconds), pan: point };
+      return;
+    }
+
+    // Landed outright, so the frame AFTER this call is the frame the tween would
+    // have reached. A zero-length tween is not the same thing — it still owes an
+    // `update` before it arrives, and the skip has to be exact.
+    this._autoZoom = null;
+    this.config.view.zoom = to;
+    this._clampPan();
+    this.pan.x = this.panTarget.x;
+    this.pan.z = this.panTarget.z;
+    this.apply();
+  }
+
+  /**
    * Is something steering the pan right now?
    *
    * Read-only, and it exists so a follower can find out that a HAND has taken
@@ -794,7 +860,7 @@ export class GameCamera {
 
     if (this._autoAzimuth) {
       const a = this._autoAzimuth;
-      a.t = Math.min(1, a.t + step / dur);
+      a.t = Math.min(1, a.t + step / (a.dur ?? dur));
       // Assigned outright at the end rather than eased into: "자신의 진영이
       // 아래쪽" has to be exactly the bearing, or the snap magnet immediately
       // starts pulling at the remainder.
@@ -805,8 +871,32 @@ export class GameCamera {
 
     if (this._autoZoom) {
       const z = this._autoZoom;
-      z.t = Math.min(1, z.t + step / dur);
+      // A tween may carry its own length. `turnViewSec` is how long a HANDOVER
+      // takes and everything that reframes for the next player uses it; the
+      // victory push-in is not a handover and is several times slower. See
+      // `pushIn`.
+      z.t = Math.min(1, z.t + step / (z.dur ?? dur));
       this.config.view.zoom = z.t >= 1 ? z.to : z.from + (z.to - z.from) * smoothstep(z.t);
+      /**
+       * A tween may also carry a pan target, re-asserted every frame.
+       *
+       * ── written once, it did not survive the first frame ──────────────────
+       * Two things wipe a pan target at minimum zoom, and a push-in that starts
+       * from there meets both. `update` above recentres it outright while the
+       * drag mode is `rotate`, and `_clampPan` reduces it to zero because at the
+       * whole-field fit there is nowhere to pan TO — the limits really are zero
+       * until the zoom has moved. Clamping is destructive, so a target set once
+       * and clamped once is a target of nothing, and the camera zoomed in on the
+       * middle of the board instead of on what decided the match.
+       *
+       * Re-asserting it here, after the recentre and before the glide, means the
+       * target is clamped against the zoom this frame has rather than the one
+       * the sequence started at, so it opens up as the camera moves in.
+       */
+      if (z.pan) {
+        this.panTarget.x = z.pan.x;
+        this.panTarget.z = z.pan.z;
+      }
       if (z.t >= 1) this._autoZoom = null;
       this._clampPan();
       moved = true;

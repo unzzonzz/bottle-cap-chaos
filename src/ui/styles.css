@@ -42,8 +42,25 @@ body {
   /* The void. Everything outside the 4:3 frame is this.
      Every colour in this file comes from src/ui/cssPalette.js, which writes the
      palette into these custom properties at boot. A hex literal here is a bug —
-     see that file for why there are no fallbacks. */
-  background: var(--bcc-void);
+     with the two exceptions this rule has, and this is the second of them.
+
+     ── the fallback is load-bearing, and the letterbox is why ────────────────
+     `cssPalette.js` runs from a module script, so for the frame or two before it
+     executes `var(--bcc-void)` resolves to its initial value — transparent, i.e.
+     the browser's own white. That was survivable while both sides of the gap
+     were near-white and that file says so at length.
+
+     It stopped being survivable when the transition became a letterbox. The
+     menu now hands over on a screen that is entirely this colour, and the game
+     document is supposed to open on the same one; a white frame in between is
+     exactly the flash the covered frame exists to remove, and it is the more
+     visible for being white-to-blue rather than white-to-white.
+
+     So the value is written twice, here and in `cssPalette.js`, and this file
+     joins the list in `docs/palette.md` of places a palette change has to be
+     carried by hand. `--bcc-fade-ms` below has a fallback for the same kind of
+     reason and states it the same way. */
+  background: var(--bcc-void, #1a76c4);
   color: var(--bcc-text);
   font-family: 'BCC Sans', Pretendard, -apple-system, 'Segoe UI', system-ui, sans-serif;
   overscroll-behavior: none;

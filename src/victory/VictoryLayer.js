@@ -1,93 +1,98 @@
-import { Color, Group, Mesh, PlaneGeometry, Raycaster, Scene, Vector2 } from 'three';
-import {
-  FRAME as SHARED_FRAME,
-  frameCamera,
-  frameScale,
-  halfDiagonal,
-  refitFrameCamera,
-} from '../core/frame.js';
-import { CAP_GROUP } from '../cap/capGeometry.js';
+import { Mesh, PlaneGeometry, Raycaster, Scene, Vector2 } from 'three';
+import { FRAME as SHARED_FRAME, frameCamera, frameScale, refitFrameCamera } from '../core/frame.js';
 import { FxMaterials } from '../render/FxMaterial.js';
-import { ringTexture, trailTexture } from '../render/fxTextures.js';
 import { HudMaterials } from '../ui/HudMaterial.js';
-import { buttonTexture, notePlateTexture, victoryPlateTexture } from '../ui/hudTextures.js';
+import {
+  buttonTexture,
+  notePlateTexture,
+  scorePlateTexture,
+  victoryPlateTexture,
+} from '../ui/hudTextures.js';
 import { VICTORY_STAGE, VictoryClock } from './VictoryClock.js';
+import { ResultFizz } from './ResultFizz.js';
 import { controlScale, controlState, stepControl } from '../ui/motion.js';
 import { PALETTE, toRgb } from '../core/palette.js';
+import { letterboxBar } from '../core/Cinematic.js';
 import { ROLE, SIZE, SPACE } from '../core/tokens.js';
 
 /**
- * Who won, as a thing that happens on screen.
+ * How the match ended, as a thing that happens on screen.
  *
- * ── its own overlay scene, and every reason is the same one ─────────────────
+ * ── the board stays; this file only writes on it ────────────────────────────
+ * There used to be a fight in here. Two 2D sprite caps on a tilted ground, an
+ * afterimage trail, a charge across the frame, a collision with a white flash
+ * and fourteen pixels of screen shake at 26 Hz, a loser flipping out of frame
+ * and a winner settling on a spring. Sixty-seven kilobytes of it, and it is
+ * gone.
+ *
+ * Three things were wrong with it. It replayed — non-interactively, and at a
+ * quarter of the fidelity — the exact thing the player had just spent a whole
+ * match doing with their hands, so the reward for winning was a worse version
+ * of the game. It knew nothing about the MODE, so a football match won on goals
+ * and a curling match won on a tiebreaker both ended with the same two caps
+ * hitting each other, and neither said what had happened. And it looked like a
+ * different program: nothing else in this game is a sprite on a tilted plane
+ * with a trail behind it, and the direction forbids strong screen shake
+ * outright.
+ *
+ * What is here instead is what a broadcast does. The board is still on screen
+ * — the finishing position is the last thing the match said — and `main.js`
+ * pushes the camera in on whatever decided it. The letterbox closes over that.
+ * The result is stated in the band with the mode's OWN number in it, taken from
+ * `scoreboardFor`, which is the same function the corner HUD reads: 3–0 caps
+ * left, 2–1 goals, 2–1 rounds. Then the bars retreat and the two buttons come
+ * up. Four stages, and the sequence is what `VictoryClock` walks.
+ *
+ * ── the bars are NOT this file's ────────────────────────────────────────────
+ * `core/Cinematic.js` owns them, `main.js` drives them off `this.stage`, and
+ * that division is the point of the redesign: the letterbox the match ENDS in
+ * has to be the same object as the one it began in, or there are two of them
+ * and the frame stops being a frame.
+ *
+ * ── its own overlay scene ───────────────────────────────────────────────────
  * `HudLayer` argues at length for not sharing the card layer's scene, and every
- * word of it applies here twice over. This one also holds two 3D caps that need
- * a DEPTH BUFFER to sort against each other, which the HUD's ±100 orthographic
- * range and depth-disabled plates cannot give it, and it needs its own snap dial
- * so the winner line can come down without taking the caps smooth with it.
- *
- * The arrangement is `menu/CapWipe`'s, which is the closest existing precedent
- * and is doing the same job: real cap geometry in an orthographic overlay over a
- * fixed virtual 640x480 frame, drawn INSIDE the bound low-resolution target
- * after a depth clear. So the whole sequence takes the identical 4x4 dither
- * lattice, the identical five bits a channel and the identical nearest-neighbour
- * upscale as the board it is covering. There is no branch anywhere that exempts
- * it, and that is the point — a victory screen that looked smoother than the
- * game would read as a different program having taken over.
- *
- * ── it reuses the cap, it does not model a broken one ───────────────────────
- * One `BufferGeometry`, handed in from `main.js` — the SAME object the six caps
- * on the board are drawn from. Nothing here builds a special mesh, nothing here
- * moves a vertex, and nothing here breaks a cap into pieces: it is pressed steel
- * and the answer to being hit is to go over, which is what stage 4 does.
- *
- * ── the artwork is INJECTED ─────────────────────────────────────────────────
- * `teamColors` and `teamTextures` are constructor arguments and `setTeamTexture`
- * is live, because the customiser is coming and the panel a player drew is the
- * thing this screen most obviously has to show. The default is the same
- * placeholder the board uses, so today the two agree; the day they stop agreeing
- * is a day nothing in this file changes. See `capTexture.js` for why a supplied
- * texture also takes the panel's tint to white.
+ * word of it applies here: this one needs its own snap dial so the winner line
+ * can come down without taking anything else with it, and it is drawn after the
+ * bloom chain because a bright pass over white type on a white plate is
+ * unreadable type.
  *
  * ── it is MODAL, and that is an input rule ─────────────────────────────────
  * While it is up it takes every press on the canvas — see `pointerDown`, which
  * returns true unconditionally. `PointerRouter` tests it before the cards and
- * before the HUD, so nothing underneath can be reached: the match is over, there
- * is no shot to take, and a press landing on a card fan that is only still on
- * screen because it has been dimmed would be a press with no meaning.
+ * before the HUD, so nothing underneath can be reached: the match is over,
+ * there is no shot to take, and a press landing on a card fan that is only
+ * still on screen because it is fading out would be a press with no meaning.
  */
 
 /** The layout box, in frame pixels. The shared, live one — see core/frame.js. */
 export const VICTORY_FRAME = SHARED_FRAME;
 
-// HALF_DIAGONAL is now `halfDiagonal()` from core/frame.js — a function,
-// because a frame that can get taller has a diagonal that can get longer.
-// Held as a constant, the losing cap vanished while still on screen.
-
 /**
- * How much the full-frame quads overhang the frame, in frame pixels.
+ * How much the full-frame quad overhangs the frame, in frame pixels.
  *
  * The vertex snap moves every corner by up to half a low-res pixel and it is
  * free to move one INWARD, which on the dimming quad would leave a bright line
- * down one edge of the screen and on the flash quad would leave an unlit strip.
- * `CapWipe.coverSafety` exists for exactly this and this is the flat-quad
- * version of it.
+ * down one edge of the screen. `Cinematic`'s bars carry the same number for the
+ * same reason.
  */
 const OVERHANG = 6;
 
 /** The winner line's plate, in frame pixels. Big — see `victoryPlateTexture`. */
 const PLATE = { width: 340, height: 72 };
 
+/** The number under it. The HUD's own score plate, at the HUD's own size. */
+const SCORE = { width: SIZE.scorePlate.w, height: SIZE.scorePlate.h };
+
 /**
  * One line of explanation under the winner, when the mode has one.
  *
  * ── it exists because "who won" is not always the whole answer ──────────────
  * Knockout and football never need it: you won because the other side ran out
- * of caps, or because the score says 3–1, and both of those are already on
- * screen. Curling can end 2–2 and be decided on which team owns the cap nearest
- * the middle of the house, and a player who cannot see that will read the result
- * as arbitrary — so "타이브레이커가 발동했다는 걸 결과 화면에 표시해라" is a
- * requirement, not a nicety.
+ * of caps, or because the score says 3–1, and both of those are now on screen
+ * in the plate directly under the winner's name. Curling can end 2–2 and be
+ * decided on which team owns the cap nearest the middle of the house, and a
+ * player who cannot see that will read the result as arbitrary — so
+ * "타이브레이커가 발동했다는 걸 결과 화면에 표시해라" is a requirement.
  *
  * The SAME plate the in-game note line uses, deliberately. It is one more thing
  * the player has already learned to read, it goes through the same thresholding
@@ -95,7 +100,7 @@ const PLATE = { width: 340, height: 72 };
  * nothing to say simply does not pass one and nothing is drawn.
  */
 const NOTE_HEIGHT = 24;
-/** Frame pixels between the winner line and the note under it. */
+/** Frame pixels between the winner line and the note above it. */
 const NOTE_GAP = 10;
 
 /**
@@ -106,29 +111,14 @@ const NOTE_GAP = 10;
  * width of 메뉴로 나가기 would be three glyphs adrift in a box.
  *
  * ── 부록 B: 좌우가 반대였다 ─────────────────────────────────────────────────
- * 조사표가 잡아낸 두 위반 중 나머지 하나가 여기다. 재시작이 왼쪽, 나가기가
- * 오른쪽이었다. B2.2-1 은 그 반대를 요구한다 — 물러나는 것이 왼쪽이고, 이 화면이
- * 권하는 것은 한 판 더다.
+ * B2.2-1 requires the retreat on the left and what the screen recommends on the
+ * right. **배열 순서가 곧 화면 순서다** — `layout` places them left to right —
+ * so obeying that rule is a matter of the order of these two lines.
  *
- * **배열 순서가 곧 화면 순서다.** `layout` 이 왼쪽부터 차례로 놓으므로, 이
- * 규칙을 지키는 일은 두 줄을 맞바꾸는 것이다.
- */
-/**
- * ── 높이는 토큰에서 온다. 40 은 이 파일이 혼자 정한 숫자였다 ────────────────
- * 폭은 라벨마다 다르고 그건 위에 적힌 결정이지만, 높이는 라벨과 무관하다 —
- * 글자 위아래로 얼마나 비우는가는 버튼이라는 부품의 성질이지 그 버튼이 무슨
- * 말을 하는지의 문제가 아니다. 그래서 폭만 저술값으로 남기고 높이는
- * `SIZE.buttonFooter` 를 따른다.
- *
- * `buttonFooter` 인 이유는 역할이 그것이기 때문이다 — 토큰 주석이 "COMMIT /
- * RETREAT" 라고 적고 있고, 이 두 개가 정확히 그 둘이다. `ModalLayer` 의
- * `buttonSecondary`(56) 가 아니라 52 인 것도 같은 이유다: 저쪽은 패널 안의
- * 일반 버튼이고 이쪽은 화면을 마무리하는 한 줄이다.
- *
- * 40 에서 52 로 열두 픽셀이 늘고, `buttonTexture` 의 그림자 여백 6 은 고정이라
- * 그 열두 픽셀은 전부 글자 위아래의 여백이 된다. 레이아웃은 따라온다 —
- * `layout` 이 높이를 `k` 로 스케일하고 `tallest` 로 바닥을 다시 잡으므로,
- * 홈 인디케이터 여유도 새 높이에 맞춰 계산된다.
+ * The height comes from the token rather than from a number this file invented:
+ * how much room a label gets above and below it is a property of the COMPONENT,
+ * not of what the label says. `buttonFooter` because that is the role — the
+ * token's own comment says "COMMIT / RETREAT", and these two are exactly those.
  */
 const BUTTONS = [
   { id: 'exit', label: '메뉴로 나가기', width: 192, height: SIZE.buttonFooter.h, role: ROLE.RETREAT },
@@ -138,41 +128,20 @@ const BUTTONS = [
 const BUTTON_GAP = 18;
 
 /**
- * Texels for the two sprites, fixed rather than on a slider.
+ * When the winner line, the number and each button come in.
  *
- * Bigger than the card effects' 32, and for the reason `fxTextures` gives in its
- * header: draw at roughly the size the sprite will occupy. A card ring is a few
- * dozen screen pixels across; the impact ring here is three hundred, and a
- * 32-texel image stretched that far stops reading as four hard bands and starts
- * reading as four hard SQUARES.
- */
-const RING_TEXELS = 64;
-const TRAIL_TEXELS = 48;
-
-/**
- * When the winner line and each button come in, as fractions of stage 5.
+ * The first two are fractions of RESULT and the last two of RELEASE, because
+ * they belong to different stages: the result is stated inside the letterbox
+ * and the controls arrive as it opens.
  *
- * Overlapping rather than strictly sequential: the brief asks for them not to
- * arrive together, which is about the READING order, and three things that hard-
- * cut in turn reads as three separate events. Each starts while the one before
- * it is still arriving, so it is one movement with an order to it.
+ * Overlapping rather than strictly sequential: three things that hard-cut in
+ * turn read as three separate events, and each of these starts while the one
+ * before it is still arriving, so it is one movement with an order to it.
  */
-const TEXT_IN = [0.0, 0.45];
-const RESTART_IN = [0.3, 0.75];
-const EXIT_IN = [0.55, 1.0];
-
-/**
- * How much of stage 4 the winner spends running out of momentum.
- *
- * The rest of it is the spring. Two parts rather than one integration seeded
- * with the charge velocity, because the charge is fast — better than two
- * thousand frame pixels a second at the default — and a spring handed that lands
- * the cap somewhere off screen before it ever turns round. So the carry is a
- * scripted deceleration to a dead stop at `overshoot`, and the spring takes over
- * from rest: `springStiffness` and `springDamping` then describe the settle they
- * are named after instead of fighting an initial condition.
- */
-const CARRY_FRACTION = 0.32;
+const TEXT_IN = [0.0, 0.4];
+const SCORE_IN = [0.22, 0.62];
+const RESTART_IN = [0.0, 0.6];
+const EXIT_IN = [0.25, 0.85];
 
 function smoothstep(x) {
   const t = Math.min(1, Math.max(0, x));
@@ -184,85 +153,19 @@ function window01(x, [from, to]) {
   return smoothstep((x - from) / Math.max(1e-4, to - from));
 }
 
-/**
- * One cap in the sequence: nested groups, because each turn is about a different
- * frame and an Euler triple cannot say that.
- *
- * The nesting is `CapWipe`'s reasoning applied to a different set of turns:
- *
- *   holder    where it is on the frame, and how big
- *   ground    the lean of the ground it is lying on — see `_applyTilt`
- *   axis      orients the flip's axis, in the GROUND's frame
- *   flip      end over end about that axis — this is the loser going over
- *
- * The mesh's own quarter turn is the last link and it is what puts the panel
- * face-on: the cap is built +y up through the panel and this camera looks down
- * -z. The z offset after it parks the cap's mid-height on the shared origin,
- * because that origin is what `flip` rotates about — left at the hem, which is
- * where `capGeometry` puts it, a half turn would swing the cap around a point
- * underneath itself instead of turning it over.
- *
- * ── there is no spin group any more ────────────────────────────────────────
- * A cap turning about its own normal was the first thing here and it is gone:
- * against artwork with an orientation mark it reads as the cap being spun by
- * hand rather than lying somewhere, and it fought the one rotation that has to
- * be legible — the loser going over. The float in stage 1 is what keeps the wait
- * from being static.
- *
- * ── `ground` sits ABOVE the flip, and that is the whole point ──────────────
- * The lean has to be a fact about the SCENE, not about each animation: the same
- * angle while the loser waits, while the winner crosses, while the loser goes
- * over and is pushed out, and while the winner settles. Putting it above `flip`
- * means the tumble happens IN the leaned frame — a cap going over on sloped
- * ground — instead of the lean being something the tumble carries around with it
- * and inverts halfway through.
- */
-class CapActor {
-  /** @param {import('three').BufferGeometry} geometry */
-  constructor(geometry) {
-    this.holder = new Group();
-    this.ground = new Group();
-    this.axis = new Group();
-    this.flip = new Group();
-    this.mesh = new Mesh(geometry, null);
-    this.mesh.rotation.x = Math.PI / 2;
-    this.mesh.position.z = -(geometry.userData.height ?? 0) * 0.5;
-    this.flip.add(this.mesh);
-    this.axis.add(this.flip);
-    this.ground.add(this.axis);
-    this.holder.add(this.ground);
-    this.holder.visible = false;
-  }
-
-  reset() {
-    this.holder.position.set(0, 0, 0);
-    this.holder.visible = false;
-    this.axis.rotation.z = 0;
-    this.flip.rotation.x = 0;
-  }
-}
-
 export class VictoryLayer {
   /**
    * @param {HTMLCanvasElement} canvas  for mapping pointer coordinates
-   * @param {import('../core/GlossMaterial.js').GlossMaterials} retro
-   * @param {import('three').BufferGeometry} capGeometry  the board's own cap
    * @param {import('three').Vector2} resolution  the low-res target's size
    * @param {string[]} teamColors
-   * @param {import('three').Texture} panelTexture  the default panel artwork
-   * @param {(import('three').Texture|null)[]} [teamTextures]  per-team override
    * @param {() => void} onRestart
    * @param {() => void} onExit
    */
   constructor({
     canvas,
     config,
-    retro,
-    capGeometry,
     resolution,
     teamColors,
-    panelTexture,
-    teamTextures = [],
     onRestart,
     outcomeFor = null,
     onExit,
@@ -278,36 +181,28 @@ export class VictoryLayer {
     this.clock = new VictoryClock({ tuning: config.victory });
 
     this.scene = new Scene();
-    /**
-     * Depth range in the thousands, and the camera pulled back off the origin.
-     *
-     * ±100 would be the HUD's and it is not enough: a 3.2-unit cap at the
-     * default scale is thirty frame pixels deep and sits at a z of forty, which
-     * fits — but the range also has to survive the scale being dragged, and the
-     * cost of asking for more of a range nothing else is competing for is zero.
-     * The camera is off the origin so `cameraPosition` in the shared vertex
-     * shader is a real point: at the origin the view vector through a cap
-     * sitting on z = 0 is degenerate and the gloss term goes to noise.
-     */
-    this.camera = frameCamera({ near: -3000, far: 3000, z: 1000 });
+    // A flat overlay: everything in it is a quad on z = 0 and paint order is the
+    // whole of the sorting. The deep range the old scene needed was for two cap
+    // meshes depth-tested against each other, and there are no meshes now.
+    this.camera = frameCamera({ near: -100, far: 100 });
 
     this.uiMaterials = new HudMaterials({ resolution });
     this.fxMaterials = new FxMaterials({ resolution });
 
-    /** One quad for everything flat. Disposed once, at the end. */
+    /** One quad for everything. Disposed once, at the end. */
     this._quad = new PlaneGeometry(1, 1);
 
-    // ── the darkened game, and the inversion over the top of it ─────────────
     /**
      * 어두워진 판.
      *
-     * 순수한 검정이었다. 어두운 UI 위에서는 맞았지만 밝은 유리 위에서 같은 일을
-     * 하면 뒤가 **없어진다** — 실측해 보니 나무판과 뚜껑 여섯 개가 전부 사라지고
-     * 갈색 얼룩만 남았다. 승리 화면은 방금 무슨 일이 있었는지 보여 주는 화면이므로
-     * 판이 보여야 한다.
+     * 순수한 검정이 아니다. 어두운 UI 위에서는 맞았지만 밝은 유리 위에서 같은
+     * 일을 하면 뒤가 **없어진다** — 팔레트의 깊은 파랑이고, `ModalLayer` 의
+     * 가림막과 같은 잉크이며 같은 이유다(팔레트 감사 규칙 1: 순수한 검정은 없다).
      *
-     * 팔레트의 깊은 파랑이다. `ModalLayer` 의 가림막과 같은 잉크이고 같은 이유다 —
-     * 이 프로젝트에 순수한 검정은 없다(팔레트 감사 규칙 1).
+     * 세기가 0.72 에서 0.34 로 내려간 이유는 이 화면의 주어가 바뀌었기
+     * 때문이다. 예전에는 판이 배경이었다 — 앞에서 뚜껑 두 개가 싸웠으므로. 지금은
+     * 판이 **주어**다: 카메라가 방금 승부를 가른 것으로 밀고 들어갔고, 결과가
+     * 읽히는 동안 그것이 계속 보여야 한다.
      */
     this.dim = new Mesh(this._quad, this.uiMaterials.createSolid(0));
     const dimRgb = toRgb(PALETTE.accent.skyDeep).map((v) => v / 255);
@@ -318,102 +213,44 @@ export class VictoryLayer {
     this.scene.add(this.dim);
 
     /**
-     * 충격의 플래시. 뚜껑도 글자도 어두워진 판도 전부 덮고, 맨 마지막에.
+     * The carbonation. One of exactly two celebratory beats on this screen.
      *
-     * ── 색 반전이 아니라 흰 플래시인 이유 ──────────────────────────────────
-     * 예전에는 `createInvert` 였다. 강타 카드가 쓰는 것과 **같은** 블렌드 —
-     * `src * (1 - dst)`, src 는 흰색 — 라는 것이 그 선택의 근거였고, 화면이 거의
-     * 검던 시절에는 옳았다.
-     *
-     * 지금은 틀렸다. 이 화면의 대부분은 흰 유리판과 밝은 하늘이고, 반전하면
-     * **어두워진다**. 번쩍이는 것이 아니라 잠깐 정전된 것처럼 보인다. 실제로
-     * 지시서가 이 플래시를 다시 설계하라고 지목한 것이 그 이유다.
-     *
-     * 흰 quad 는 어느 팔레트에서나 같은 방향으로 작동한다. 알파는 1 이 아니라
-     * `victory.flashStrength` 인데, 완전히 흰 프레임 세 장은 이 화면에서 유일하게
-     * 아픈 것이기 때문이다 — 아래가 비쳐야 무엇이 번쩍였는지 보인다.
+     * The other is the glint on the winning caps, and `CardFx` draws that — the
+     * 원모어 flourish played with no card behind it. Two, and no more: the
+     * screen's argument is restraint, and confetti in particular is somebody
+     * else's game. See `ResultFizz`.
      */
-    this.flash = new Mesh(this._quad, this.uiMaterials.createSolid(0));
-    this.flash.material.uniforms.uTint.value.set(1, 1, 1);
-    this.flash.scale.copy(this.dim.scale);
-    this.flash.renderOrder = 1000;
-    this.flash.visible = false;
-    this.scene.add(this.flash);
+    this.fizz = new ResultFizz({ materials: this.fxMaterials, quad: this._quad });
+    this.fizz.build(config.victory.bubbleCount, this.scene);
 
-    /**
-     * Everything the shake moves.
-     *
-     * The caps, the hit ring and the trail — and deliberately NOT the
-     * dimming quad, which has to stay still or its overhang stops covering the
-     * frame, nor the type, which is not on screen yet when the shake happens.
-     */
-    this.content = new Group();
-    this.scene.add(this.content);
-
-    // ── the two caps ────────────────────────────────────────────────────────
-    this._capMaterials = this._buildCapMaterials(retro, panelTexture, teamTextures);
-    this.winner = new CapActor(capGeometry);
-    this.loser = new CapActor(capGeometry);
-    /**
-     * The winner in front, said twice on purpose.
-     *
-     * A real depth offset, because these are the only depth-tested things in the
-     * scene and the hit is the one moment they overlap — so which is nearer has
-     * to be a fact about where they are, not about paint order. AND an explicit
-     * `renderOrder`, so the answer does not rest on how the transparent list
-     * happens to break a tie: at equal `renderOrder` it sorts back to front by
-     * projected z, which would in fact give the right answer here, and relying on
-     * that is how the wrong one arrives the first time a z is nudged.
-     */
-    this._winnerZ = 40;
-    this._loserZ = 0;
-    this.loser.mesh.renderOrder = 0;
-    this.winner.mesh.renderOrder = 5;
-    this.content.add(this.loser.holder, this.winner.holder);
-
-    /**
-     * ── there is no glow under the winner ─────────────────────────────────
-     * There was: three concentric additive bands, palette-cycled off the winning
-     * team's colour. On screen it did not read as light under the cap, it read as
-     * a hoop lying around it — the outermost band landed just outside the cap's
-     * own silhouette, so the settled winner had a ring beside it at all times.
-     * Removed rather than retuned: any additive sprite big enough to be seen
-     * around a cap of this size is a ring, and a small one is a smudge.
-     *
-     * The expanding hit ring below stays. It is a different thing — one event,
-     * under half a second, at the point of contact, and it now lies flat on the
-     * leaned ground with the caps.
-     */
-    this.ring = new Mesh(this._quad, this.fxMaterials.create(ringTexture(RING_TEXELS)));
-    this.ring.renderOrder = 10;
-    this.ring.visible = false;
-    this.content.add(this.ring);
-
-    /**
-     * The trail: a few stepped discs strung out behind the incoming cap.
-     *
-     * An AFTERIMAGE, not a blur. The brief rules out motion blur and this is
-     * what the era had instead — the same sprite drawn a few times along the
-     * path, additively, at falling opacity. It is a handful of hard-edged
-     * discs, so there is no gradient anywhere in it.
-     */
-    this.trail = [];
-    for (let i = 0; i < 6; i++) {
-      const m = new Mesh(this._quad, this.fxMaterials.create(trailTexture(TRAIL_TEXELS)));
-      m.renderOrder = -5;
-      m.visible = false;
-      this.trail.push(m);
-      this.content.add(m);
-    }
-
-    // ── the type and the buttons ────────────────────────────────────────────
+    // ── the type ────────────────────────────────────────────────────────────
     this.plate = new Mesh(this._quad, this.uiMaterials.create(null));
     this.plate.renderOrder = 20;
     this.plate.visible = false;
     this.scene.add(this.plate);
 
-    // The explanation under it. Same render order as the winner line — they
-    // arrive together and never overlap — and hidden until a mode hands one in.
+    /**
+     * The mode's own number, under the winner's name.
+     *
+     * ── this is the half the old screen did not have ───────────────────────
+     * "모드를 모른다. 축구는 골을 넣었고 컬링은 돌을 라인 가까이 놓았고 서바이벌은
+     * 떨어뜨렸다. 셋 다 같은 캡-치기 애니메이션이 나온다." The fix is not a third
+     * animation, it is a number — and the number already exists, because the
+     * corner HUD has been showing it all match. `scoreboardFor` is the mode's
+     * own answer and `scorePlateTexture` is the plate the player has been
+     * reading it off; both are reused exactly, at the same size, so the result
+     * screen says the thing the scoreboard said, larger and last.
+     */
+    this.score = new Mesh(this._quad, this.uiMaterials.create(null));
+    this.score.renderOrder = 20;
+    this.score.visible = false;
+    this.scene.add(this.score);
+    /** The frozen scoreboard, as `scoreboardFor` reported it. Set by `begin`. */
+    this._board = null;
+    this._scoreKey = '';
+
+    // The explanation. Same render order as the winner line — they arrive
+    // together and never overlap — and hidden until a mode hands one in.
     this.note = new Mesh(this._quad, this.uiMaterials.create(null));
     this.note.renderOrder = 20;
     this.note.visible = false;
@@ -449,9 +286,9 @@ export class VictoryLayer {
      * A transition is running off one of the buttons.
      *
      * Set by the host the moment a press is honoured, and it swallows everything
-     * after it. Without it, 재시작 pressed twice inside the quarter second the
-     * cap takes to cover the screen starts two rebuilds, and the second one runs
-     * against a world the first has already thrown away.
+     * after it. Without it, 재시작 pressed twice inside the moment the bars take
+     * to close starts two rebuilds, and the second one runs against a world the
+     * first has already thrown away.
      */
     this._busy = false;
 
@@ -463,117 +300,12 @@ export class VictoryLayer {
     this._draw = false;
     /** Played from the panel rather than by a finished match. See `begin`. */
     this.forced = false;
-    /** Frame-pixel unit vector the winner arrives ALONG. Set in `begin`. */
-    this._travel = new Vector2(1, 0);
-    /** Where the two caps meet, in frame pixels. */
-    this._contact = new Vector2();
-    /** The winner's live position and velocity, in frame pixels. */
-    this._pos = new Vector2();
-    this._vel = new Vector2();
-    /** Where the carry ends and the spring starts. */
-    this._settleFrom = new Vector2();
-    /** Scratch, hoisted: this is per-frame code and none of it should allocate. */
-    this._scratch = new Vector2();
-    /** Seconds since the hit landed. Drives the shake and the ring. */
-    this._sinceImpact = 0;
-    /** Seconds since the sequence began. Drives the float. */
+    /** Seconds since the sequence began. */
     this._now = 0;
     /** How far the background has darkened, 0..1 of `bgOpacity`. */
     this._dimShown = 0;
-    /** Frames of inversion still owed. Counted DOWN in frames, never in seconds. */
-    this._flashLeft = 0;
-    /** Four hard entries derived from the winner's colour. Tints the trail. */
-    this._palette = [];
 
     this.layout();
-  }
-
-  // ── construction ──────────────────────────────────────────────────────────
-
-  /**
-   * One material set per team, in the order `CAP_GROUP` names them.
-   *
-   * The array has to have an entry for every group the geometry declares. The
-   * board's cap is built with the shell on, so there are three of them, and a
-   * mesh handed only two silently drops the liner — which is the underside, and
-   * the underside is what the loser shows the camera on its way out.
-   */
-  _buildCapMaterials(retro, panelTexture, teamTextures) {
-    this._panelTexture = panelTexture;
-    // Shared by both, and not tinted with the cap: a real liner is not painted
-    // with the shell. The same value and the same reasoning as `ArenaView`.
-    this._linerMaterial = this._sortable(retro.create({ color: PALETTE.metal.liner, gloss: 0.35 }));
-
-    return this.teamColors.map((color, i) => {
-      const set = [];
-      set[CAP_GROUP.BODY] = this._sortable(retro.create({ color }));
-      // ALWAYS created with a map, even when the team has no artwork of its own,
-      // because `RetroMaterials.create` compiles the sampler in only if there is
-      // one at construction — so a material built mapless could never be handed
-      // a custom texture later, however the uniform was set.
-      set[CAP_GROUP.PANEL] = this._sortable(retro.create({ map: panelTexture, color }));
-      set[CAP_GROUP.LINER] = this._linerMaterial;
-      this._applyTeamTexture(set, i, teamTextures[i] ?? null);
-      return set;
-    });
-  }
-
-  /**
-   * Put a lit cap material into the same sorting bucket as everything else here.
-   *
-   * ── this is not cosmetic, and getting it wrong darkens the winner ──────────
-   * `renderOrder` is NOT the whole of the sorting in a mixed scene. three.js
-   * splits its render list in two and draws every OPAQUE object before every
-   * transparent one, sorting by `renderOrder` only WITHIN each half. Every other
-   * overlay material in this project is transparent — `HudMaterial`, `FxMaterial`
-   * and `CardMaterial` all set the flag — so the rule has never had to be stated
-   * before. `RetroMaterials.create` does not: it is the game's lit surface shader
-   * and it writes `vec4(c, 1.0)`.
-   *
-   * So with the caps left opaque, the dimming veil at `renderOrder -50` would be
-   * drawn AFTER them and composite 72% black over the two caps the screen exists
-   * to show; the trail, which belongs behind the winner, would be drawn in
-   * front of it.
-   *
-   * Setting the flag costs nothing at the pixel: the shader's alpha is 1, so
-   * normal blending resolves to `src` exactly as an opaque draw does, and
-   * `depthTest`/`depthWrite` are untouched — the two caps still sort against each
-   * other in the depth buffer, which is what makes the hit read as one passing in
-   * front of the other. It only moves them into the bucket where the explicit
-   * `renderOrder` values below are honoured.
-   *
-   * These are this layer's OWN materials. `ArenaView`'s are never touched.
-   */
-  _sortable(material) {
-    material.transparent = true;
-    return material;
-  }
-
-  /**
-   * Point one team's panel at its own artwork, or back at the placeholder.
-   *
-   * The tint goes to white with a supplied texture and back to the team colour
-   * without one, and that is not a detail: the placeholder is near-greyscale
-   * precisely so it can be multiplied by the cap's colour, and a player's own
-   * full-colour panel multiplied by a mid red as well would come out nearly
-   * black. `capTexture.js` states the contract and `CapWipe` makes the same
-   * distinction for the logo it carries.
-   */
-  _applyTeamTexture(set, team, texture) {
-    const panel = set[CAP_GROUP.PANEL];
-    panel.map = texture ?? this._panelTexture;
-    // Swapping a map on a standard material can change the shader program — a
-    // null map compiles without `USE_MAP` — so the flag is not optional here the
-    // way it was with one hand-written shader that always sampled.
-    panel.needsUpdate = true;
-    panel.color.set(texture ? PALETTE.untinted : this.teamColors[team]);
-  }
-
-  /** Live, for when the customiser lands. Null puts the placeholder back. */
-  setTeamTexture(team, texture) {
-    const set = this._capMaterials[team];
-    if (!set) return;
-    this._applyTeamTexture(set, team, texture ?? null);
   }
 
   setResolution(resolution) {
@@ -587,13 +319,13 @@ export class VictoryLayer {
   /**
    * Lift the button row clear of a home indicator.
    *
-   * The row is the only thing in this layer near an edge — the winner plate sits
-   * at y = -110, well inside — and it had 30 frame pixels of clearance, which is
-   * not quite enough: a landscape iPhone's indicator strip is about 26 of them,
-   * so the hit quads finished 4 pixels above a region the OS treats as its own.
-   * `max` rather than `+` because the existing clearance already covers most of
-   * the inset; adding would push 재시작 and 나가기 visibly up the screen on a
-   * phone for no reason a player could see.
+   * The row is the only thing in this layer near an edge — the result band sits
+   * well inside — and it had 30 frame pixels of clearance, which is not quite
+   * enough: a landscape iPhone's indicator strip is about 26 of them, so the hit
+   * quads finished 4 pixels above a region the OS treats as its own. `max`
+   * rather than `+` because the existing clearance already covers most of the
+   * inset; adding would push 재시작 and 나가기 visibly up the screen on a phone
+   * for no reason a player could see.
    *
    * @param {{top:number,right:number,bottom:number,left:number}} insets frame px
    */
@@ -608,30 +340,66 @@ export class VictoryLayer {
    * Place the type and the buttons against the frame.
    *
    * Called on construction and whenever the panel moves an offset — never per
-   * frame, because none of it depends on time. The caps are NOT here: where they
-   * are is the whole of what the sequence animates.
+   * frame, because none of it depends on time.
+   *
+   * ── the band, and what may be written in it ─────────────────────────────
+   * The result is laid out inside the letterbox band, which is the frame less
+   * `letterboxBar()` at each edge. A bar is a margin, not a UI surface —
+   * "바 안에 글자를 쓰지 마라" — so the winner line, the number and the note are
+   * clamped into the band rather than merely placed near the middle and hoped
+   * about, because the band's height moves with the frame's and a phone's is a
+   * different shape from a desktop's.
+   *
+   * The two BUTTONS are deliberately outside that clamp. They arrive at RELEASE,
+   * after the bars have retreated, so the band no longer exists when they are
+   * on screen and confining them to it would push them up into the result for
+   * no reason.
    */
   layout() {
     const c = this.config.victory;
 
     /**
      * ── 판 크기와 자리는 프레임에서 나온다 ────────────────────────────────
-     * `PLATE` 는 340x72 이고 `victory.textY` 는 -110, `buttonY` 는 -178 이다. 전부
-     * 640x480 기준이라 421x316 프레임에서는 승리 판과 버튼 줄이 서로 겹쳤다 —
-     * 실측: 판의 아래 가장자리가 -146, 버튼 줄의 위 가장자리가 -162 인데 프레임
-     * 바닥이 -158 이라 둘 다 화면 밖으로 밀려 나가며 만났다.
-     *
-     * `victory.textY` / `buttonY` 는 패널이 움직이는 값이므로 없애지 않고 **배수를
-     * 곱한다**. 패널에서 -110 을 -90 으로 바꾸면 어느 프레임에서나 그만큼 위로
-     * 간다는 관계가 유지된다.
+     * `PLATE` 는 340x72 이고 저술 좌표는 전부 640x480 기준이다. 421x316 프레임에서
+     * 그대로 두면 판들이 서로 겹친다. `textY` / `scoreY` / `buttonY` 는 패널이
+     * 움직이는 값이므로 없애지 않고 **배수를 곱한다** — 패널에서 한 칸 올리면
+     * 어느 프레임에서나 그만큼 올라간다는 관계가 유지된다.
      */
     const k = frameScale();
+    const bandTop = VICTORY_FRAME.height / 2 - letterboxBar();
+
     this._plateSize = {
       width: Math.round(Math.min(PLATE.width * k, VICTORY_FRAME.width - SPACE.md * 2)),
       height: Math.round(PLATE.height * k),
     };
+    this._scoreSize = {
+      width: Math.round(Math.min(SCORE.width * k, VICTORY_FRAME.width - SPACE.md * 2)),
+      height: Math.round(SCORE.height * k),
+    };
+
+    const noteH = Math.round(NOTE_HEIGHT * k);
+    /**
+     * The tallest the stack can be, measured from the winner line's centre.
+     *
+     * Written as one clamp on the whole group rather than three separate ones,
+     * because what has to fit in the band is the STACK: clamping each plate on
+     * its own would let the note leave the band while the line that anchors it
+     * stayed put.
+     */
+    const above = this._plateSize.height / 2 + (this._note ? NOTE_GAP * k + noteH : 0);
+    const below = -c.scoreY * k + this._plateSize.height / 2 + this._scoreSize.height / 2;
+    const wanted = c.textY * k;
+    const textY = Math.min(bandTop - above, Math.max(-bandTop + below, wanted));
+
     this.plate.scale.set(this._plateSize.width, this._plateSize.height, 1);
-    this.plate.position.set(0, c.textY * k, 0);
+    this.plate.position.set(0, textY, 0);
+    this._textY = textY;
+
+    this.score.scale.set(this._scoreSize.width, this._scoreSize.height, 1);
+    this.score.position.set(0, textY + (c.scoreY - c.textY) * k, 0);
+
+    this._noteH = noteH;
+    this.note.position.set(0, textY + this._plateSize.height / 2 + NOTE_GAP * k + noteH / 2, 0);
 
     const pad = Math.max(0, c.hitMargin);
     /**
@@ -667,6 +435,9 @@ export class VictoryLayer {
       b.hit.scale.set(b.width + pad * 2, b.height + pad * 2, 1);
       b.hit.position.copy(b.plate.position);
     }
+
+    this.dim.scale.set(VICTORY_FRAME.width + OVERHANG * 2, VICTORY_FRAME.height + OVERHANG * 2, 1);
+    this.fizz.layout();
   }
 
   // ── lifecycle ─────────────────────────────────────────────────────────────
@@ -675,9 +446,14 @@ export class VictoryLayer {
     return this.clock.running;
   }
 
-  /** True once the animation is over and the buttons will answer a press. */
+  /** True once the sequence is over and the buttons will answer a press. */
   get interactive() {
     return this.clock.done && !this._busy;
+  }
+
+  /** Was this run pressed through? The camera reads it, to land on its target. */
+  get skipped() {
+    return this.clock.skipped;
   }
 
   /**
@@ -685,8 +461,8 @@ export class VictoryLayer {
    *
    * Read by the host before it starts another one. The layer swallows presses on
    * its own once this is set — see `pointerDown` — but the two buttons hand out
-   * work that only the host can refuse twice: a second fade would attach a second
-   * veil and navigate again.
+   * work that only the host can refuse twice: a second fade would attach a
+   * second veil and navigate again.
    */
   get busy() {
     return this._busy;
@@ -701,86 +477,58 @@ export class VictoryLayer {
    *
    * @param {number} winner  0 or 1. Anything else — including the `undefined`
    *   `Match` leaves behind when a match ends because nobody can shoot — is a
-   *   draw, and a draw has no loser to hit, so stages 1 to 4 have nothing to
-   *   say. It goes straight to the screen with the result on it. The game's own
-   *   judging is not touched to make this neater: `-1` really is what
-   *   `KnockoutRules` reports when both sides clear, and reading `undefined` the
-   *   same way is this file being defensive about a state it does not own.
-   * @param {boolean} [forced]
+   *   draw. The game's own judging is not touched to make this neater: `-1`
+   *   really is what `KnockoutRules` reports when both sides clear, and reading
+   *   `undefined` the same way is this file being defensive about a state it
+   *   does not own.
+   *
+   *   A draw takes the SAME four stages. It used to jump straight to the text,
+   *   on the grounds that there was no loser to be hit and therefore nothing for
+   *   the animation to say — which had it exactly backwards, because a draw is
+   *   the result that most needs explaining and it was getting the least. See
+   *   `VictoryClock`'s header.
+   * @param {object} [opts]
+   * @param {boolean} [opts.forced]
    *   Played from the panel, over a match that has not finished. It is the ONLY
    *   difference this flag makes, and it is about who is allowed to take the
    *   screen away again: the loop puts an unforced sequence away the moment the
    *   match stops being over, which is what keeps the determinism replay button
    *   — `Match.replayLastTurn` sets the state back to AIM and leaves `winner`
    *   exactly where it was — from leaving a modal screen up over a live match.
-   *   A forced one is the panel's, and only the panel takes it down.
+   * @param {string|null} [opts.note]
+   *   One line above the winner, from the mode's own verdict — see
+   *   `RuleSet.resolveTurn`'s `resultNote`.
+   * @param {object|null} [opts.board]
+   *   The scoreboard as `scoreboardFor` reports it, frozen at the moment the
+   *   match ended. Handed in rather than read per frame: this is the FINAL
+   *   score, and a screen that re-asked the rules every frame would be a screen
+   *   that could change its mind after the match was over.
    */
-  /**
-   * @param {string|null} [note]
-   *   One line under the winner, from the mode's own verdict — see `NOTE_HEIGHT`
-   *   and `RuleSet.resolveTurn`'s `resultNote`. Omitted by the two modes whose
-   *   result needs no explaining, and their screen is byte for byte what it was.
-   */
-  begin(winner, { forced = false, note = null } = {}) {
+  begin(winner, { forced = false, note = null, board = null } = {}) {
     const valid = winner === 0 || winner === 1;
     this.winnerIndex = valid ? winner : -1;
     this._draw = !valid;
     this.forced = forced;
     this._note = note || null;
+    this._board = board || null;
 
     this._now = 0;
-    this._sinceImpact = 0;
-    this._flashLeft = 0;
     this._dimShown = 0;
-    this._vel.set(0, 0);
     this.hovered = null;
     this._pressed = null;
     this._busy = false;
-
-    this.winner.reset();
-    this.loser.reset();
-
-    if (!this._draw) {
-      this.winner.mesh.material = this._capMaterials[this.winnerIndex];
-      this.loser.mesh.material = this._capMaterials[1 - this.winnerIndex];
-      this._palette = this._buildPalette(this.teamColors[this.winnerIndex]);
-    } else {
-      this._palette = this._buildPalette(PALETTE.neutral);
-    }
-
-    const c = this.config.victory;
-    // The bearing it comes FROM, so the hit direction is the other way.
-    const a = (c.enterAngleDeg * Math.PI) / 180;
-    const from = new Vector2(Math.cos(a), Math.sin(a));
-    this._travel.copy(from).multiplyScalar(-1);
-    /**
-     * Where it stops: short of the middle by rather more than a cap radius, so
-     * the two overlap when they meet.
-     *
-     * Derived from the cap's own drawn size rather than given a slider of its
-     * own. It is not a look to be tuned — it is the geometric fact that two
-     * caps in contact are one diameter apart at their centres, softened a
-     * little because two caps that merely TOUCH read as a near miss.
-     */
-    const contactOffset = c.capScale * 1.35;
-    this._contact.set(from.x * contactOffset, c.capY + from.y * contactOffset);
+    this.fizz.reset();
 
     this.clock.begin();
-    if (this._draw) this.clock.jumpTo(VICTORY_STAGE.UI);
+    // The note changes how tall the stack is, so the band clamp has to be
+    // re-solved before the first frame rather than at the next resize.
+    this.layout();
     this._syncToStage(0);
   }
 
   /** Straight to the pressable screen. Every animated value lands on its end. */
   skip() {
     if (!this.clock.skip()) return false;
-    // Long enough that every envelope below is saturated, without pretending
-    // real time passed: nothing integrates against `_now` except the float and
-    // the palette cycle, and both are periodic.
-    this._sinceImpact = Math.max(
-      this.config.victory.shakeSeconds,
-      this.config.victory.ringSeconds,
-    ) + 1;
-    this._flashLeft = 0;
     this._syncToStage(0);
     return true;
   }
@@ -792,15 +540,14 @@ export class VictoryLayer {
     this.forced = false;
     this.hovered = null;
     this._pressed = null;
-    this.winner.reset();
-    this.loser.reset();
+    this._dimShown = 0;
     this.dim.visible = false;
-    this.flash.visible = false;
-    this.ring.visible = false;
     this.plate.visible = false;
+    this.score.visible = false;
     this.note.visible = false;
     this._note = null;
-    for (const m of this.trail) m.visible = false;
+    this._board = null;
+    this.fizz.reset();
     for (const b of this._buttons) {
       b.plate.visible = false;
       b.hit.visible = false;
@@ -816,387 +563,81 @@ export class VictoryLayer {
     }
   }
 
-  /**
-   * Four hard entries out of one team colour. The trail's tint comes from here.
-   *
-   * DERIVED rather than written down, unlike `CardFx`'s chaos and 강타 palettes,
-   * because the afterimage belongs to whoever won and there are two possible
-   * answers. Mixing toward white rather than sweeping the hue, for the reason
-   * `CHAOS_PALETTE` gives: a rainbow reads as a modern shader effect however few
-   * steps it has.
-   *
-   * Only the first entry is read now — the glow that cycled through all four is
-   * gone. Kept as a palette rather than collapsed to one colour because it is
-   * four lines and the trail is the obvious place a cycle would go back.
-   */
-  _buildPalette(hex) {
-    const base = new Color(hex);
-    return [0.75, 0.35, 0.0, 0.55].map((k) => {
-      const c = base.clone();
-      return [c.r + (1 - c.r) * k, c.g + (1 - c.g) * k, c.b + (1 - c.b) * k];
-    });
-  }
-
   // ── per frame ─────────────────────────────────────────────────────────────
 
   /** @param {number} dt  render seconds, already clamped by the caller */
   update(dt) {
     if (!this.active) return;
-
-    const ui = this.config.ui;
-    // The same dial the rest of the UI is on, so "텍스트만 강도를 낮춘다" is one
-    // slider and not a second one that has to be kept in step with it.
-    // And the effects are on the effects' dial, for the same reason.
-
     this._now += dt;
-
-    const before = this.clock.stage;
     this.clock.update(dt);
-    if (before !== VICTORY_STAGE.IMPACT && this.clock.stage === VICTORY_STAGE.IMPACT) {
-      this._onImpact();
-    }
-    if (this.clock.atOrPast(VICTORY_STAGE.IMPACT)) this._sinceImpact += dt;
-
     this._syncToStage(dt);
   }
 
-  /**
-   * The leading edge of the hit.
-   *
-   * The inversion is armed HERE, once, and counted down in frames — never
-   * derived from the stage's own progress. `CardFx` has the note on why: a
-   * time-based window lands on a different number of frames depending on the
-   * frame rate, and at three frames that is the difference between a flash and
-   * nothing at all.
-   */
-  _onImpact() {
-    this._sinceImpact = 0;
-    this._flashLeft = Math.max(0, Math.round(this.config.victory.flashFrames));
-    // Where it stops on the far side, before the spring takes it back.
-    const c = this.config.victory;
-    this._settleFrom.set(
-      this._travel.x * c.overshoot,
-      c.capY + this._travel.y * c.overshoot,
-    );
-  }
-
-  /** Everything the current stage says about where things are. */
+  /** Everything the current stage says about what is on screen. */
   _syncToStage(dt) {
     this._updateDim(dt);
-    this._applyTilt();
-    this._updateCaps(dt);
-    this._updateSprites();
-    this._updateShake();
+    this._updateFizz(dt);
     this._updateType(dt);
-    this._updateFlash();
     this._refreshTextures();
   }
 
   /**
-   * Lean the ground the caps are lying on.
+   * The board darkens once the bars are closing, and not before.
    *
-   * ── one angle, everything on the ground, nothing on the glass ────────────
-   * Dead-on the cap is a disc: 21 flutes in silhouette and a flat face, which is
-   * the same picture whether it is the right way up or upside down. Leaning it
-   * back until the near skirt shows is what makes it read as a pressed metal
-   * object lying on something rather than as a sprite.
-   *
-   * Applied per OBJECT — each cap's own `ground` group, and the flat sprites'
-   * own rotation — rather than by leaning one parent group over all of them.
-   * Leaning a parent also rotates its children's POSITIONS, and the caps carry a
-   * depth offset so the winner occludes the loser at the hit: at 24 degrees the
-   * winner's 40 units of z would have dragged it 16 frame pixels down the screen
-   * relative to the loser, so two caps meant to be meeting edge to edge would
-   * have met at a visible step. Rotating each object in place keeps the layout
-   * exactly as laid out and still leans everything by the same angle.
-   *
-   * And it is the same angle in every stage BY CONSTRUCTION rather than by four
-   * call sites agreeing: it is written once, here, every frame, above the flip —
-   * so the loser going over and being pushed out is a cap tumbling on sloped
-   * ground, not a cap whose slope inverts halfway through the tumble.
-   *
-   * ── the type and the buttons are not on the ground ──────────────────────
-   * They are direct children of the scene, never of `content`, and nothing here
-   * touches them. A leaned readout is an unreadable one, which is the whole of
-   * the rule the rest of the UI already follows — see `HudMaterial`'s note on why
-   * the HUD is unlit and dead flat. The dimming veil and the inversion quad stay
-   * square for a harder reason: both have to cover the frame exactly, and a
-   * leaned full-frame quad does not.
+   * Stage 1 is a replay of the match — the camera is pushing in on the thing
+   * that decided it — and a replay behind a veil is a memory. The dimming is
+   * what says "this is now a screen about the result", which is exactly what
+   * the bars are saying at the same moment.
    */
-  _applyTilt() {
-    /**
-     * NEGATIVE, and the sign is the whole of whether this works.
-     *
-     * The mesh's own quarter turn has already sent the panel's normal to +z, at
-     * the camera. A POSITIVE rotation about x then takes it to (0, -sin, cos) —
-     * pointing DOWN and at the camera, which lifts the cap's far edge and shows
-     * the skirt along the TOP of the silhouette. That is a cap tipped toward the
-     * viewer, and on screen it reads as the cap falling over forwards.
-     *
-     * Negating sends it to (0, +sin, cos): up and at the camera, near edge
-     * dropped, so the skirt and the hem's flare show along the BOTTOM — which is
-     * what a cap lying on ground that leans away from you actually looks like.
-     * `groundTiltDeg` stays a plain positive "lean back by this much" on the
-     * panel; the sign lives here, once, with the reason.
-     */
-    const rad = -(this.config.victory.groundTiltDeg * Math.PI) / 180;
-    this.winner.ground.rotation.x = rad;
-    this.loser.ground.rotation.x = rad;
-    // The hit ring lies ON the ground, so it leans with it and reads as a ring
-    // on a slope rather than as a hoop standing up in front of the caps.
-    this.ring.rotation.x = rad;
-    for (const m of this.trail) m.rotation.x = rad;
-  }
-
   _updateDim(dt) {
     const c = this.config.victory;
-    const target = Math.min(1, Math.max(0, c.bgOpacity));
-    if (this.clock.done && dt === 0) {
+    const target = this.clock.atOrPast(VICTORY_STAGE.BARS)
+      ? Math.min(1, Math.max(0, c.bgOpacity))
+      : 0;
+    if (dt === 0 && this.clock.done) {
       // A skip lands on the darkened frame rather than fading from where it was.
       this._dimShown = target;
     } else {
       const rate = dt / Math.max(0.02, c.bgFadeSeconds);
-      this._dimShown = Math.min(target, this._dimShown + rate * target);
+      this._dimShown += Math.max(-rate, Math.min(rate, target - this._dimShown));
     }
     this.dim.material.uniforms.uOpacity.value = this._dimShown;
     this.dim.visible = this._dimShown > 0.004;
   }
 
-  _updateCaps(dt) {
-    if (this._draw) return;
-    const c = this.config.victory;
-    const stage = this.clock.stage;
-    const TAU = Math.PI * 2;
-
-    this.winner.holder.scale.setScalar(c.capScale);
-    this.loser.holder.scale.setScalar(c.capScale);
-
-    // ── the loser ─────────────────────────────────────────────────────────
-    if (!this.clock.atOrPast(VICTORY_STAGE.RESULT)) {
-      // Stages 1 to 3: on the middle, floating, turning slowly. Not still —
-      // a cap parked dead centre and motionless reads as a paused game.
-      const bob = Math.sin(this._now * c.floatHz * TAU) * c.floatAmount;
-      const swayed = Math.cos(this._now * c.floatHz * TAU * 0.71) * c.floatAmount * 0.35;
-      // Scaled in over the front of stage 1 rather than faded: `RetroMaterial`
-      // writes an opaque alpha by construction — it is the game's lit surface
-      // shader and has no opacity term — so there is nothing here to fade.
-      const rise = stage === VICTORY_STAGE.ENTER ? smoothstep(this.clock.t / 0.4) : 1;
-      this.loser.holder.position.set(swayed, c.capY + bob, this._loserZ);
-      this.loser.holder.scale.setScalar(c.capScale * (0.86 + 0.14 * rise));
-      this.loser.flip.rotation.x = 0;
-      this.loser.holder.visible = true;
-    } else {
-      // Stage 4: over and out, at the same time. Sequencing them would take
-      // twice as long and read as two separate events happening to one cap.
-      const t = this._sinceImpact;
-      const travelled = t * Math.max(0, c.exitSpeed);
-      // A half turn and no more: face down is the statement, and a cap still
-      // rolling past it would be a cap that had not landed on an answer.
-      const flip = Math.min(Math.PI, t * Math.max(0, c.flipSpeedTurns) * TAU);
-      // The flip axis lies across the flight path, so it goes end over end
-      // along it rather than cartwheeling about the direction it is travelling.
-      this.loser.axis.rotation.z = Math.atan2(this._travel.y, this._travel.x) + Math.PI / 2;
-      this.loser.flip.rotation.x = flip;
-      this.loser.holder.position.set(
-        this._contact.x + this._travel.x * travelled,
-        this._contact.y + this._travel.y * travelled,
-        this._loserZ,
-      );
-      /**
-       * Gone means gone.
-       *
-       * Hidden once its own drawn radius has cleared the frame's far corner, so
-       * "화면에 남지 않는다" is a measured fact rather than a hope about the
-       * speed slider. The `atOrPast(UI)` half is the backstop for the speed
-       * being dragged to nothing: by the time the buttons are coming up the
-       * loser is out of the story whatever the number says.
-       */
-      const reach = halfDiagonal() + c.capScale * 1.7;
-      const dist = Math.hypot(this.loser.holder.position.x, this.loser.holder.position.y);
-      this.loser.holder.visible = dist < reach && !this.clock.atOrPast(VICTORY_STAGE.UI);
-    }
-
-    // ── the winner ────────────────────────────────────────────────────────
-    if (stage === VICTORY_STAGE.ENTER) {
-      this.winner.holder.visible = false;
-      return;
-    }
-
-    if (stage === VICTORY_STAGE.CHARGE) {
-      // Off the frame, on the far side of the bearing it comes from.
-      const start = this._scratch.set(
-        -this._travel.x * c.enterDistance,
-        c.capY - this._travel.y * c.enterDistance,
-      );
-      // Accelerating, not linear: it is being thrown, and a constant speed
-      // across the frame reads as a slide.
-      const k = Math.pow(this.clock.t, 1.55);
-      this._pos.set(
-        start.x + (this._contact.x - start.x) * k,
-        start.y + (this._contact.y - start.y) * k,
-      );
-      this.winner.holder.position.set(this._pos.x, this._pos.y, this._winnerZ);
-      this.winner.holder.visible = true;
-      return;
-    }
-
-    if (stage === VICTORY_STAGE.IMPACT) {
-      // Held at the contact point for the two to four frames the hit lasts. The
-      // shake and the inversion are what move on those frames; the cap that
-      // caused them stops dead, which is what selling a hit is.
-      this.winner.holder.position.set(this._contact.x, this._contact.y, this._winnerZ);
-      this.winner.holder.visible = true;
-      return;
-    }
-
-    // Stage 4 onward: carry, then spring, then hold.
-    const carry = Math.max(0.02, c.resultSeconds * CARRY_FRACTION);
-    if (this._sinceImpact < carry) {
-      // Decelerating to a dead stop at the overshoot — momentum running out.
-      const k = 1 - Math.pow(1 - this._sinceImpact / carry, 2);
-      this._pos.set(
-        this._contact.x + (this._settleFrom.x - this._contact.x) * k,
-        this._contact.y + (this._settleFrom.y - this._contact.y) * k,
-      );
-      this._vel.set(0, 0);
-    } else {
-      /**
-       * A real spring, integrated, so the two sliders mean what they are named.
-       *
-       * Semi-implicit Euler at up to 50 ms a step is stable for the range the
-       * panel offers, and the step is already clamped by the caller for the same
-       * reason every other clock here is. Started from rest at the overshoot, so
-       * `springStiffness` sets how quickly it comes back and `springDamping` how
-       * much of the return it gives back on the other side.
-       */
-      const k = Math.max(0, c.springStiffness);
-      const damp = Math.max(0, c.springDamping);
-      const dx = this._pos.x - 0;
-      const dy = this._pos.y - c.capY;
-      this._vel.x += (-k * dx - damp * this._vel.x) * dt;
-      this._vel.y += (-k * dy - damp * this._vel.y) * dt;
-      this._pos.x += this._vel.x * dt;
-      this._pos.y += this._vel.y * dt;
-      if (dt === 0 && this.clock.done) {
-        // A skip lands it home rather than wherever the spring happened to be.
-        this._pos.set(0, c.capY);
-        this._vel.set(0, 0);
-      }
-    }
-    this.winner.holder.position.set(this._pos.x, this._pos.y, this._winnerZ);
-    this.winner.holder.visible = true;
-  }
-
-  _updateSprites() {
-    const c = this.config.victory;
-
-    /**
-     * ── the impact ring ───────────────────────────────────────────────────
-     * Expanding, because something is LEAVING the point of contact — the same
-     * reading `CardFx` spells out for the swap's rings, and the reason 강타's
-     * contracts instead.
-     *
-     * `!this._draw` is load-bearing and was missing. A draw JUMPS to stage 5, so
-     * `atOrPast(IMPACT)` is true for it — the stage is past impact without ever
-     * having been impact — and `_sinceImpact` starts counting the moment it is.
-     * The result was a ring expanding out of a contact point on a screen with no
-     * caps on it and nothing that had hit anything.
-     */
-    if (!this._draw && this.clock.atOrPast(VICTORY_STAGE.IMPACT)) {
-      const k = this._sinceImpact / Math.max(0.02, c.ringSeconds);
-      if (k >= 1) {
-        this.ring.visible = false;
-      } else {
-        // Halfway between the two centres — where the metal actually met.
-        this.ring.position.set(
-          this._contact.x * 0.5,
-          (this._contact.y + c.capY) * 0.5,
-          this._winnerZ + 20,
-        );
-        this.ring.scale.setScalar(c.ringStart + (c.ringEnd - c.ringStart) * smoothstep(k));
-        this.ring.material.uniforms.uTint.value.set(1, 1, 1);
-        // Stepped to five levels. A smooth fade on an additive sprite is a
-        // gradient by another name, and the quantiser downstream would band it
-        // anyway — so the bands are chosen rather than inherited.
-        this.ring.material.uniforms.uOpacity.value = Math.ceil((1 - k) * 5) / 5;
-        this.ring.visible = true;
-      }
-    } else {
-      this.ring.visible = false;
-    }
-
-    // ── the trail ─────────────────────────────────────────────────────────
-    const charging = this.clock.stage === VICTORY_STAGE.CHARGE && !this._draw;
-    const n = charging ? Math.min(this.trail.length, Math.max(0, Math.round(c.trailCount))) : 0;
-    const tint = this._palette[0] ?? [1, 1, 1];
-    for (let i = 0; i < this.trail.length; i++) {
-      const m = this.trail[i];
-      if (i >= n) {
-        m.visible = false;
-        continue;
-      }
-      const back = c.trailSpacing * (i + 1);
-      m.position.set(
-        this._pos.x - this._travel.x * back,
-        this._pos.y - this._travel.y * back,
-        this._winnerZ - 10,
-      );
-      m.scale.setScalar(Math.max(1, c.trailSize) * (1 - (i + 1) / (n + 1.5)));
-      m.material.uniforms.uTint.value.set(tint[0], tint[1], tint[2]);
-      // Also stepped, and it fades in over the charge so the streak grows
-      // behind the cap rather than being there from the first frame.
-      const grow = smoothstep(this.clock.t / 0.35);
-      m.material.uniforms.uOpacity.value =
-        (Math.ceil((1 - (i + 1) / (n + 1.5)) * 4) / 4) * 0.7 * grow;
-      m.visible = true;
-    }
-  }
-
   /**
-   * One shake, decaying, quantised to whole frame pixels.
+   * The bubbles ride the dimming.
    *
-   * ── it moves the CONTENT, not the camera ──────────────────────────────────
-   * Moving the camera would move the dimming quad with everything else and open
-   * a bright gap at the frame's edge — and shaking the GAME's camera instead is
-   * not on the table: it carries the player's own pan, zoom and rotation
-   * inertia, the brief rules out touching the game's systems, and a shake left
-   * in that state after the sequence ends is a camera the next match inherits.
-   *
-   * Whole pixels because the console had no sub-pixel raster and everything else
-   * on screen is being snapped to that grid anyway. A shake interpolated between
-   * pixels would be the one smooth motion in the frame.
+   * One scalar rather than a window of their own: they are the ground the
+   * result is read against, so they belong to the same moment the ground does.
+   * They keep running under the buttons after RELEASE, because they are the
+   * only thing moving on a screen that is otherwise waiting for a press — and a
+   * completely still screen reads as a frozen one.
    */
-  _updateShake() {
+  _updateFizz(dt) {
     const c = this.config.victory;
-    const dur = Math.max(0.01, c.shakeSeconds);
-    // `!_draw` for the same reason the ring needs it: a draw is past impact
-    // without ever having been impact, and nothing hit anything to shake.
-    const k =
-      !this._draw && this.clock.atOrPast(VICTORY_STAGE.IMPACT)
-        ? Math.max(0, 1 - this._sinceImpact / dur)
-        : 0;
-    if (k <= 0) {
-      this.content.position.set(0, 0, 0);
-      return;
-    }
-    // Squared, so it is violent at the front and gone rather than trailing off.
-    const a = Math.max(0, c.shakeStrength) * k * k;
-    const w = this._sinceImpact * Math.max(0, c.shakeHz) * Math.PI * 2;
-    this.content.position.set(
-      Math.round(Math.sin(w) * a),
-      // A second frequency that does not divide into the first, so it reads as
-      // a jolt rather than as a diagonal slide.
-      Math.round(Math.cos(w * 1.31) * a * 0.7),
-      0,
-    );
+    const level = c.bgOpacity > 0 ? this._dimShown / c.bgOpacity : 0;
+    this.fizz.update(dt, Math.min(1, level) * Math.max(0, c.bubbleStrength));
   }
 
   _updateType(dt = 0) {
     const c = this.config.victory;
-    const inUi = this.clock.atOrPast(VICTORY_STAGE.UI);
-    const t = this.clock.done ? 1 : inUi ? this.clock.t : 0;
 
-    const textK = inUi ? window01(t, TEXT_IN) : 0;
+    /**
+     * Two stages, two envelopes.
+     *
+     * The result is stated during RESULT and the controls arrive during
+     * RELEASE, so the two windows are measured against different `t`s. Past
+     * either stage the value holds at 1 rather than being recomputed, which is
+     * what makes DONE — and therefore a skip — land on exactly the frame the
+     * sequence would have reached.
+     */
+    const inResult = this.clock.atOrPast(VICTORY_STAGE.RESULT);
+    const resultT = this.clock.stage === VICTORY_STAGE.RESULT ? this.clock.t : inResult ? 1 : 0;
+    const inRelease = this.clock.atOrPast(VICTORY_STAGE.RELEASE);
+    const releaseT = this.clock.stage === VICTORY_STAGE.RELEASE ? this.clock.t : inRelease ? 1 : 0;
+
+    const textK = window01(resultT, TEXT_IN);
     this.plate.material.uniforms.uOpacity.value = textK;
     this.plate.visible = textK > 0.004;
     // One beat on arrival, up and back down over the life of the envelope, so it
@@ -1213,15 +654,21 @@ export class VictoryLayer {
     const box = this._plateSize ?? PLATE;
     this.plate.scale.set(box.width * (1 + bump), box.height * (1 + bump), 1);
 
-    // The explanation rides the same envelope and takes NO bump. The beat is the
-    // winner line arriving; a second thing pulsing beside it reads as two
-    // separate events, which is the same argument the button windows make.
+    // The number comes in behind the name, and takes NO bump. The beat is the
+    // result arriving; a second thing pulsing beside it reads as two separate
+    // events, which is the same argument the button windows make.
+    const scoreK = window01(resultT, SCORE_IN);
+    this.score.material.uniforms.uOpacity.value = scoreK;
+    this.score.visible = !!this._board && scoreK > 0.004;
+
+    // The explanation rides the winner line's own envelope, because it is the
+    // reason for what that line says.
     this.note.material.uniforms.uOpacity.value = textK;
     this.note.visible = !!this._note && textK > 0.004;
 
     const windows = { restart: RESTART_IN, exit: EXIT_IN };
     for (const b of this._buttons) {
-      const k = inUi ? window01(t, windows[b.id] ?? TEXT_IN) : 0;
+      const k = window01(releaseT, windows[b.id] ?? RESTART_IN);
       // Full weight once it is up. There is no dimming here: the in-game buttons
       // drop to `ui.dimOpacity` so they stop competing with the board, and on
       // this screen there is nothing left for them to compete with.
@@ -1236,7 +683,11 @@ export class VictoryLayer {
        * 하는 일이므로, 둘 중 하나가 다른 하나를 덮으면 안 된다 — 올라오는 중에
        * 눌러도 눌린 것이 보여야 한다.
        *
-       * 히트 쿼드는 따라가지 않는다. `HudLayer` 의 같은 자리에 이유가 있다.
+       * ── 이 배율은 좌표를 옮기지 않는다 ─────────────────────────────────
+       * 부록 D6 의 요구는 "버튼이 최종 위치에서 투명도만으로 나온다" 이고, 이
+       * 파일이 그것을 지키는 방식은 등장을 알파로만 하는 것이다. 눌림 배율은
+       * 손이 만든 것이라 예외이고, 히트 쿼드는 따라가지 않으므로 누를 수 있는
+       * 자리는 한 픽셀도 움직이지 않는다. `HudLayer` 의 같은 자리에 이유가 있다.
        */
       stepControl(
         b.motion,
@@ -1248,34 +699,14 @@ export class VictoryLayer {
     }
   }
 
-  _updateFlash() {
-    /**
-     * 프레임 단위로 세어 내린다. 시간이 아니라 프레임인 이유는 `_onImpact` 에
-     * 적혀 있다: 세 프레임짜리 창은 프레임 레이트에 따라 아예 안 보일 수 있다.
-     *
-     * 남은 프레임 수에 비례해 옅어진다. 세 장 모두 같은 세기면 플래시가 툭 끊기는데,
-     * 옅어지면 짧은 잔상이 되어 링이 열리는 동작으로 이어진다.
-     */
-    const owed = this._flashLeft;
-    this.flash.visible = owed > 0;
-    if (owed > 0) {
-      const total = Math.max(1, Math.round(this.config.victory.flashFrames));
-      const k = owed / total;
-      this.flash.material.uniforms.uOpacity.value =
-        Math.max(0, Math.min(1, this.config.victory.flashStrength)) * k;
-      this._flashLeft--;
-    }
-  }
-
   /**
-   * Re-ask for every plate and sprite, every frame.
+   * Re-ask for every plate, every frame.
    *
-   * Deliberately unconditional. Both caches this layer draws out of can be
-   * emptied from under it — `HudLayer` calls `clearHudTextureCache` when the UI
-   * texture slider moves and the card panel calls `clearFxTextureCache` when the
-   * stun texel slider does — and a material still pointing at a disposed texture
-   * draws NOTHING, silently, because a freed texture is not an error. Every call
-   * here is a keyed cache hit and therefore free; the one frame after a clear it
+   * Deliberately unconditional. The cache this layer draws out of can be emptied
+   * from under it — `HudLayer` calls `clearHudTextureCache` when the UI texture
+   * slider moves — and a material still pointing at a disposed texture draws
+   * NOTHING, silently, because a freed texture is not an error. Every call here
+   * is a keyed cache hit and therefore free; the one frame after a clear it
    * regenerates, which is exactly when it needs to.
    */
   _refreshTextures() {
@@ -1292,10 +723,9 @@ export class VictoryLayer {
      * which is the only layer that knows which seat the person watching
      * occupies; absent, this is character for character what it always was.
      *
-     * The colour is deliberately still the WINNER's. The line arrives with the
-     * winning cap and is part of that arrival, so recolouring it would detach
-     * the two — a 패배 in your own colour would read as your cap having done
-     * something.
+     * The colour is deliberately still the WINNER's, which on a loss means the
+     * word 패배 arrives in the other player's colour. That is the right way
+     * round: the line is about who won.
      */
     const text = draw ? '무승부' : (this.outcomeFor?.(this.winnerIndex) ?? `${this.winnerIndex + 1}P 승리`);
 
@@ -1306,52 +736,59 @@ export class VictoryLayer {
     });
 
     /**
-     * The note, sized to its own text and hung under the winner line.
+     * The number, drawn by the HUD's own score plate.
      *
-     * Re-asked every frame like everything else here — see the header — but the
-     * SCALE and POSITION are only recomputed when the text changes, because they
-     * come out of the texture's `userData` and writing them every frame would be
-     * three assignments to prove a string had not changed. `layout()` cannot do
-     * it: the width is not known until the text is.
+     * Keyed so it is baked once: `scorePlateTexture` has its own cache and this
+     * asks it for the same key every frame, which is a map lookup. The board is
+     * frozen at `begin`, so unlike the HUD's there is nothing here that can
+     * change between frames except the texture scale.
+     */
+    if (this._board) {
+      const box = this._scoreSize ?? SCORE;
+      const key = `${this._board.key}|${box.width}|${scale}`;
+      if (key !== this._scoreKey) {
+        this._scoreKey = key;
+        this.score.material.uniforms.uMap.value = scorePlateTexture(
+          {
+            key: this._board.key,
+            left: { value: this._board.left, color: this.teamColors[0] },
+            right: { value: this._board.right, color: this.teamColors[1] },
+            caption: this._board.caption,
+          },
+          { ...box, scale },
+        );
+      }
+    }
+
+    /**
+     * The note, sized to its own text and hung ABOVE the winner line.
+     *
+     * Above rather than below, and that is a reading order rather than a
+     * measurement: "동점 2:2 · 타이브레이커" and then "1P 승리" is the reason and
+     * then the result, which is the order the player wants them in — the note is
+     * not a footnote, it is why. Below is also where the number now lives.
+     *
+     * Re-asked every frame like everything else here, but the SCALE is only
+     * recomputed when the text changes, because it comes out of the texture's
+     * `userData` and writing it every frame would be two assignments to prove a
+     * string had not changed. `layout()` cannot do it: the width is not known
+     * until the text is.
      */
     if (this._note) {
-      // `textY` is in the key because the note hangs off it and the panel can
-      // drag it: without it, moving the winner line would leave the note behind.
-      const noteH = Math.round(NOTE_HEIGHT * frameScale());
-      const key = `${this._note}|${scale}|${this.config.victory.textY}|${noteH}`;
+      const noteH = this._noteH ?? Math.round(NOTE_HEIGHT * frameScale());
+      const key = `${this._note}|${scale}|${noteH}`;
       const tex = notePlateTexture(this._note, 'normal', {
         height: noteH,
         scale,
         // Nearly the frame, so a tiebreaker sentence is never truncated. The
         // in-game note's tighter ceiling is about not covering the board; there
-        // is no board left to cover here.
+        // is nothing being aimed at here.
         maxWidth: VICTORY_FRAME.width - 48,
       });
       this.note.material.uniforms.uMap.value = tex;
       if (key !== this._noteKey) {
         this._noteKey = key;
-        const w = tex.userData?.width ?? 200;
-        this.note.scale.set(w, noteH, 1);
-        /**
-         * ABOVE the winner line, and that is a measurement rather than a taste.
-         *
-         * Under it is where a footnote belongs and there is no room: at the
-         * defaults the winner plate's bottom edge is at −146 and the buttons'
-         * top edge is at −158, which is twelve pixels for a twenty-four pixel
-         * plate. Above it there are fifty-three, between the plate's top at −74
-         * and the settled caps' lower edge at about −21.
-         *
-         * It reads at least as well there. "동점 2:2 · 타이브레이커" and then
-         * "1P 승리" is the reason and then the result, which is the order the
-         * player wants them in — the note is not a footnote, it is why.
-         */
-        const k = frameScale();
-        const plateH = this._plateSize?.height ?? PLATE.height;
-        this.note.position.set(
-          0,
-          this.config.victory.textY * k + plateH / 2 + NOTE_GAP * k + noteH / 2,
-          0,
-        );
+        this.note.scale.set(tex.userData?.width ?? 200, noteH, 1);
       }
     }
 
@@ -1362,10 +799,6 @@ export class VictoryLayer {
         { width: b.width, height: b.height, scale, role: b.role },
       );
     }
-
-    this.ring.material.uniforms.uMap.value = ringTexture(RING_TEXELS);
-    const trailTex = trailTexture(TRAIL_TEXELS);
-    for (const m of this.trail) m.material.uniforms.uMap.value = trailTex;
   }
 
   // ── drawing ───────────────────────────────────────────────────────────────
@@ -1373,12 +806,10 @@ export class VictoryLayer {
   /**
    * Draw it over whatever is already in the bound target.
    *
-   * The depth clear is not optional and it is not the caller's: the two caps are
-   * depth-tested against each other and must not be sorted against the board
-   * behind them — they are in front by definition, not by being nearer.
-   * `autoClear` goes off around it so what is underneath survives, and back on
-   * afterwards because the next frame's first render expects to be clearing.
-   * `CapWipe.render` is the same three lines for the same three reasons.
+   * The depth clear is not optional and it is not the caller's: everything here
+   * is in front by definition, not by being nearer. `autoClear` goes off around
+   * it so what is underneath survives, and back on afterwards because the next
+   * frame's first render expects to be clearing.
    *
    * @param {import('three').WebGLRenderer} renderer
    */
@@ -1415,15 +846,16 @@ export class VictoryLayer {
    *
    * Unconditionally true while it is up. That is the modality: the match is
    * over, and a press must not reach a card fan or a 나가기 button that is only
-   * still under the pointer because this screen dimmed it rather than removing
-   * it. See the header.
+   * still under the pointer because this screen is fading it out. See the header.
    */
   pointerDown(clientX, clientY) {
     if (!this.active) return false;
     if (this._busy) return true;
-    // A press during the animation is the skip, and it is ONLY the skip — it
-    // does not also arm the button it happened to land on. Pressing through a
-    // flourish is asking to see the screen, not to have chosen from it.
+    // A press during the sequence is the skip, and it is ONLY the skip — it does
+    // not also arm the button it happened to land on. Pressing through a
+    // flourish is asking to see the screen, not to have chosen from it. And the
+    // buttons are invisible for three of the four stages, so a press that also
+    // chose would be a press on something the player could not see.
     if (!this.clock.done) {
       this.skip();
       return true;
@@ -1476,10 +908,10 @@ export class VictoryLayer {
   }
 
   dispose() {
+    this.fizz.dispose();
     this._quad.dispose();
     this.uiMaterials.dispose();
     this.fxMaterials.dispose();
-    for (const set of this._capMaterials) for (const m of set) m.dispose();
     this.scene.clear();
   }
 }

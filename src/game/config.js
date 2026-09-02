@@ -2600,188 +2600,122 @@ export const CONFIG = {
    * The winning sequence, and the screen it lands on.
    *
    * ── every number here is presentation, and that is load-bearing ───────────
-   * Nothing in this block can reach the simulation. The sequence runs in its own
-   * overlay scene on the RENDER clock, off a match that has already finished and
-   * whose physics has stopped stepping — see `MATCH_STATE.OVER` in `Match`. So a
-   * slider dragged mid-animation changes what is on screen and cannot change who
-   * won, which is why the stage lengths are safe to expose at all.
+   * Nothing in this block can reach the simulation. The sequence runs on the
+   * RENDER clock, off a match that has already finished and whose physics has
+   * stopped stepping — see `MATCH_STATE.OVER` in `Match`. So a slider dragged
+   * mid-animation changes what is on screen and cannot change who won, which is
+   * why the stage lengths are safe to expose at all.
    *
-   * ── the stage lengths, and why they do not add up to the brief's per-stage ──
-   * The brief gives both approximate per-stage figures (0.4 / 0.3 / 2-4 frames /
-   * 0.5) and a total for stages 1-4 of "1.5~2초, 짧게 갈 필요 없다". Those two
-   * disagree by a third of a second — the per-stage numbers sum to about 1.25 —
-   * and the total is the one with a reason attached, so it wins. The extra time
-   * is spent in the two stages that are actually WATCHED rather than read: the
-   * loser hanging there before it is hit, and the winner settling afterwards,
-   * which the brief itself calls "승자를 감상하는 구간".
+   * ── the sequence was a cap fight and is now a broadcast ────────────────────
+   * There were five stages and they replayed the game: the losing cap floated,
+   * the winning one charged across the frame, they collided with a screen shake
+   * and a white flash, the loser flipped out and the winner sprang back. Every
+   * number for all of that lived here — entry angles, trail spacing, ring radii,
+   * spring constants, shake frequency — and it is gone.
    *
-   * Defaults: 0.55 + 0.30 + 3 frames + 0.80 = about 1.70s to the result, and
-   * 2.00s to a screen you can press.
+   * Three things were wrong with it and only the last one is about taste. It
+   * replayed, non-interactively, the exact thing the player had just spent a
+   * match doing with their hands. It knew nothing about the MODE, so a football
+   * match won on goals and a curling match won on a tiebreaker both ended with
+   * the same two caps hitting each other. And it was visually stranded: 2D
+   * sprite caps on a tilted ground with afterimage trails, shaking the frame by
+   * 14 pixels at 26 Hz, which nothing else in this game looks remotely like.
+   *
+   * What replaces it is what sports coverage does. The board stays on screen,
+   * the camera pushes in on whatever decided the match, the letterbox closes
+   * over it, and the result is stated with the mode's own number in it. Four
+   * stages, about 2.85s at the defaults to a screen you can press, and the same
+   * frame the match OPENED in — see `core/Cinematic.js`.
    */
   victory: {
     // ── stage lengths ────────────────────────────────────────────────────
-    /** 1. The loser is on screen, floating, waiting to be hit. */
-    enterSeconds: 0.55,
-    /** 2. The winner crosses the frame. */
-    chargeSeconds: 0.3,
     /**
-     * 3. The hit, in FRAMES.
+     * 1. The board holds and the camera pushes in on what decided it.
      *
-     * Frames and not seconds, for the same reason `cardFx.smashFlashFrames` is:
-     * the colour inversion is a whole-frame blend operation and at three frames
-     * the difference between counting time and counting frames is the difference
-     * between a flash and nothing at all. See `FxMaterials.createInvert`.
+     * Long, and it is the one stage that has to be. This is the replay — the
+     * finishing position is the last thing the match said, and a push-in that
+     * arrives before the eye has followed it is a cut with extra steps. Sports
+     * coverage holds the shot for about this long before it cuts to a caption,
+     * which is exactly the structure being copied.
      */
-    impactFrames: 3,
-    /** 4. The loser leaves, the winner settles. */
-    resultSeconds: 0.8,
-    /** 5. The text, then the buttons. */
-    uiSeconds: 0.3,
+    freezeSeconds: 1.1,
+    /** 2. The letterbox closes over it. */
+    barSeconds: 0.4,
+    /** 3. The result, in the band. */
+    resultSeconds: 0.9,
+    /** 4. The bars retreat and the two buttons come up. */
+    releaseSeconds: 0.45,
+
+    // ── the push-in ──────────────────────────────────────────────────────
+    /**
+     * How much tighter the camera frames during stage 1, as a multiplier on
+     * whatever zoom the match ended at.
+     *
+     * A multiplier and not an absolute, because where the player left the view
+     * is part of what they were looking at — pulling to a fixed framing would
+     * undo their own zoom at the moment it mattered most. 1.35 is about one
+     * wheel notch and a half: plainly a move IN, and not so far that a knockout
+     * board's last cap fills the frame.
+     */
+    pushZoom: 1.35,
+    /**
+     * The celebratory beat on the winning caps, in seconds.
+     *
+     * `CardFx.play('onemore', winner, …)` and nothing else — the glint and the
+     * one soft ring the 원모어 card already draws over a player's caps, played
+     * with no card behind it. Reusing that vocabulary is the whole of the
+     * decoration budget for this screen: a second effect system for one beat is
+     * how a result screen ends up looking like a different game.
+     *
+     * The flourish's own timing is `CardFx`'s and stays there — see
+     * `VictoryClock`'s note on where the frame-counting discipline went.
+     */
+    sparkleSeconds: 0.55,
 
     // ── the darkened game behind ─────────────────────────────────────────
     /**
-     * How far down the game screen goes.
+     * How far down the board goes once the bars are shut.
      *
-     * Not 1. The finishing position is the last thing the match said and it
-     * stays legible underneath — the sequence is a thing happening in front of
-     * the board, not a curtain over it.
+     * 0.72 while the screen was a cap fight in front of it; the board was
+     * scenery then and it is the SUBJECT now — the camera has just pushed in on
+     * the thing that decided the match and the whole point is that it stays
+     * legible under the result. 0.34 is enough to seat white type on it and far
+     * enough from a curtain that the finishing position still reads.
+     *
+     * Not applied until stage 2. Nothing dims during the push-in: that stage is
+     * a replay of the match, and a replay behind a veil is a memory.
      */
-    bgOpacity: 0.72,
+    bgOpacity: 0.34,
     bgFadeSeconds: 0.3,
 
-    // ── the caps ─────────────────────────────────────────────────────────
+    // ── the bubbles ──────────────────────────────────────────────────────
     /**
-     * Frame pixels per world unit. A 3.2-unit cap at 38 is 122px across.
+     * Streams of carbonation up the frame under the result. See `ResultFizz`.
      *
-     * ── it is the subject of the screen, not the whole of it ─────────────────
-     * 52 first, which drew the cap 166px wide — 26% of the frame's width and
-     * better than a third of its height. At that size it stopped reading as an
-     * object on a screen and started reading as a texture filling one, and it
-     * competed with the 340px winner line directly underneath it for the same
-     * attention. 38 puts it at 19% of the width: still plainly the thing being
-     * looked at, still coarse enough that the 21 flutes and the hem read, and now
-     * clearly subordinate to the line that says who won.
-     *
-     * Going further was tried and is worse — at 32 the flute detail starts to go
-     * and the cap is smaller than the plate under it, which inverts the hierarchy.
-     *
-     * ── four numbers below follow this one ──────────────────────────────────
-     * `ringStart`/`ringEnd` and `trailSize`/`trailSpacing` are absolute frame
-     * pixels, so they do NOT scale with this on their own and were moved with it
-     * by the same 38/52. Everything else that depends on the cap's drawn size —
-     * the contact offset and the distance at which the loser is judged to have
-     * cleared the frame — is derived from `capScale` in `VictoryLayer` and needs
-     * no attention here.
+     * Bottles, water and bubbles are this project's celebration vocabulary and
+     * confetti is not — "색종이를 쓰지 마라" — so the thing that rises when
+     * somebody wins is the same thing that rises when the menu's bottle is
+     * shaken, running the same growth-and-rise law.
      */
-    capScale: 38,
-    /** Where they meet, in frame pixels above centre. The buttons get below. */
-    capY: 40,
-    /**
-     * How far back the ground the caps lie on is leaned, in degrees.
-     *
-     * 0 is dead top-down, which is the one angle a crown cap has nothing to say
-     * from: 21 flutes in silhouette and a flat face, identical the right way up
-     * and upside down. Leaning it back until the near skirt shows is what makes
-     * it a pressed metal object lying on something.
-     *
-     * 24 is enough to see the skirt and the hem's flare without the panel — the
-     * thing the artwork is on, and the thing the whole screen is about —
-     * foreshortening away: the face keeps 91% of its height and the skirt gains
-     * about a tenth of the cap's width underneath it.
-     *
-     * Applied to the caps and the flat ground sprites and to NOTHING ELSE. The
-     * winner line and the buttons stay square to the screen; see the note on
-     * `VictoryLayer._applyTilt`.
-     */
-    groundTiltDeg: 24,
-    /**
-     * How far the waiting cap drifts, in frame pixels, and how fast.
-     *
-     * This is now the whole of "정적이지 않게" for stage 1. The slow turn about
-     * the cap's own normal that used to sit alongside it is gone — against panel
-     * artwork with an orientation mark it read as a cap being spun by hand, and
-     * it competed with the one rotation that has to be legible, which is the
-     * loser going over in stage 4.
-     */
-    floatAmount: 6,
-    floatHz: 0.55,
-
-    // ── the winner's charge ──────────────────────────────────────────────
-    /**
-     * Which way it comes IN from, as a bearing in degrees: 0 right, 90 up,
-     * 180 left, 270 down. The hit direction is the opposite of this, and the
-     * loser leaves along it.
-     *
-     * 215 is from the lower left, which the brief asks for ("측면 또는 하단") and
-     * which also sends the loser out through the upper right — away from the
-     * buttons that are about to appear along the bottom.
-     */
-    enterAngleDeg: 215,
-    /** How far out it starts, in frame pixels. 400 is the frame's half-diagonal. */
-    enterDistance: 620,
-    /** Afterimage sprites strung out behind it. 0 turns the trail off. */
-    trailCount: 3,
-    // Both moved with `capScale`: this is an afterimage OF the cap, so it is
-    // meaningless at a size the cap is not.
-    trailSpacing: 42,
-    trailSize: 57,
-
-    // ── the hit ──────────────────────────────────────────────────────────
-    /**
-     * 충격 순간의 전체 화면 플래시. 프레임 수와 세기.
-     *
-     * ── 색 반전에서 흰 플래시로 ──────────────────────────────────────────
-     * 예전에는 `src * (1 - dst)` 반전이었다. 강타 카드가 쓰는 것과 같은 블렌드였고,
-     * 화면이 거의 검을 때는 훌륭했다 — 어두운 판이 순간 밝아지니 번쩍인다.
-     * 지금 팔레트는 반대다. 밝은 유리와 흰 판이 대부분이라 반전하면 **어두워진다**.
-     * 번쩍임이 아니라 정전처럼 보인다.
-     *
-     * 흰 플래시는 어느 팔레트에서나 같은 방향으로 작동한다: 밝은 것은 하얗게
-     * 타고, 어두운 것은 밝아진다. 세기가 1 이 아닌 것은 완전히 흰 프레임 세 장이
-     * 이 화면에서 유일하게 아픈 것이기 때문이다 — 0.72 면 아래가 비쳐서 무엇이
-     * 번쩍였는지 보인다.
-     */
-    flashFrames: 3,
-    flashStrength: 0.72,
-    /** Frame pixels of shake at the peak. Quantised to whole pixels. */
-    shakeStrength: 14,
-    shakeSeconds: 0.22,
-    /** Cycles a second. High: this is an impact, not a wobble. */
-    shakeHz: 26,
-    /**
-    * The additive ring, in frame pixels, and how long it takes to get there.
-    *
-    * Moved with `capScale` when the cap came down, so the ring still opens to
-    * about 1.8x the cap's width — it has to read as bigger than what it came out
-    * of, and a 300px ring around a 122px cap read as a hoop that had nothing to
-    * do with the hit.
-    */
-    ringStart: 32,
-    ringEnd: 219,
-    ringSeconds: 0.42,
-
-    // ── the loser leaving ────────────────────────────────────────────────
-    /**
-     * Turns a second on the flip. It stops at a half turn — face down — and
-     * holds there, so this is really "how fast does it go over".
-     */
-    flipSpeedTurns: 1.4,
-    /** Frame pixels a second, along the hit direction. */
-    exitSpeed: 1500,
-
-    // ── the winner settling ─────────────────────────────────────────────
-    /** How far past centre the hit carries it, in frame pixels. */
-    overshoot: 86,
-    /** The spring that brings it back. Stiffness against damping. */
-    springStiffness: 190,
-    springDamping: 17,
+    bubbleCount: 30,
+    /** Overall brightness of them. The menu's own is `fizzStrength`. */
+    bubbleStrength: 0.9,
 
     // ── the text and the buttons ─────────────────────────────────────────
     /** How much bigger the winner line gets at the peak of its entrance beat. */
     textPulseScale: 0.16,
-    /** Frame pixels below the caps for the winner line. */
-    textY: -110,
-    /** And below that for the buttons. */
+    /**
+     * Frame pixels from the middle for the winner line, and for the number
+     * under it.
+     *
+     * Both inside the letterbox band by construction at the authored frame: the
+     * band is ±184 of 480 and the lowest thing here is the score plate's bottom
+     * edge at −98. A bar is a margin, not a UI surface, and nothing may be
+     * written into one.
+     */
+    textY: 44,
+    scoreY: -56,
+    /** And the buttons, which arrive after the bars have gone. */
     buttonY: -178,
     /** Extra pixels of give around each button's hit quad, for thumbs. */
     hitMargin: 12,
@@ -3339,6 +3273,12 @@ export const CONFIG = {
      * On, because at the turn zoom the ball can leave the frame entirely on a
      * hard shot and the player loses the one thing they are watching. Off gives
      * the old fixed view.
+     *
+     * UNDER `track`, which is the player's own switch. This one stays a
+     * developer's knob for whether football has a ball follow at all; the person
+     * playing gets one control that says "카메라 추적", and it would be a lie in
+     * the one mode where the automatic camera is this line rather than
+     * `CamTracker`. See the gate in `main.js`.
      */
     followBall: true,
     /**
@@ -3366,6 +3306,14 @@ export const CONFIG = {
      * on the render clock by a module that writes to the camera's pan and to
      * nothing else, so a match played with tracking on and one played with it
      * off produce the same hashes.
+     *
+     * ── and it is the MASTER switch, not only the tracker's ──────────────────
+     * This is what the settings screen's "카메라 추적" writes, and a player
+     * turning it off is asking for the camera to stop moving on its own — not
+     * asking about `CamTracker` specifically, which they have never heard of. So
+     * `followBall` is gated on it too. Without that the switch did nothing
+     * whatsoever in football, which is the one mode that does not use the
+     * tracker: "카메라 추적 껐는데 축구에서는 자동 카메라가 그대로 따라간다".
      */
     track: true,
     /**
@@ -3578,14 +3526,33 @@ export const CONFIG = {
    * named for a network it is not using.
    *
    * Sums to 2.5 at the defaults, inside the brief's two-to-three. The order is
-   * the brief's too. See `MatchFoundLayer`.
+   * the brief's too. See `IntroLayer`.
    */
   intro: {
+    /**
+     * The letterbox unfolding, before anybody is introduced.
+     *
+     * The document opens with the bars shut — that is how the seam with the
+     * menu is hidden, see `core/Cinematic.js` — so this is the first thing that
+     * happens in every match, `enabled` or not. Never skip it: cutting from a
+     * covered frame straight to the board is the hard cut the bars exist to
+     * replace, and it is also what would make a cold `/survival` open on a
+     * flash.
+     */
+    barSeconds: 0.45,
     selfSec: 0.55,
     opponentSec: 0.55,
     holdSec: 0.9,
     exitSec: 0.5,
-    /** Play it at all. Off, the match opens straight onto the board. */
+    /**
+     * Introduce the two players at all. Off, the bars open onto the board and
+     * the UI fades in, and nothing else happens.
+     *
+     * Global rather than per mode, deliberately. A match is a match: survival,
+     * football and curling all open with two people and two caps, and a switch
+     * that could be off in one of them is a switch somebody has to remember the
+     * state of.
+     */
     enabled: true,
   },
 };

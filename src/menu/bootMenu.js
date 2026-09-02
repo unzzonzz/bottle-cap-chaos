@@ -13,10 +13,10 @@ import {
 import { DISPLAY_ASPECT, Viewport } from '../core/Viewport.js';
 import { SceneComposer } from '../core/Composer.js';
 import { BOARD_ASPECT, FRAME, frameScale } from '../core/frame.js';
-import { aimedLaunchDirection, Bottle, CAP_COLOR } from './Bottle.js';
+import { Bottle } from './Bottle.js';
 import { PALETTE, withAlpha } from '../core/palette.js';
 import { whenFontsReady } from '../ui/fonts.js';
-import { CapWipe, WIPE_FRAME } from './CapWipe.js';
+import { Cinematic } from '../core/Cinematic.js';
 import { MenuItems } from './MenuItems.js';
 import { SettingsScene } from './SettingsScene.js';
 import { OpponentScene } from './OpponentScene.js';
@@ -51,31 +51,37 @@ import { MenuAudio } from '../audio/MenuAudio.js';
  *     composer.render()                MSAA target -> bloom -> canvas
  *     camera.layers.set(UI)            the plates, unbloomed
  *     clearDepth(); render(scene)
- *     wipe.render(); modal.render()    their own overlay scenes
+ *     modal.render(); cinematic.render()   their own overlay scenes
  *
  * That is `main.js`'s arrangement with one addition: here the plates are WORLD
  * objects rather than a separate scene, so the split between what bloom touches
  * and what it does not is done with layers instead. See `asUiLayer`.
  *
- * The wipe stays an overlay drawn last for the reason it always was: it has the
- * screen while it runs, and what it hands over to is the other document.
+ * The letterbox is last, over the modal included, for the reason the cap wipe
+ * was before it: it has the screen while it runs, and what it hands over to is
+ * the other document.
  *
  * ── two ways out, and only one of them is a navigation ──────────────────────
- * 설정 swaps scene roots in place, so the whole four-stage run happens in one
- * continuous sequence of frames. The two game modes cannot: the game owns its
- * own renderer and its own Rapier world, and there is no honest way to host
- * that inside this page without rebuilding `main.js` around it. So they hand
- * over — at the covered frame, with the destination already prefetched, and
- * with the page repainted the cap's own red first so the seam between the two
- * documents is red-on-red rather than a flash of black. `main.js` picks stage 4
- * up on the other side out of its own overlay. See `menuRoutes`.
+ * 설정 swaps scene roots in place, so the whole run happens in one continuous
+ * sequence of frames. The two game modes cannot: the game owns its own renderer
+ * and its own Rapier world, and there is no honest way to host that inside this
+ * page without rebuilding `main.js` around it. So they hand over — at the
+ * covered frame, with the destination already prefetched.
+ *
+ * Nothing repaints the page for that hand-over any more, and its absence is the
+ * fix rather than an omission. The bars close to `PALETTE.bg.skyTop`, which is
+ * already `--bcc-void` — the colour the stylesheet paints the document and the
+ * browser paints around a letterboxed canvas. So the covered frame, the gap
+ * between the two documents and the game page's first frame are all the same
+ * colour without anybody assigning it. See `core/Cinematic.js`.
  */
 
 /**
  * @param {HTMLCanvasElement} canvas
  * @param {{audio?: import('../audio/AudioSystem.js').AudioSystem,
  *          audioSettings?: import('../audio/AudioSettings.js').AudioSettingsBook,
- *          graphicsSettings?: import('../core/GraphicsSettings.js').GraphicsSettingsBook}} [deps]
+ *          graphicsSettings?: import('../core/GraphicsSettings.js').GraphicsSettingsBook,
+ *          viewSettings?: import('../core/ViewSettings.js').ViewSettingsBook}} [deps]
  *   All three are built once in `main.js`, before the branch that chose this
  *   page — see the note there. Absent, every call below is optional-chained and
  *   the menu is exactly what it was.
@@ -115,7 +121,10 @@ function asUiLayer(root) {
   return root;
 }
 
-export function bootMenu(canvas, { audio = null, audioSettings = null, graphicsSettings = null } = {}) {
+export function bootMenu(
+  canvas,
+  { audio = null, audioSettings = null, graphicsSettings = null, viewSettings = null } = {},
+) {
   const cfg = MENU_CONFIG;
 
   /**
@@ -144,7 +153,7 @@ export function bootMenu(canvas, { audio = null, audioSettings = null, graphicsS
    *
    * Built once, from the palette, and handed to the material factory rather than
    * to the scene: `scene.environment` would only reach THIS scene, and the caps
-   * also appear in the victory sequence, the cap wipe and the match-found layer,
+   * also appear in the victory sequence and the match-found layer,
    * each of which owns its own scene. Setting it per material covers all of them
    * from one place.
    */
@@ -182,7 +191,7 @@ export function bootMenu(canvas, { audio = null, audioSettings = null, graphicsS
 
   /**
    * The menu's own bloom chain. Same parameters as the match page's, so the two
-   * sides of the cap wipe are the same picture — see `MENU_CONFIG.view.bloom`.
+   * sides of the letterbox are the same picture — see `MENU_CONFIG.view.bloom`.
    */
   const composer = new SceneComposer({ viewport, scene, camera, bloom: cfg.view.bloom });
 
@@ -377,13 +386,9 @@ export function bootMenu(canvas, { audio = null, audioSettings = null, graphicsS
   /** Which scene root is live. Swapped under the cap at the covered frame. */
   let current = 'menu';
 
-  // Its own overlay scene and camera; see the note in `CapWipe`.
-  const wipe = new CapWipe({
-    retro,
-    tuning: cfg.wipe,
-    panelMap: bottle.capTopMap,
-    color: CAP_COLOR,
-  });
+  /** The letterbox. Its own overlay scene and camera; see `core/Cinematic.js`. */
+  const cinematic = new Cinematic({ resolution: viewport.resolution });
+  viewport.onResize(({ resolution }) => cinematic.setResolution(resolution));
 
   const transition = new Transition({ tuning: cfg.transition });
 
@@ -391,16 +396,16 @@ export function bootMenu(canvas, { audio = null, audioSettings = null, graphicsS
   /**
    * How many world units one framebuffer pixel is worth on the z = 0 plane.
    *
-   * ── it is the TARGET's height, not the wipe's virtual frame ──────────────
+   * ── it is the TARGET's height, not the overlay's virtual frame ───────────
    * This was the virtual 640x480 to begin with, matching the overlay, and it
    * was wrong in a way worth recording: the target is 320x240, so a plate
    * authored 128 texels wide landed on 64 real pixels and every piece of type
    * on it was resampled to half size — after `crispText` had gone to the
    * trouble of thresholding its alpha specifically so it would not be.
    *
-   * The wipe's frame is virtual on purpose, so the cap keeps its share of the
-   * screen at any internal resolution. The plates want the opposite: one texel
-   * on one pixel, whatever that resolution happens to be. Reading it off
+   * The overlay's frame is virtual on purpose, so the letterbox keeps its share
+   * of the screen at any internal resolution. The plates want the opposite: one
+   * texel on one pixel, whatever that resolution happens to be. Reading it off
    * `viewport.resolution` gets that at every mode, and the resize hook below
    * re-lays them out when the panel changes it.
    */
@@ -653,8 +658,9 @@ export function bootMenu(canvas, { audio = null, audioSettings = null, graphicsS
       if (consumed) return;
       if (hit.id === 'back') returnToMenu();
       // Sideways between two sub-screens, so it takes the short fade rather
-      // than the cap: the cap wipe is the menu's way of ENTERING something, and
-      // spending a second on it to move one row deeper would read as leaving.
+      // than the letterbox: the transition is the menu's way of ENTERING
+      // something, and spending a second on it to move one row deeper would
+      // read as leaving.
       else if (hit.id === 'marks') fadeTo('marks');
       return;
     }
@@ -667,12 +673,13 @@ export function bootMenu(canvas, { audio = null, audioSettings = null, graphicsS
       menuAudio?.press('menu', hit);
       if (consumed) return;
       /**
-       * 시작 gets the cap wipe; 뒤로 gets the short fade.
+       * 시작 gets the letterbox; 뒤로 gets the short fade.
        *
-       * The same division the rest of the menu already makes and states: the cap
-       * is what you get for STARTING something, and coming back is not an event.
-       * Entering this screen was a wipe, leaving it for the match is a wipe, and
-       * backing out to the menu is the same 180 ms fade that leaves a match.
+       * The same division the rest of the menu already makes and states: the
+       * bars are what you get for STARTING something, and coming back is not an
+       * event. Entering this screen closed them, leaving it for the match closes
+       * them, and backing out to the menu is the same 180 ms fade that leaves a
+       * match.
        */
       if (hit.id === 'start') launch();
       else if (hit.id === 'back') returnToMenu();
@@ -738,32 +745,30 @@ export function bootMenu(canvas, { audio = null, audioSettings = null, graphicsS
   });
 
   // ── the run ──────────────────────────────────────────────────────────────
-  const mouth = new Vector3();
-  const dir = new Vector3();
-
-  /** World position -> the overlay's frame pixels. */
-  function toFrame(world) {
-    const p = world.clone().project(camera);
-    return { x: (p.x * WIPE_FRAME.width) / 2, y: (p.y * WIPE_FRAME.height) / 2 };
-  }
 
   /**
-   * The cap wipe, with whatever should happen behind it.
+   * The letterbox closing, with whatever should happen behind it.
    *
    * ── this used to BE `run`, and the opponent screen split it ───────────────
-   * There are two things a wipe can hide now: a scene swap, which is what 설정
-   * and the new 상대 선택 screen are, and a document change, which is what
-   * starting a match is. They were one function because a mode item did both at
-   * once — pick 서바이벌 and you got the wipe and the navigation together.
+   * There are two things a covered frame can hide: a scene swap, which is what
+   * 설정 and 상대 선택 are, and a document change, which is what starting a
+   * match is. They were one function because a mode item did both at once —
+   * pick 서바이벌 and you got the transition and the navigation together.
    *
    * A mode item no longer navigates. It opens a screen, and the navigation
    * happens one press later from that screen, so the two have to be separable —
-   * and the wipe itself, which is identical for both, should not be written
-   * twice to achieve it.
+   * and the transition itself, which is identical for both, should not be
+   * written twice to achieve it.
    *
    * @param {() => void} onSwap  runs on the first fully covered frame
+   * @param {{held?: boolean, uncover?: boolean}} [opts]
+   *   `uncover` false leaves the bars shut when the run ends. That is the
+   *   navigation case and it is not a detail: `location.assign` does not tear
+   *   this document down synchronously, so a document that opened its bars on
+   *   the way out would show the menu again for however long the next one takes
+   *   to paint — which is exactly the flash the covered frame exists to prevent.
    */
-  function runWipe(onSwap, { held = false } = {}) {
+  function runTransition(onSwap, { held = false, uncover = true } = {}) {
     if (transition.running) return false;
     items.setHover(null);
     items.enabled = false;
@@ -773,49 +778,28 @@ export function bootMenu(canvas, { audio = null, audioSettings = null, graphicsS
       {
         /**
          * ── the cap only comes OFF THE BOTTLE when the bottle is there ───────
-         * On the menu the wipe is the bottle being opened: the cap leaves the
-         * mouth, along the axis the bottle has turned toward the camera, and
-         * the burst goes off behind it.
+         * On the menu this is the bottle being opened: the crimp lets go, the
+         * cap hops off the mouth along the axis the bottle has turned toward
+         * the camera, and the eruption goes off underneath it.
          *
-         * Every other screen has no bottle on it. This used to run regardless,
-         * so pressing 시작 on the opponent screen fired a cap out of thin air —
-         * out of the point the bottle WOULD have occupied, off to one side of a
-         * screen it was not on. Reported exactly that way.
-         *
-         * With nothing to leave, the cap simply comes at the camera: dead
-         * centre, spinning, growing. That is the same launch the game page
-         * plays coming back from a result screen — `main.js` starts it with
-         * `begin({x:0, y:0}, aimedLaunchDirection(...))` — so the two look
-         * identical, which is what was asked for.
+         * Every other screen has no bottle on it, and nothing takes its place.
+         * The cap used to be fired out of thin air there — out of the point the
+         * bottle WOULD have occupied, off to one side of a screen it was not
+         * on — which was reported exactly that way. The bars are what covers
+         * the frame now, so a screen with no bottle simply gets the bars: there
+         * is no longer a hole to fill.
          */
-        onLaunch: () => {
-          if (current !== 'menu') {
-            wipe.begin({ x: 0, y: 0 }, aimedLaunchDirection(cfg.bottle));
-            return;
-          }
-
-          // Two caps for one frame, or none for one frame, are both visible at
-          // 60 Hz — so the bottle loses its cap on the frame the overlay gains
-          // one.
-          bottle.setCapVisible(false);
+        onPop: () => {
+          if (current !== 'menu') return;
           bottle.popBurst();
-
-          bottle.mouthWorld(mouth);
-          bottle.mouthDirection(dir);
-          const from = toFrame(mouth);
-          // The heading is the bottle's own axis, projected — and by now the
-          // bottle has turned to point that axis at the camera. A cap that came
-          // off a leaning bottle and then flew straight up the screen would read
-          // as two unrelated events.
-          const ahead = toFrame(mouth.clone().addScaledVector(dir, 4));
-          wipe.begin(from, { x: ahead.x - from.x, y: ahead.y - from.y });
         },
         onSwap,
         onDone: () => {
-          wipe.end();
-          bottle.setCapVisible(true);
+          bottle.popCap(0);
           items.enabled = true;
           refreshHover();
+          if (!uncover) return;
+          cinematic.open(cfg.transition.barSeconds);
         },
       },
       { held },
@@ -846,18 +830,18 @@ export function bootMenu(canvas, { audio = null, audioSettings = null, graphicsS
   function run(target, opts) {
     if (Object.hasOwn(MODES, target)) {
       pendingMode = target;
-      return runWipe(() => swapTo('opponent'), opts);
+      return runTransition(() => swapTo('opponent'), opts);
     }
-    return runWipe(() => swapTo(target), opts);
+    return runTransition(() => swapTo(target), opts);
   }
 
   /**
    * 시작 — leave for the match, opponent and all.
    *
-   * The same wipe the menu item played, so entering the game is one continuous
-   * gesture across two screens rather than two different flourishes. The URL is
-   * built BEFORE the wipe starts so the prefetch has the whole shake to work
-   * with, which is the timing `menuRoutes.prefetch` explains.
+   * The same transition the menu item played, so entering the game is one
+   * continuous gesture across two screens rather than two different flourishes.
+   * The URL is built BEFORE it starts so the prefetch has the whole shake to
+   * work with, which is the timing `menuRoutes.prefetch` explains.
    */
   function launch() {
     if (!pendingMode || !opponent) return;
@@ -867,9 +851,9 @@ export function bootMenu(canvas, { audio = null, audioSettings = null, graphicsS
      * The other two choices have an opponent already (the person next to you, or
      * nobody) so 시작 is a navigation. Online has to find somebody first, and the
      * navigation happens on the far side of that, from `onMatched`. Sideways to
-     * another menu screen, so it takes the short fade rather than the cap wipe:
-     * the wipe is what the menu spends on ENTERING a match, and this is not one
-     * yet.
+     * another menu screen, so it takes the short fade rather than the
+     * letterbox: the bars are what the menu spends on ENTERING a match, and this
+     * is not one yet.
      */
     if (opponent.choice === 'online') {
       fadeTo('online');
@@ -877,7 +861,7 @@ export function bootMenu(canvas, { audio = null, audioSettings = null, graphicsS
     }
     const url = destinationUrl(pendingMode, location, { vs: opponent.choice });
     prefetch(url);
-    runWipe(() => navigateTo(url));
+    runTransition(() => navigateTo(url), { uncover: false });
   }
 
   /**
@@ -902,15 +886,20 @@ export function bootMenu(canvas, { audio = null, audioSettings = null, graphicsS
    * about which mode is being opened, which is why it now takes a finished URL.
    */
   function navigateTo(url) {
-    // The page is about to be replaced, and the gap between this document going
-    // away and the next one's first frame is not under anyone's control. What IS
-    // controllable is what fills it: with the whole window painted the cap's own
-    // red — the letterbox included, so there is no edge between the two — the gap
-    // is the same colour as the frames either side of it and there is nothing to
-    // see. The game page sets the same colour synchronously at module load and
-    // clears it once the cap has flown off.
-    document.documentElement.style.background = CAP_COLOR;
-    document.body.style.background = CAP_COLOR;
+    /**
+     * The page is about to be replaced, and the gap between this document going
+     * away and the next one's first frame is not under anyone's control. What
+     * fills it is the document's own background, which is `--bcc-void` — and
+     * that is the SAME colour the bars have just closed to. So the covered
+     * frame, the gap, and the game page's first frame are one flat colour with
+     * nothing assigned anywhere.
+     *
+     * There were two lines here painting the window the cap's red, because the
+     * covered frame used to be a red cap. They are gone rather than recoloured:
+     * an inline style that has to agree with `Cinematic`, `cssPalette` and
+     * `capacitor.config.json` is three ways for the seam to come back, and the
+     * stylesheet already says the right thing.
+     */
     // The document — and the AudioContext with it — is gone within a frame or
     // two. Ramped on the audio clock so the last voice fades rather than being
     // cut off, which is a click on the one frame that is supposed to be seamless.
@@ -927,10 +916,10 @@ export function bootMenu(canvas, { audio = null, audioSettings = null, graphicsS
   /**
    * Out of the settings screen, on a short black fade.
    *
-   * NOT the cap wipe, and the same fade the HUD's 메뉴 button uses to leave a
+   * NOT the letterbox, and the same fade the HUD's 메뉴 button uses to leave a
    * match — literally the same function, so the two ways back cannot drift
-   * apart. The brief puts it as "복귀 시에는 전환 연출 없이 짧은 페이드": the cap
-   * is what you get for STARTING something. Coming back is not an event, and
+   * apart. The brief puts it as "복귀 시에는 전환 연출 없이 짧은 페이드": the bars
+   * are what you get for STARTING something. Coming back is not an event, and
    * playing the same flourish in both directions makes leaving feel as
    * ceremonious as arriving, which is exactly backwards.
    */
@@ -1059,7 +1048,7 @@ export function bootMenu(canvas, { audio = null, audioSettings = null, graphicsS
           session.stash();
           const url = destinationUrl(pendingMode, location, { vs: 'online' });
           prefetch(url);
-          runWipe(() => navigateTo(url));
+          runTransition(() => navigateTo(url), { uncover: false });
         },
       });
       scene.add(asUiLayer(online.root));
@@ -1103,6 +1092,8 @@ export function bootMenu(canvas, { audio = null, audioSettings = null, graphicsS
           audioSettings,
           // 같은 규칙. 이 줄이 그래픽 판과 다섯 칸 칩 줄을 만든다.
           graphicsSettings,
+          // 그리고 이 줄이 카메라 추적 토글을 만든다.
+          viewSettings,
           profile,
           modal,
         });
@@ -1165,13 +1156,13 @@ export function bootMenu(canvas, { audio = null, audioSettings = null, graphicsS
   const debug = bootMenuDebug({
     config: cfg,
     bottle,
-    wipe,
+    cinematic,
     items,
     transition,
     retro,
     composer,
     viewport,
-    overlay: wipe.scene,
+    overlay: cinematic.scene,
     onRebuild: () => bottle.rebuild(),
     onLean: () => bottle.applyLean(),
     onLayout: () => placeCamera(),
@@ -1305,19 +1296,31 @@ export function bootMenu(canvas, { audio = null, audioSettings = null, graphicsS
       cfg.camera.distance * camWiden,
     );
 
+    /**
+     * The bars and the cap, off the one clock.
+     *
+     * ── the bars are asked for a TARGET, not stepped ────────────────────────
+     * `Cinematic.to` is idempotent, so calling it every frame of the stage is
+     * the same as calling it once on the edge — and unlike an edge it cannot be
+     * missed by a frame long enough to step over the stage entirely. The bars
+     * then close on their own clock, which is what lets the same object be
+     * driven by four different sequences without any of them owning it.
+     */
     switch (state.stage) {
-      case STAGE.LAUNCH:
-        wipe.launch(state.t, dt);
+      case STAGE.POP:
+        cinematic.shut(cfg.transition.barSeconds);
+        bottle.popCap(state.pop);
         break;
       case STAGE.COVER:
-        wipe.cover(dt);
-        break;
-      case STAGE.EXIT:
-        wipe.exit(state.t, dt);
+        // Hidden rather than left at the top of its hop: the frame is opaque,
+        // so this is free, and the next thing that happens to this bottle is a
+        // scene swap that may leave it on screen with its cap off.
+        bottle.setCapVisible(false);
         break;
       default:
         break;
     }
+    cinematic.update(dt);
 
     // The sound, after everything else has written this frame's state. The
     // shake envelope is the curved one the bottle and the camera both use, so
@@ -1359,12 +1362,13 @@ export function bootMenu(canvas, { audio = null, audioSettings = null, graphicsS
     r.render(scene, camera);
     scene.background = sky;
 
-    // 3. The wipe and the modal, which own their own scenes. The wipe's cap is
-    //    a 3D object that would take bloom happily, but it carries the game's
-    //    logo at 800 frame pixels and that is type; the modal is nothing but
-    //    type.
-    wipe.render(r);
+    // 3. The modal and the letterbox, which own their own scenes. Both are
+    //    outside the bloom: the modal is nothing but type, and a bright pass
+    //    over a hard bar edge blooms the edge.
     modal.render(r);
+    // Last of all, over the modal included: it is the frame everything else is
+    // inside, and at the covered frame it is the only thing on screen.
+    cinematic.render(r);
     r.autoClear = true;
 
     // Back to the world layer, so anything that reads the camera between frames
@@ -1403,11 +1407,11 @@ export function bootMenu(canvas, { audio = null, audioSettings = null, graphicsS
   // verifying — the covered frame is three frames long and is not something you
   // can catch by looking.
   window.__menu = {
-    config: cfg, bottle, wipe, items, transition, camera, viewport, retro, tick,
-    run, toFrame, scene,
+    config: cfg, bottle, cinematic, items, transition, camera, viewport, retro, tick,
+    run, scene,
     // The screens, for the same reason `tick` is here: a sub-screen sits behind
-    // a cap wipe and a fade, and neither is something you can step through by
-    // hand from the outside.
+    // a covered frame and a fade, and neither is something you can step through
+    // by hand from the outside.
     swapTo, markBook, openEditor, audio, menuAudio, launch,
     // 조명 리그. 노출을 손으로 재려면 있어야 한다 — `createLightRig` 의 `scale`
     // 주석에 왜 이 문서가 경기 화면과 다른 배율을 쓰는지 적혀 있다.

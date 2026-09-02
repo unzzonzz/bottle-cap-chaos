@@ -173,7 +173,17 @@ export class CamTracker {
    * @param {(() => void)|null} [f.onReturn]
    *   the default-framing call, for when nothing else made it. See `_release`.
    */
-  update({ dt, live, arena, shooter, enabled, keepZ = null, reframed = false, onReturn = null }) {
+  update({
+    dt,
+    live,
+    arena,
+    shooter,
+    enabled,
+    keepZ = null,
+    reframed = false,
+    keepView = false,
+    onReturn = null,
+  }) {
     const step = Math.max(0, Math.min(0.1, dt));
     const on = !!enabled && !!this.config.view.track;
 
@@ -202,7 +212,7 @@ export class CamTracker {
     }
 
     // The turn is over — or never started. Either way nothing is in flight.
-    if (this.active) this._release(reframed, onReturn);
+    if (this.active) this._release(reframed, onReturn, keepView);
     if (this.returning) this._ease(step);
     this._trail();
   }
@@ -298,17 +308,27 @@ export class CamTracker {
    * player then has to aim. So the same call the handover makes is made here,
    * through the callback, and the pan is eased back over `trackReturnSec`.
    *
+   * ── and when NOBODY should ──────────────────────────────────────────────
+   * `keepView` is the third answer and it is the one the caller has to supply,
+   * because it is a fact about who is watching rather than about the throw:
+   * against the computer there is no incoming player, so the view is not reset
+   * for a handover either — see the `keep` decision in `faceCurrentPlayer`. This
+   * path had to be told separately, because it is the one that fires when a turn
+   * ends WITHOUT changing hands and therefore without any handover to have made
+   * the decision. Left out, the pan would be eased home on exactly the turns the
+   * handover no longer touches.
+   *
    * `onReturn` is `faceCurrentPlayer(true)` itself rather than a copy of what it
    * does. The framing has one definition and this is not a second one — change
    * the bearing rule or the opening zoom and both paths change together.
    */
-  _release(reframed, onReturn) {
+  _release(reframed, onReturn, keepView = false) {
     // Where the camera actually IS, not where the spring had got to. The two
     // are the same on an ordinary turn and are not after a hand has taken the
     // view, or after the clamp has been pinning the look point at its limit.
     const from = { x: this.camera.pan.x, z: this.camera.pan.z };
     this._stop();
-    if (reframed) return;
+    if (reframed || keepView) return;
 
     this.returning = { from, t: 0 };
     // Ahead of the ease, so the bearing and the zoom start travelling on this

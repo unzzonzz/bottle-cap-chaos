@@ -122,6 +122,16 @@ const ROWS = [
    * 확인 버튼이 없는 이유가 `FOOTER` 에 적혀 있다.
    */
   { id: 'graphics', kind: 'readout' },
+  /**
+   * 카메라 추적. 그래픽 바로 아래 — 둘 다 "화면이 어떻게 보이는가" 다.
+   *
+   * 음소거와 같은 `toggle` 이다. 이 화면의 컨트롤 관용구는 눌림에 답하는 판
+   * 하나뿐이고, 켬/끔 두 값에 새 것을 들여올 이유가 없다.
+   *
+   * 그래픽 티어와 한 문서에 담지 않은 이유는 `core/ViewSettings.js` 머리말에
+   * 있다 — 티어는 측정이 고쳐도 되는 값이고 이건 사람만 고칠 수 있는 값이다.
+   */
+  { id: 'track', kind: 'toggle' },
   { id: 'nickname', kind: 'action' },
   /**
    * 서버 주소는 `?debug=1` 뒤로 접었다 (PHASE 5 승인 항목 3).
@@ -164,18 +174,22 @@ export class SettingsScene {
    *   caller that has no audio gets exactly the screen this used to be.
    * @param {import('../core/GraphicsSettings.js').GraphicsSettingsBook} [graphicsSettings]
    *   같은 규칙. 모델이 없으면 그래픽 줄도 칩도 만들지 않는다.
+   * @param {import('../core/ViewSettings.js').ViewSettingsBook} [viewSettings]
+   *   또 같은 규칙. 모델이 없으면 카메라 추적 줄도 만들지 않는다.
    */
   constructor({
     retro,
     unitsPerPixel,
     audioSettings = null,
     graphicsSettings = null,
+    viewSettings = null,
     profile = null,
     modal = null,
   }) {
     this.root = new Group();
     this.audioSettings = audioSettings;
     this.graphicsSettings = graphicsSettings;
+    this.viewSettings = viewSettings;
     /**
      * The nickname model, or null.
      *
@@ -215,6 +229,8 @@ export class SettingsScene {
       // The audio rows need a model behind them; 닉네임 and the two links do not.
       if (def.id === 'graphics') {
         if (!graphicsSettings) continue;
+      } else if (def.id === 'track') {
+        if (!viewSettings) continue;
       } else if (!audioSettings && def.kind !== 'link' && def.kind !== 'action') continue;
       // Both profile rows need a model behind them, the same way the audio rows
       // need theirs.
@@ -242,6 +258,7 @@ export class SettingsScene {
 
     this._off = audioSettings?.onChange(() => this.refresh());
     this._offGraphics = graphicsSettings?.onChange(() => this.refresh());
+    this._offView = viewSettings?.onChange(() => this.refresh());
     this._offProfile = profile?.onChange(() => this.refresh());
     this.refresh();
   }
@@ -406,6 +423,15 @@ export class SettingsScene {
        */
       case 'graphics':
         return `그래픽   ${TIER_NAMES[this.graphicsSettings?.tier ?? 0] ?? ''}`;
+      /**
+       * "카메라 추적" 이지 "발사 뚜껑 추적" 이 아니다.
+       *
+       * 개발자 패널의 같은 값은 뒤쪽 이름을 쓴다 — 거기서는 무엇을 따라가는지가
+       * 요점이기 때문이다. 여기서는 움직이는 것이 카메라라는 쪽이 요점이고, 이
+       * 줄을 끄러 오는 사람은 "카메라가 자꾸 움직인다" 를 고치러 온 것이다.
+       */
+      case 'track':
+        return `카메라 추적   ${this.viewSettings?.trackCamera ? '켬' : '끔'}`;
       case 'nickname':
         // '없음' rather than a blank: an empty right-hand column reads as a
         // broken row, and "you have not chosen one" is the thing worth saying.
@@ -573,6 +599,13 @@ export class SettingsScene {
       return true;
     }
 
+    // 오디오보다 위인 것도 그래픽과 같은 이유다: 소리 없는 빌드에서도 카메라는
+    // 끌 수 있어야 한다.
+    if (id === 'track' && this.viewSettings) {
+      this.viewSettings.toggleTrackCamera();
+      return true;
+    }
+
     if (!this.audioSettings) return false;
 
     if (id.startsWith('vol:')) {
@@ -660,6 +693,7 @@ export class SettingsScene {
   dispose() {
     this._off?.();
     this._offGraphics?.();
+    this._offView?.();
     this._offProfile?.();
     this.panel.geometry.dispose();
     this.panel.material.uniforms.uMap.value?.dispose();

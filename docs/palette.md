@@ -89,7 +89,11 @@ Pretendard 로 해결되지만 Capacitor 빌드에는 들어가지 않는다. �
 | `android/.../drawable*/splash.png` | 스플래시 PNG 10장 | 아직 Capacitor 기본값. 재생성 필요 |
 
 `src/ui/styles.css` 는 닿는다 — `src/ui/cssPalette.js` 가 `--bcc-*` 커스텀
-프로퍼티로 밀어 넣는다. 스타일시트에 hex 리터럴을 쓰지 마라.
+프로퍼티로 밀어 넣는다. 스타일시트에 hex 리터럴을 쓰지 마라. **예외 하나**:
+`html, body` 의 `background` 는 `var(--bcc-void, #1a76c4)` 로 폴백을 갖는다.
+모듈 스크립트가 돌기 전 한두 프레임 동안 이 값이 필요하고, 그 프레임이 메뉴와
+경기 문서 사이의 이음매이기 때문이다 — 이유는 그 규칙 옆에 적혀 있다. 팔레트의
+`bg.skyTop` 을 바꾸면 여기도 손으로 맞춰라.
 
 ## 커밋 전
 

@@ -1,59 +1,74 @@
 /**
- * The five stages of the winning sequence, and the clock that walks them.
+ * The four stages of the ending, and the clock that walks them.
  *
  * It owns no three.js objects and draws nothing, exactly as `menu/Transition`
- * does for the cap wipe. It answers two questions per frame — which stage, and
+ * does for the way in. It answers two questions per frame — which stage, and
  * how far into it — and everything about what that LOOKS like is next door in
- * `VictoryLayer`.
+ * `VictoryLayer`, or in `main.js` for the one part of it that is the camera's.
  *
- *   1  ENTER    the losing cap is on screen, floating
- *   2  CHARGE   the winning cap crosses the frame
- *   3  IMPACT   the hit: shake, inversion, ring
- *   4  RESULT   the loser flips out of frame, the winner settles
- *   5  UI       the winner line, then the buttons
+ *   1  FREEZE   the board holds; the camera pushes in on what decided it
+ *   2  BARS     the letterbox closes over it
+ *   3  RESULT   the winner, and the mode's own number, in the band
+ *   4  RELEASE  the bars retreat and the two buttons come up
  *   -  DONE     everything is up and pressable
  *
  * ── it is not physics ───────────────────────────────────────────────────────
  * Nothing here integrates anything and Rapier is not involved. The brief rules
  * it out and there is a harder reason to want it ruled out: this plays at the
  * one moment the match has finished and its world has stopped stepping, so a
- * simulated collision here would be a second physics world running against a
+ * simulated anything here would be a second physics world running against a
  * first one that is deliberately frozen. It is a scripted path with a clock.
  *
- * ── stage 3 is counted in FRAMES ────────────────────────────────────────────
- * Two to four of them, per the brief. A duration in seconds would land on a
- * different number of frames depending on the display, and at three frames that
- * is the difference between a flash and nothing at all — the same argument
- * `CardFx` makes for `smashFlashFrames`, and this clock is where it is spent:
- * `update` is told how many frames are owed and counts them down itself.
+ * ── there were five stages and they were a cap fight ────────────────────────
+ * ENTER, CHARGE, IMPACT, RESULT, UI: the losing cap floated, the winning one
+ * crossed the frame, they collided, the loser flipped out and the winner sprang
+ * back. Stage 3 was counted in FRAMES rather than seconds — two to four of them
+ * — because a whole-frame flash at that length lands on a different number of
+ * frames depending on the display, and at three frames that is the difference
+ * between a flash and nothing at all.
+ *
+ * There is no impact any more, so there is no frame count here. That discipline
+ * did not go away with it: the one short beat left in this sequence is the
+ * glint on the winning caps, and `CardFx` draws it with its own timing — the
+ * same 원모어 flourish the card plays, played with no card behind it. The
+ * argument for counting it carefully is made in `CardFx._updateFlash`, which is
+ * where it is actually spent. Two counters for one beat is two beats.
+ *
+ * ── a DRAW takes the same four stages ───────────────────────────────────────
+ * There used to be a `jumpTo` and one caller: a draw, which had no loser to be
+ * hit and therefore nothing for four of the five stages to say, so it skipped
+ * straight to the text. That was backwards. A draw is the result that most
+ * needs explaining — why did it stop, rounds or time? — and it was the one
+ * getting the least. The camera has something to push in on either way, the
+ * bars close either way, and the number in the band is what answers the
+ * question. So there is no jump and no branch: 무승부 is a different string in
+ * the same sequence.
  *
  * ── the skip lands on DONE, not on the end of a stage ───────────────────────
- * A press during the animation goes straight to the pressable screen. That is
+ * A press during the sequence goes straight to the pressable screen. That is
  * the whole of it — there is no half-skip and no fast-forward, because a player
  * pressing through a flourish wants the thing behind it, not a quicker version
  * of the flourish. `VictoryLayer.skip` snaps every animated value to its final
- * state in the same call, so the frame after a skip is identical to the frame
- * the sequence would have reached on its own.
+ * state in the same call and `main.js` lands the camera, so the frame after a
+ * skip is identical to the frame the sequence would have reached on its own.
  */
 
 export const VICTORY_STAGE = {
   IDLE: 'idle',
-  ENTER: 'enter',
-  CHARGE: 'charge',
-  IMPACT: 'impact',
+  FREEZE: 'freeze',
+  BARS: 'bars',
   RESULT: 'result',
-  UI: 'ui',
+  RELEASE: 'release',
   DONE: 'done',
 };
 
 /** Stage order, for `atOrPast`. */
 const ORDER = [
   VICTORY_STAGE.IDLE,
-  VICTORY_STAGE.ENTER,
-  VICTORY_STAGE.CHARGE,
-  VICTORY_STAGE.IMPACT,
+  VICTORY_STAGE.FREEZE,
+  VICTORY_STAGE.BARS,
   VICTORY_STAGE.RESULT,
-  VICTORY_STAGE.UI,
+  VICTORY_STAGE.RELEASE,
   VICTORY_STAGE.DONE,
 ];
 
@@ -64,12 +79,8 @@ export class VictoryClock {
     this.stage = VICTORY_STAGE.IDLE;
     /** 0..1 through the current stage. 1 while DONE. */
     this.t = 0;
-    /** Seconds since `begin`, excluding the frames stage 3 held for. */
+    /** Seconds inside the current stage. */
     this.elapsed = 0;
-    /** Frames of stage 3 still owed. */
-    this._impactLeft = 0;
-    /** Frames of stage 3 already served. For the inversion's own counter. */
-    this.impactFrame = 0;
     this._skipped = false;
   }
 
@@ -92,11 +103,9 @@ export class VictoryClock {
   }
 
   begin() {
-    this.stage = VICTORY_STAGE.ENTER;
+    this.stage = VICTORY_STAGE.FREEZE;
     this.t = 0;
     this.elapsed = 0;
-    this._impactLeft = Math.max(1, Math.round(this.tuning.impactFrames));
-    this.impactFrame = 0;
     this._skipped = false;
   }
 
@@ -106,45 +115,34 @@ export class VictoryClock {
     this._skipped = true;
     this.stage = VICTORY_STAGE.DONE;
     this.t = 1;
-    this._impactLeft = 0;
-    // Left where the hit finished rather than zeroed, so anything reading it
-    // after a skip sees "the inversion is over" and not "it never happened".
-    this.impactFrame = Math.max(1, Math.round(this.tuning.impactFrames));
-    return true;
-  }
-
-  /**
-   * Drop straight into a named stage, mid-run.
-   *
-   * One caller: a DRAW, which has no loser to hit and therefore nothing for
-   * stages 1 to 4 to say — see `VictoryLayer.begin`. It is a jump and not a
-   * skip: `skipped` stays false, because nobody pressed anything.
-   */
-  jumpTo(stage) {
-    if (!this.running) return;
-    this.stage = stage;
     this.elapsed = 0;
-    this.t = stage === VICTORY_STAGE.DONE ? 1 : 0;
-    this._impactLeft = stage === VICTORY_STAGE.IMPACT ? Math.max(1, Math.round(this.tuning.impactFrames)) : 0;
+    return true;
   }
 
   reset() {
     this.stage = VICTORY_STAGE.IDLE;
     this.t = 0;
     this.elapsed = 0;
-    this._impactLeft = 0;
-    this.impactFrame = 0;
     this._skipped = false;
+  }
+
+  /** How long the named stage lasts, in seconds. */
+  _span(stage) {
+    const c = this.tuning;
+    if (stage === VICTORY_STAGE.FREEZE) return c.freezeSeconds;
+    if (stage === VICTORY_STAGE.BARS) return c.barSeconds;
+    if (stage === VICTORY_STAGE.RESULT) return c.resultSeconds;
+    return c.releaseSeconds;
   }
 
   /**
    * One frame of the clock.
    *
-   * ── stage 3 does not consume dt, and that is deliberate ──────────────────
-   * It is a frame count, so it advances once per CALL however long the frame
-   * was. A tab that comes back after a second hands `tick` a clamped 50 ms and
-   * that is still one frame of inversion, not thirty — which is the behaviour
-   * you want, because the inversion is a thing done to a FRAME.
+   * The stage lengths are read HERE rather than latched at `begin`, so a slider
+   * dragged mid-sequence changes what is being watched. That is the whole point
+   * of the panel having them, and it is the mistake the old clock made and had
+   * to fix: a length read once at the start left the panel doing nothing until
+   * the next playthrough.
    *
    * @param {number} dt  render seconds, already clamped by the caller
    * @returns {{stage: string, t: number}}
@@ -152,54 +150,16 @@ export class VictoryClock {
   update(dt) {
     if (!this.running || this.done) return { stage: this.stage, t: this.t };
 
-    const c = this.tuning;
-
-    if (this.stage === VICTORY_STAGE.IMPACT) {
-      this.impactFrame++;
-      this._impactLeft--;
-      const total = Math.max(1, Math.round(c.impactFrames));
-      this.t = Math.min(1, this.impactFrame / total);
-      if (this._impactLeft <= 0) {
-        this.stage = VICTORY_STAGE.RESULT;
-        this.t = 0;
-        this.elapsed = 0;
-      }
-      return { stage: this.stage, t: this.t };
-    }
-
     this.elapsed += dt;
-
-    const span =
-      this.stage === VICTORY_STAGE.ENTER
-        ? c.enterSeconds
-        : this.stage === VICTORY_STAGE.CHARGE
-          ? c.chargeSeconds
-          : this.stage === VICTORY_STAGE.RESULT
-            ? c.resultSeconds
-            : c.uiSeconds;
-
-    this.t = Math.min(1, this.elapsed / Math.max(1e-4, span));
+    const span = Math.max(1e-4, this._span(this.stage));
+    this.t = Math.min(1, this.elapsed / span);
 
     if (this.elapsed >= span) {
       this.elapsed = 0;
       this.t = 0;
-      if (this.stage === VICTORY_STAGE.ENTER) this.stage = VICTORY_STAGE.CHARGE;
-      else if (this.stage === VICTORY_STAGE.CHARGE) {
-        this.stage = VICTORY_STAGE.IMPACT;
-        /**
-         * The frame count is read HERE, at the hit, and not at `begin`.
-         *
-         * It was read at `begin` first, which is wrong twice over. The small
-         * wrong is that dragging the slider mid-sequence then did nothing until
-         * the next playthrough, on a panel whose whole purpose is that a value
-         * moved while watching changes what is being watched. The real wrong is
-         * that it made the count depend on how the stage was ARRIVED at — a jump
-         * straight into `charge` left it at whatever the previous run had
-         * finished on, and the hit lasted that long or not at all.
-         */
-        this._impactLeft = Math.max(1, Math.round(this.tuning.impactFrames));
-        this.impactFrame = 0;
-      } else if (this.stage === VICTORY_STAGE.RESULT) this.stage = VICTORY_STAGE.UI;
+      if (this.stage === VICTORY_STAGE.FREEZE) this.stage = VICTORY_STAGE.BARS;
+      else if (this.stage === VICTORY_STAGE.BARS) this.stage = VICTORY_STAGE.RESULT;
+      else if (this.stage === VICTORY_STAGE.RESULT) this.stage = VICTORY_STAGE.RELEASE;
       else {
         this.stage = VICTORY_STAGE.DONE;
         this.t = 1;

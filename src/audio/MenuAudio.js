@@ -239,10 +239,10 @@ export class MenuAudio {
     if (stage !== this._stage) {
       const before = this._stage;
       this._stage = stage;
-      // LAUNCH and COVER both have callbacks in `bootMenu`, but COVER's fires
-      // from two places — the cover branch and a long-frame backstop in the exit
-      // branch — so the stage edge is the honest single event for both.
-      if (stage === STAGE.LAUNCH) this.audio.play('menu_launch');
+      // POP and COVER both have callbacks in `bootMenu`, but COVER's fires from
+      // two places — the cover branch and a long-frame backstop past it — so the
+      // stage edge is the honest single event for both.
+      if (stage === STAGE.POP) this.audio.play('menu_launch');
       else if (stage === STAGE.COVER && before !== STAGE.COVER) this.audio.play('menu_cover');
     }
 

@@ -320,8 +320,8 @@ export class MarkTextures {
    * The bake already contains the cap's paint, so multiplying by the team colour
    * a second time would square it — a red cap would come out maroon and the
    * mark's own colours would be dragged toward red with it. `capTexture.js`
-   * states the same contract from the other side, and `CapWipe` and the victory
-   * screen both already honour it.
+   * states the same contract from the other side, and the opening sequence
+   * already honours it.
    */
   get panelTint() {
     return PALETTE.untinted;

@@ -1,6 +1,6 @@
 import GUI from 'lil-gui';
 import { Mesh, PlaneGeometry, ShaderMaterial } from 'three';
-import { WIPE_FRAME } from './CapWipe.js';
+import { FRAME } from '../core/frame.js';
 import { STAGE } from './Transition.js';
 import { CONFIG } from '../game/config.js';
 import { onQualityChange, QUALITY, TIER_NAMES } from '../core/quality.js';
@@ -15,17 +15,22 @@ import { addAudioFolder } from '../audio/audioDebug.js';
  *
  * ── the gap check is the one control here that is not a slider ──────────────
  * "완전 차폐 프레임 시각화 (빈틈 확인용)" cannot be answered by looking. The
- * covered window is three frames long, the cap is spinning through it, and a
- * one-pixel wedge of background at a corner for two frames is both entirely
- * possible and completely invisible at speed.
+ * covered window is a third of a second and a one-pixel wedge of background
+ * along an edge is both entirely possible and easy to miss.
  *
- * So it is measured instead. `CapWipe.margin()` is how far the panel's opaque
- * disc reaches past the frame's furthest corner, in frame pixels, computed from
- * the panel radius measured off the geometry the mesh is drawing. The readout
- * shows it live and remembers the WORST value seen during the last covered
- * window; anything at or below zero is a gap and is reported as one. The
- * checkerboard behind the overlay is the visual half of the same thing — if any
- * of it is ever visible during stage 3, the cap did not cover the screen.
+ * It used to be measured, because the cover was a spinning cap and how far its
+ * opaque disc reached past the frame's furthest corner was a real number that
+ * could go negative. Two rectangles cannot: `Cinematic` anchors each bar to the
+ * frame's own edge, grows it inward and overhangs it, so at `bars = 1` the two
+ * meet in the middle and coverage is a fact about the arithmetic rather than a
+ * measurement.
+ *
+ * What is left is the visual half, and it is worth keeping because the vertex
+ * SNAP is still free to move an edge: the checkerboard sits behind the bars in
+ * their own overlay scene, and if any of it is ever visible while the readout
+ * says the bars are shut, they are not covering the screen. The readout beside
+ * it is the two scalars themselves — `bars` and `uiGate` — because with the
+ * measurement gone they are the whole of the state.
  */
 
 const CHECKER_FRAG = /* glsl */ `
@@ -50,7 +55,7 @@ export function bootMenuDebug(ctx) {
     return { frame() {}, gui: null };
   }
 
-  const { config, bottle, wipe, transition, retro, composer, viewport, overlay } = ctx;
+  const { config, bottle, cinematic, transition, retro, composer, viewport, overlay } = ctx;
   /** Frame counter for the audio readouts' slow poll. See the return below. */
   let audioTick = 0;
   const gui = new GUI({ title: 'MENU / 병 + 전환' });
@@ -59,7 +64,7 @@ export function bootMenuDebug(ctx) {
   const stats = { tris: '', stage: '', cover: '' };
   const triRow = gui.add(stats, 'tris').name('삼각형').disable();
   const stageRow = gui.add(stats, 'stage').name('단계').disable();
-  const coverRow = gui.add(stats, 'cover').name('차폐 여유 (px)').disable();
+  const coverRow = gui.add(stats, 'cover').name('레터박스').disable();
 
   /** The bottle's own budget from the brief. The cap is measured separately. */
   const BUDGET = [1200, 2000];
@@ -79,7 +84,7 @@ export function bootMenuDebug(ctx) {
 
   // ── the gap check ────────────────────────────────────────────────────────
   const checker = new Mesh(
-    new PlaneGeometry(WIPE_FRAME.width, WIPE_FRAME.height),
+    new PlaneGeometry(FRAME.width, FRAME.height),
     new ShaderMaterial({
       vertexShader: CHECKER_VERT,
       fragmentShader: CHECKER_FRAG,
@@ -87,13 +92,12 @@ export function bootMenuDebug(ctx) {
       depthWrite: false,
     }),
   );
-  // Behind the cap in the overlay, and only ever on when the check is on.
-  checker.position.z = -500;
+  // Behind the bars in their overlay, and only ever on when the check is on.
+  checker.position.z = -5;
   checker.renderOrder = -1000;
   checker.visible = false;
   overlay.add(checker);
 
-  let worstMargin = Infinity;
   let lastStage = STAGE.IDLE;
 
   // ── the bottle's profile ─────────────────────────────────────────────────
@@ -181,18 +185,22 @@ export function bootMenuDebug(ctx) {
   refreshTotal();
 
   run.add(config.transition, 'shakeSeconds', 0, 1, 0.01).name('1 흔들림 (s)').onChange(refreshTotal);
-  run.add(config.transition, 'launchSeconds', 0.05, 1, 0.01).name('2 발사 (s)').onChange(refreshTotal);
-  run.add(config.transition, 'coverSeconds', 0.016, 1.2, 0.008).name('3 차폐 — 로고 노출 (s)').onChange(refreshTotal);
-  run.add(config.transition, 'exitSeconds', 0.05, 1, 0.01).name('4 빠져나가기 (s)').onChange(refreshTotal);
-  run.add(config.wipe, 'spinSpeed', 0, 6, 0.05).name('뚜껑 회전 속도 (rev/s)');
-  run.add(config.wipe, 'axisTilt', 0, 45, 0.5).name('회전축 기울기 (도)');
-  run.add(config.wipe, 'startScale', 0.005, 0.4, 0.005).name('시작 스케일 비율');
-  run.add(config.wipe, 'coverSafety', 1, 1.6, 0.01).name('차폐 여유 배수');
-  run.add(config.wipe, 'exitGrowth', 1, 2.5, 0.01).name('빠질 때 확대율');
-  run.add(config.wipe, 'exitTravel', 400, 2500, 10).name('빠질 때 이동 거리 (px)');
+  run.add(config.transition, 'barSeconds', 0.05, 1, 0.01).name('2 바 닫힘 (s)').onChange(refreshTotal);
+  run.add(config.transition, 'popSeconds', 0.02, 0.6, 0.01).name('2 뚜껑 튀어오름 (s)');
+  run.add(config.transition, 'coverSeconds', 0.016, 1.2, 0.008).name('3 차폐 (s)').onChange(refreshTotal);
   run.add(config.bottle, 'burstSeconds', 0, 0.5, 0.01).name('분출 지속 (s)');
   run.add(config.bottle, 'burstSize', 0, 20, 0.1).name('분출 크기');
   run.add({ play: () => ctx.onPlay() }, 'play').name('▶ 전환 강제 재생 (설정으로)');
+  /**
+   * The other half of that button, and the reason `Transition.skip` still
+   * exists. The covered frame is three frames long — it is where the scene swap
+   * happens and it is the one part of the run you cannot catch by looking. This
+   * lands on its FIRST frame; see `Transition.skip` for why it lands there and
+   * not at the end of the run.
+   */
+  run
+    .add({ go: () => transition.skip() }, 'go')
+    .name('▶ 커버로 건너뛰기');
 
   const checks = gui.addFolder('검증');
   const flags = { checker: false, wireframe: false };
@@ -290,30 +298,21 @@ export function bootMenuDebug(ctx) {
 
   /** Called once a frame from the loop. */
   function frame(state) {
-    checker.visible = flags.checker && wipe.root.visible;
+    // Only while the bars are doing something: at rest the overlay is empty and
+    // a checkerboard behind nothing is a checkerboard over the whole menu.
+    checker.visible = flags.checker && cinematic.bars > 0;
 
     if (state.stage !== lastStage) {
       lastStage = state.stage;
       stats.stage = state.stage;
       stageRow.updateDisplay();
-      if (state.stage === STAGE.LAUNCH) worstMargin = Infinity;
     }
 
-    // Sampled only while the frame is meant to be opaque. Outside stage 3 the
-    // margin is negative by design and averaging that in would make the worst
-    // case meaningless.
-    if (state.stage === STAGE.COVER) {
-      const m = wipe.margin();
-      if (m < worstMargin) worstMargin = m;
-    }
-
-    const now = wipe.root.visible ? wipe.margin() : NaN;
-    const worst = Number.isFinite(worstMargin) ? worstMargin : null;
+    const bars = cinematic.bars;
+    const px = Math.round((bars * FRAME.height) / 2);
     stats.cover =
-      `현재 ${Number.isFinite(now) ? now.toFixed(0) : '—'}` +
-      (worst === null
-        ? '  · 차폐 최저 —'
-        : `  · 차폐 최저 ${worst.toFixed(0)}${worst <= 0 ? '  ⚠ 빈틈' : '  OK'}`);
+      `bars ${bars.toFixed(2)} (${px}px)  ·  gate ${cinematic.uiGate.toFixed(2)}` +
+      (bars >= 1 ? '  차폐' : bars > 0 ? '  레터박스' : '');
     coverRow.updateDisplay();
   }
 
@@ -410,8 +409,8 @@ export function bootMenuDebug(ctx) {
    * ── 사운드 ────────────────────────────────────────────────────────────────
    * The same folder the game page's panel builds, from the same file. The menu
    * owns four sound-producing things the match page has never heard of — the
-   * bottle being worked up, the cap wipe, the mark editor's brush and every one
-   * of the confirm dialogs — and they are tuned by these very sliders, so the
+   * bottle being worked up, the transition, the mark editor's brush and every
+   * one of the confirm dialogs — and they are tuned by these very sliders, so the
    * folder belongs on both panels or on neither.
    */
   const audioPanel = ctx.audio
