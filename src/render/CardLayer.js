@@ -955,6 +955,15 @@ export class CardLayer {
    *
    * The alternative was to make the hand smaller until it stopped overlapping,
    * which is not a fix — it is the same collision with less of it.
+   *
+   * ── re-measured when 철벽 made the draw pool six ──────────────────────────
+   * A sixth card in `CardHands.DRAWABLE` does NOT make the hand six: the
+   * ceiling is `config.cards.handLimit`, still 5, and the pool has never had
+   * anything to do with it — duplicates already meant five cards could be any
+   * five. Measured on a 900x620 viewport with a full five-card hand held fully
+   * raised, one of the four own caps had a card quad over it and the reserved
+   * rule handed all four back to the board. So the fan's footprint is exactly
+   * what it was, and the numbers above stand.
    */
   _reserved(clientX, clientY) {
     return this._isReserved(clientX, clientY);

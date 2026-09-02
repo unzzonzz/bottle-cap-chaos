@@ -101,6 +101,25 @@ export const survivalStrategy = {
         reach: cfg.threat.reach,
         pushDistance: cfg.threat.pushDistance,
       },
+      /**
+       * Each cap's mass multiplier, so the threat model can be told which caps
+       * are braced. 1 for everything on a board with no 철벽 on it.
+       *
+       * ── read off the WORLD, and that is what makes it work both ways ───────
+       * `capMassMul` asks the body. So a brace the HUMAN played is already in
+       * the arena by the time this runs — `Match._syncCapMass` puts it there
+       * before the turn's snapshot is taken — and the AI answers the opponent's
+       * card without anything here knowing whose card it was. Reading
+       * `CardEffects` instead would have needed the caster and the beneficiary
+       * kept straight, and would have been a second copy of §2-A's own rule
+       * about when the brace is live.
+       *
+       * The ROLLOUTS need none of this: they restore the same snapshot into a
+       * real Rapier world, and mass rides along in the bytes. What is corrected
+       * here is only the closed-form summary — `dangerMap` and the two threat
+       * terms — which is the part that never runs a solver.
+       */
+      massMul: Array.from({ length: arena.capCount }, (_, i) => arena.capMassMul(i)),
     };
   },
 

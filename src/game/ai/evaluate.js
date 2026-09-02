@@ -96,10 +96,18 @@ function exitDistance(p, ux, uz, safeRadius) {
  * Worst case over the enemies, not the sum. Two attackers do not make a cap
  * twice as dead, and summing would make a crowd of distant caps read as more
  * dangerous than one lined up at point-blank range.
+ *
+ * ── `push` is PER CAP, and defaults to the shared figure ────────────────────
+ * 철벽 makes a cap heavier, so the same hit moves it less and the run to the
+ * edge it can survive is longer. A single global constant here would price a
+ * braced cap exactly as it prices a bare one, and the AI would spend its turn
+ * answering a danger the card has already removed — and, on the other side of
+ * the board, refuse an attack that has genuinely stopped working. See
+ * `pushDistanceFor`, which is what every caller passes.
  */
-function threatOn(p, enemies, cfg, safeRadius) {
+function threatOn(p, enemies, cfg, safeRadius, push = cfg.pushDistance) {
   const reach = Math.max(1e-3, cfg.reach);
-  const push = Math.max(1e-3, cfg.pushDistance);
+  push = Math.max(1e-3, push);
   let worst = 0;
   for (const e of enemies) {
     const dx = p.x - e.x;
@@ -113,6 +121,36 @@ function threatOn(p, enemies, cfg, safeRadius) {
     if (t > worst) worst = t;
   }
   return worst;
+}
+
+/**
+ * How far a shot actually shifts THIS cap, in world units.
+ *
+ * ── both halves of this are measured, and neither is the obvious one ────────
+ * SPEED: a cap is not shot, it is HIT, and a collision does not deliver a fixed
+ * impulse — it delivers `m1(1+e)v1 / (m1+m2)`. So a cap whose mass is multiplied
+ * by `a` takes `2 / (1 + a)` of the shove, not `1 / a`. `CardEffects.massMulFor`
+ * has the measurements; the short version is that at a = 1.5 the two predictions
+ * differ by 0.80 against 0.67, which is most of the card.
+ *
+ * DISTANCE: friction decelerates at `a = μg` and is therefore mass-independent,
+ * so a cap that starts at `v` travels `v²/2a` whatever it weighs. Distance goes
+ * as the SQUARE of the speed ratio. Measured on an isolated cap: 21.59 units
+ * bare against 9.69 braced, a ratio of 0.449 against a prediction of 0.444.
+ *
+ * So the factor is `(2/(1+a))²`, and a linear one would price the card at about
+ * half of what it does.
+ *
+ * `capMassMul` reads the live body rather than the card state, which is what
+ * makes this right for BOTH sides: a brace the human played is in the world by
+ * the time the AI's context is built, so the AI answers the opponent's card
+ * without anything here knowing whose it was.
+ */
+function pushDistanceFor(ctx, i) {
+  const a = ctx.massMul?.[i] ?? 1;
+  if (!(a > 1)) return ctx.threat.pushDistance;
+  const speed = 2 / (1 + a);
+  return ctx.threat.pushDistance * speed * speed;
 }
 
 /**
@@ -201,7 +239,13 @@ export function evaluateSurvival(result, ctx) {
      * with nobody in range does not. Retreating is now driven by BEING IN
      * DANGER rather than by inward being generically good.
      */
-    terms.selfThreat += threatOn(p, foeAfter.map((f) => f.p), ctx.threat, ctx.safeRadius);
+    terms.selfThreat += threatOn(
+      p,
+      foeAfter.map((f) => f.p),
+      ctx.threat,
+      ctx.safeRadius,
+      pushDistanceFor(ctx, i),
+    );
 
     // A small credit for moving inward, kept as a tiebreaker. It used to be the
     // main reason the AI ever retreated, which is why it retreated constantly.
@@ -222,10 +266,18 @@ export function evaluateSurvival(result, ctx) {
    * up behind one is worth something, so the AI can build a position over two
    * turns instead of only ever taking shots that resolve immediately.
    */
-  for (const { p } of foeAfter) {
+  // `i` as well as `p`, which it did not need until 철벽: how far an opponent's
+  // cap can be shoved is now a fact about WHICH cap it is.
+  for (const { i, p } of foeAfter) {
     const edge = edgeFraction(p, ctx.safeRadius);
     terms.foeEdge += edge * edge;
-    terms.foeThreat += threatOn(p, mineAfter.map((m) => m.p), ctx.threat, ctx.safeRadius);
+    terms.foeThreat += threatOn(
+      p,
+      mineAfter.map((m) => m.p),
+      ctx.threat,
+      ctx.safeRadius,
+      pushDistanceFor(ctx, i),
+    );
   }
 
   const mineLeft = mineAfter.length;
@@ -343,12 +395,13 @@ export function dangerMap(player, ctx) {
   for (let i = 0; i < capOwner.length; i++) {
     if (!alive[i] || capOwner[i] !== player) continue;
     const p = before[i];
-    const level = threatOn(p, enemies, threat, safeRadius);
+    const push = pushDistanceFor(ctx, i);
+    const level = threatOn(p, enemies, threat, safeRadius, push);
     // The enemy responsible, so the caller can run the other way.
     let from = null;
     let worst = -1;
     for (const e of enemies) {
-      const one = threatOn(p, [e], threat, safeRadius);
+      const one = threatOn(p, [e], threat, safeRadius, push);
       if (one > worst) {
         worst = one;
         from = e;

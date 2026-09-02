@@ -1262,6 +1262,26 @@ export function bootPhysicsDebug({
       .filter((v) => c.silencedOn(v))
       .map((v) => `P${v + 1}←P${c.silence[v].by + 1} ${c.silenceTurnsLeft(v)}턴`);
     bits.push(silenced.length ? `침묵 ${silenced.join(' / ')}` : '침묵 —');
+    /**
+     * Who is braced, and what the WORLD actually did about it.
+     *
+     * Two facts rather than one, because under §2-A they are legitimately
+     * different: the card is armed from the moment it is played and the mass is
+     * only applied for the opponent's turn, so "철벽 P1" alone cannot answer the
+     * question this readout exists for — whether the cap in front of you is
+     * heavy right now. `capMassMul` asks the body, so the ×배율 shown is the one
+     * the solver is using and not the one the card intends.
+     */
+    const braced = [0, 1]
+      .filter((v) => c.resistOn(v))
+      .map((v) => {
+        const caps = match.arena.capOwner
+          .map((o, i) => (o === v ? i : -1))
+          .filter((i) => i >= 0);
+        const live = caps.some((i) => match.arena.capMassMul(i) > 1);
+        return `P${v + 1}${live ? ` ×${c.massMulFor(v).toFixed(2)}` : ' 대기'}`;
+      });
+    bits.push(braced.length ? `철벽 ${braced.join(' / ')}` : '철벽 —');
     const bad = match.swapOverlap?.length ?? 0;
     if (bad) bits.push(`⚠ 스왑 후 겹침 ${bad}`);
     fxStats.active = bits.join('  ·  ');
@@ -1296,6 +1316,7 @@ export function bootPhysicsDebug({
     ['chaos', '혼란'],
     ['onemore', '원모어'],
     ['smash', '강타'],
+    ['resist', '철벽'],
     ['silence', '침묵'],
   ]) {
     lengths.add(config.cards.fxSeconds, id, 0.1, 1, 0.05).name(label);
@@ -1326,6 +1347,7 @@ export function bootPhysicsDebug({
     ['chaos', '혼란'],
     ['onemore', '원모어'],
     ['smash', '강타'],
+    ['resist', '철벽'],
     ['silence', '침묵'],
   ]) {
     force
@@ -1853,6 +1875,7 @@ export function bootPhysicsDebug({
     aiFootball.add(fb.pitch, 'coverWidth', 0.5, 15, 0.1).name('커버 폭 (단위)');
     aiFootball.add(fb.pitch, 'supportRadius', 2, 40, 1).name('지원 판정 반경 (단위)');
     aiFootball.add(fb.cards, 'oneMoreMinScore', 0, 1200, 5).name('원모어: 최소 이득 (축구)');
+    aiFootball.add(fb.cards, 'resistEdgeMin', 0, 1, 0.01).name('철벽: 최소 노출도 (축구)');
   }
 
   const aiSkill = ai.addFolder('실력 조절');
@@ -1869,6 +1892,7 @@ export function bootPhysicsDebug({
   cardJudge.add(aiCfg.cards, 'oneMoreMinScore', 0, 200, 1).name('원모어: 최소 이득');
   cardJudge.add(aiCfg.cards, 'chaosThreatMin', -1, 1, 0.01).name('혼란: 최소 위협도');
   cardJudge.add(aiCfg.cards, 'silenceMinCards', 0, 5, 1).name('침묵: 상대 최소 손패');
+  cardJudge.add(aiCfg.cards, 'resistEdgeMin', 0, 1, 0.01).name('철벽: 최소 노출도');
 
   const aiShow = ai.addFolder('턴 연출 길이');
   aiShow.add(aiCfg.show, 'cardPullSeconds', 0, 1, 0.01).name('카드 뽑기 (s)');

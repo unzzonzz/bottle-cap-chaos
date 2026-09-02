@@ -42,6 +42,7 @@ const CARD_FX_SOUND = {
   chaos: 'card_fx_chaos',
   onemore: 'card_fx_onemore',
   smash: 'card_fx_smash',
+  resist: 'card_fx_resist',
   swap: 'card_fx_swap',
 };
 
@@ -68,6 +69,15 @@ export class MatchAudio {
 
     /** Scratch for the frame's impacts, reused so a frame allocates nothing. */
     this._impacts = [];
+    /**
+     * The caps that took a hit this frame. Read by `CardFx`, for 철벽's ring.
+     *
+     * A Set rather than a list, because the only question asked of it is
+     * membership, once per braced cap per frame.
+     */
+    this.struckCaps = new Set();
+    /** Whether `observe` has already run for this frame. See `update`. */
+    this._observed = false;
 
     this._onCardUsed = () => this._cardUsed();
     window.addEventListener('cardused', this._onCardUsed);
@@ -106,6 +116,14 @@ export class MatchAudio {
     const rules = match?.rules;
 
     this._state = match?.state ?? null;
+    /**
+     * The state the CONTACT DETECTOR last looked in. A second latch, and it has
+     * to be a second one: `_state` is read in `update`, and the detector is read
+     * in `observe`, which runs earlier in the frame — see the note there. One
+     * latch shared between them would be flipped by whichever ran first and the
+     * other would never see the transition.
+     */
+    this._contactState = match?.state ?? null;
     this._lastTurn = match?.lastTurn ?? null;
     this._verdict = match?.lastVerdict ?? null;
     this._fxCard = null;
@@ -184,6 +202,71 @@ export class MatchAudio {
   }
 
   /** One render frame, after everything else has written its state. */
+  /**
+   * Look at the world. Play nothing.
+   *
+   * ── split out so the collision signal has ONE source ──────────────────────
+   * `ContactAudio` is the only thing in the project that detects a collision —
+   * there is no `EventQueue` anywhere, deliberately and permanently, and
+   * `ContactAudio`'s own header explains at length why the two read-only routes
+   * it combines are the whole of what is available. 철벽's ring has to flash on
+   * the frame a braced cap is hit, and a second detector built for it would be a
+   * second answer to the same question: the day the two disagreed, the sound and
+   * the flash would land on different frames and there would be no way to say
+   * which one was wrong.
+   *
+   * So the detection runs HERE, before `CardFx.update` in the frame, and both
+   * the sound and the ring read what it found. It must run exactly once a frame
+   * — `collect` diffs velocities against the last time it looked, and calling it
+   * twice would hand the second call a zero delta — which is what the latch
+   * below is for: whichever of `observe` and `update` comes first does the
+   * looking, and `update` clears the latch on the way out.
+   *
+   * Still strictly read-only. Every call it makes is a query, its randomness is
+   * its own stream, and a match played with the sound off produces the same
+   * hashes as one played with it on.
+   */
+  observe() {
+    const match = this.match;
+    if (!match || this._observed) return;
+    this._observed = true;
+
+    /**
+     * The detector's own state gate, asked HERE rather than in `_updateState`.
+     *
+     * Contacts are only meaningful while bodies move under their own power. A
+     * swap card and a ball respawn drive them KINEMATICALLY, so the velocities
+     * are commanded rather than solved and diffing across the boundary produces
+     * a phantom impact large enough to clip.
+     *
+     * It used to live in `_updateState`, which was fine while the collect was
+     * the last thing in the frame — the reset ran first and the collect found a
+     * cold detector. Now that the collect runs before `update` at all, leaving
+     * the gate there would let a transition frame be collected and PLAYED before
+     * anything reset it.
+     */
+    const state = match.state;
+    if (state !== this._contactState) {
+      const from = this._contactState;
+      this._contactState = state;
+      if (!PHYSICAL.has(state) || !PHYSICAL.has(from)) this.contacts.reset();
+    }
+
+    const impacts = this._impacts;
+    impacts.length = 0;
+    this.contacts.collect(match, impacts);
+
+    this.struckCaps.clear();
+    // Only while bodies are moving under their own power. Outside that the
+    // collect above is a re-sample rather than a reading — see `_updateBoard`.
+    if (PHYSICAL.has(match.state)) {
+      for (const hit of impacts) {
+        if (hit.capA >= 0) this.struckCaps.add(hit.capA);
+        if (hit.capB >= 0) this.struckCaps.add(hit.capB);
+      }
+    }
+  }
+
   update(dt) {
     const match = this.match;
     if (!match) return;
@@ -197,6 +280,9 @@ export class MatchAudio {
     this._updateBow();
     this._updateVictory();
     this._updateBoard(match, dt);
+    // Armed for the next frame. `observe` runs first when the caller asks for
+    // it and falls through to `_updateBoard` here when nobody does.
+    this._observed = false;
   }
 
   // ── the turn ──────────────────────────────────────────────────────────────
@@ -207,11 +293,8 @@ export class MatchAudio {
     const from = this._state;
     this._state = state;
 
-    // Contacts are only meaningful while bodies move under their own power. A
-    // swap card and a ball respawn drive them KINEMATICALLY, so the velocities
-    // are commanded rather than solved and diffing across the boundary produces
-    // a phantom impact large enough to clip.
-    if (!PHYSICAL.has(state) || !PHYSICAL.has(from)) this.contacts.reset();
+    // The contact detector's own reset used to be here and has moved to
+    // `observe`, which now runs before this does. See the note there.
 
     if (state === MATCH_STATE.AIM) this._fallen.clear();
 
@@ -604,24 +687,42 @@ export class MatchAudio {
    * announce it several hundred steps after it was worth hearing.
    */
   _updateBoard(match, _dt) {
-    const live = PHYSICAL.has(match.state);
+    // The reading itself belongs to `observe`, which may already have run this
+    // frame on `CardFx`'s behalf. Either way it happens exactly once.
+    this.observe();
 
+    const live = PHYSICAL.has(match.state);
     if (live) {
-      const impacts = this._impacts;
-      impacts.length = 0;
-      this.contacts.collect(match, impacts);
-      for (const hit of impacts) {
+      for (const hit of this._impacts) {
         this.audio.play(hit.id, { intensity: hit.intensity, gain: hit.gain ?? 1 });
+        /**
+         * 철벽's "it held", ON TOP OF the crack rather than instead of it.
+         *
+         * The collision genuinely happened, so the collision sound belongs. What
+         * the card changed is how it ENDED, and that is one short hard note on
+         * the tail rather than a different event.
+         *
+         * The test is the MASS, not the card. Under §2-A a player holding 철벽
+         * is not braced on their own turn, and a note that fired there would be
+         * claiming credit for a shove the card did nothing about — the same
+         * distinction `CardFx._updateResist` draws for the ring's flash, asked
+         * the same way so the two cannot disagree about what "held" means.
+         */
+        if (this._held(match, hit.capA) || this._held(match, hit.capB)) {
+          this.audio.play('resist_hold', { intensity: hit.intensity });
+        }
       }
-    } else {
-      this.contacts.collect(match, this._impacts);
-      this._impacts.length = 0;
     }
 
     this._updateSlide(match, live);
     this._updateFlips(match, live);
     this._updateFalls(match, live);
     // RESPAWN makes no sound at all. See the note in `soundBank`.
+  }
+
+  /** Was this cap actually heavier when it was hit? -1 is "not a cap". */
+  _held(match, index) {
+    return index >= 0 && (match.arena?.capMassMul(index) ?? 1) > 1;
   }
 
   /**

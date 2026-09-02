@@ -184,7 +184,26 @@ export class ContactAudio {
       intensity = intensity < 0.08 ? 0.08 : intensity > 1 ? 1 : intensity;
 
       const gain = partner.role === 'ground' ? Math.max(0, cfg.groundGain ?? 0.5) : 1;
-      events.push({ id, intensity, gain, dv: c.dv });
+      /**
+       * ── BOTH caps of the pair, and it has to be both ────────────────────
+       * One event is emitted per pair rather than per body, and the survivor is
+       * whichever half jumped hardest. That is right for the sound and wrong for
+       * anything that asks "was THIS cap hit", because the two halves of a
+       * cap-on-cap collision are not symmetric: 철벽 makes the braced cap the
+       * HEAVIER one, so it takes the smaller velocity change and is reliably the
+       * half that loses the sort. A reader given only `capA` would light up the
+       * striker and never the cap that actually held.
+       *
+       * -1 for a partner that is not a cap — a wall, the ball, the ground.
+       */
+      events.push({
+        id,
+        intensity,
+        gain,
+        dv: c.dv,
+        capA: c.rec.role === 'cap' ? c.rec.index : -1,
+        capB: partner.role === 'cap' ? partner.index ?? -1 : -1,
+      });
     }
 
     if (!events.length) return out;
@@ -235,7 +254,7 @@ export class ContactAudio {
       if (!touching) continue;
 
       bestRank = rank;
-      best = { role: role.role, key: role.key ?? `s${other}` };
+      best = { role: role.role, key: role.key ?? `s${other}`, index: role.index ?? -1 };
     }
     if (best) return best;
 
@@ -257,7 +276,7 @@ export class ContactAudio {
         const b = this._position(arena, other.rec);
         if (!b) continue;
         if (Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) <= reach) {
-          return { role: other.rec.role, key: other.rec.key };
+          return { role: other.rec.role, key: other.rec.key, index: other.rec.index };
         }
       }
     }
@@ -265,7 +284,7 @@ export class ContactAudio {
     // Something immovable, and we cannot say what. The dull sound is the safe
     // answer: a wall thud heard where a cap crack belonged is a small error, and
     // a crack heard off a wall is the one that sounds broken.
-    return { role: 'wall', key: 'wall' };
+    return { role: 'wall', key: 'wall', index: -1 };
   }
 
   /** From the latched transform buffer — plain floats, no WASM crossing. */

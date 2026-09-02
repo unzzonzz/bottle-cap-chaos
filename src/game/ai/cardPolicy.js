@@ -1,8 +1,8 @@
 /**
  * Whether to spend a card, and which.
  *
- * ── the five cards here are the five cards that EXIST ───────────────────────
- * 궤적, 혼란, 원모어, 강타, 침묵. Not 스왑 — that one is in `cardCatalog.SHELVED`
+ * ── the six cards here are the six cards that EXIST ─────────────────────────
+ * 궤적, 혼란, 원모어, 강타, 철벽, 침묵. Not 스왑 — that one is in `cardCatalog.SHELVED`
  * and is not in `CardHands.DRAWABLE`, so no orb can ever yield one and no hand
  * can ever hold one. Writing a judgment for it would be a rule for a card that
  * cannot be played, and the first person to read this file would reasonably
@@ -207,6 +207,52 @@ export function decideCard(s) {
       return { play: false, why: `상대가 유리한 상황이 아니다 (위협 ${threat.toFixed(2)})` };
     }
     return { play: true, why: `상대가 유리 — 다음 발사를 흐트러뜨린다 (위협 ${threat.toFixed(2)})` };
+  });
+
+  /**
+   * 철벽 — brace my own caps against the opponent's reply.
+   *
+   * ── the only card here judged on MY position rather than on my SHOT ────────
+   * 강타 and 궤적 are decided by simulating the shot about to be taken. 혼란 and
+   * 침묵 are decided by what the opponent can do next. This one is decided by
+   * where my own caps are standing, which is a question none of the other four
+   * asks — and it is the whole of the card's value, because a brace is worth
+   * exactly as much as the shove it prevents.
+   *
+   * ── a cap in the middle of the board cannot be pushed off ──────────────────
+   * That is why the threshold is on exposure and not simply "am I under
+   * threat". Being shoved is only fatal near the brink; a cap in the middle
+   * takes the same hit, travels the same distance, and is still on the board.
+   * Playing the card there spends it to prevent an outcome that was not going
+   * to happen, which is the failure mode the header calls "무조건 쓰지 마라".
+   *
+   * `myEdgeRisk` is the worst of my caps rather than the average, deliberately:
+   * a brace covers every cap I own, so what it is worth is set by the one that
+   * is actually in danger. Averaging would let three safe caps talk the AI out
+   * of saving the fourth.
+   *
+   * ── it reads the same in football, which is why the field is shared ────────
+   * There `myEdgeRisk` is the pressure on my NET, and the rule comes out as
+   * "brace when they are close to scoring" — which is when my caps being shoved
+   * out of the lane is what loses the goal. The scales differ, so the threshold
+   * is overridden per mode; see `config.ai.football.cards`.
+   *
+   * Rank 2, with 혼란 and 침묵: like those two it acts on the opponent's turn, so
+   * a card that improves THIS shot is decided first.
+   */
+  consider('resist', 2, () => {
+    if (s.myCaps === 0) return { play: false, why: '지킬 뚜껑이 없다' };
+    if (s.foeCaps === 0) return { play: false, why: '상대에게 남은 뚜껑이 없다 — 밀 사람이 없다' };
+    if (s.myEdgeRisk < t.resistEdgeMin) {
+      return {
+        play: false,
+        why: `내 뚜껑이 판 안쪽에 있다 (노출 ${s.myEdgeRisk.toFixed(2)}) — 밀려도 죽지 않는다`,
+      };
+    }
+    return {
+      play: true,
+      why: `가장자리에 몰려 있다 (노출 ${s.myEdgeRisk.toFixed(2)}) — 다음 발사를 버틴다`,
+    };
   });
 
   /**

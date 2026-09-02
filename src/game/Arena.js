@@ -133,6 +133,29 @@ export class Arena {
     this.capOwner = [];
     /** @type {string[]} placement label per cap. Decoration; no rule reads it. */
     this.capRole = [];
+    /**
+     * Each cap's mass with nothing armed, read back off Rapier at build time.
+     *
+     * Held so that releasing 철벽 is a RESTORE and never a division. `m *= k`
+     * followed by `m /= k` does not come back to `m` in floating point, and a
+     * cap that ends a match a few ulps heavier than it started is a cap whose
+     * whole future is a different match — the hash would not show it, because
+     * mass is not in the hash, and the divergence would surface a hundred turns
+     * later as a preview that no longer matched its own shot.
+     *
+     * See `setCapMassMul`, which is the only place mass is ever written.
+     */
+    this._capBaseMass = [];
+    /**
+     * The multiplier currently ON each cap, and the world generation it was
+     * observed in. See `PhysicsWorld.generation`.
+     *
+     * The stamp is the whole of why this is safe to cache. A snapshot carries
+     * mass, so a rewind can hand back a cap that disagrees with this array —
+     * comparing generations turns that from a silent staleness into a re-apply.
+     */
+    this._capMassMul = [];
+    this._massGeneration = -1;
 
     /** -1 when the layout has no ball. */
     this.ballBody = -1;
@@ -251,6 +274,11 @@ export class Arena {
 
     const index = this.capBodies.length;
     this.capBodies.push(body.handle);
+    // AFTER the colliders, which are where the mass comes from: Rapier sums
+    // their contributions when the last one is attached, so asking before this
+    // point reads a massless body.
+    this._capBaseMass.push(body.mass());
+    this._capMassMul.push(1);
     this.capColliders.push(handles);
     this.capOwner.push(p.owner ?? 0);
     this.capRole.push(p.role ?? '');
@@ -328,6 +356,9 @@ export class Arena {
     this.capColliders = [];
     this.capOwner = [];
     this.capRole = [];
+    this._capBaseMass = [];
+    this._capMassMul = [];
+    this._massGeneration = -1;
     this.ballBody = -1;
     this.ballCollider = -1;
     this._bodies = [];
@@ -391,6 +422,125 @@ export class Arena {
     body.setLinvel(zero, false);
     body.setAngvel(zero, false);
     body.sleep();
+  }
+
+  // ── mass ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Make a cap `mul` times as heavy as it was built. The only writer of mass.
+   *
+   * ── 철벽 is a mass card, and the alternatives were all worse ────────────────
+   * "Pushed back less, by a ratio" has exactly one clean expression in a
+   * rigid-body solver, and mass is it: a collision hands the struck body
+   * `m1(1+e)v1 / (m1+m2)`, so making `m2` larger scales the shove down and
+   * scales nothing else. What multiplier buys what ratio is `CardEffects.
+   * massMulFor`'s business, and it is not the obvious one — see there.
+   *
+   * Extra linear damping is a function of TIME, not a ratio — a hard hit still
+   * launches and then slows. Lower restitution makes a cap bounce less, which is
+   * not the same as being pushed less. A post-collision velocity clamp cannot
+   * tell a cap that was struck from a cap that was FIRED, so it would quietly
+   * weaken the braced player's own shots. And hooking the solver's contact
+   * impulses puts new JS in the middle of the physics step, which is a new risk
+   * for both determinism and the snapshot. Mass is the one that is simply true.
+   *
+   * ── additional mass, not a density, and never a division ───────────────────
+   * `setAdditionalMass` REPLACES whatever was previously added, so passing zero
+   * restores the collider-derived total exactly — measured bit-identical to the
+   * value read at build time, which is the property "해제는 곱셈의 역이 아니라
+   * 원래 값 복원" asks for. `_capBaseMass` is what the extra is computed from,
+   * so the arithmetic never chains: two multipliers in a row both derive from
+   * the same untouched base rather than from each other.
+   *
+   * `recomputeMassPropertiesFromColliders` is required — without it the change
+   * lands on the body but not on `mass()` until the next step, which would make
+   * the snapshot taken immediately afterwards a snapshot of the OLD mass. It
+   * scales the angular inertia by the same factor and leaves the centre of mass
+   * exactly where it was, both measured; a braced cap therefore resists spin as
+   * much as it resists being shoved, and still pitches over the same way.
+   *
+   * That last part is what keeps the rest of the collider's measurements true.
+   * `capCollider`'s whole argument is that the centre of mass sits at 62% of the
+   * cap's height and that this is why a cap pitches over instead of skating —
+   * a multiplier that moved it would have quietly rewritten that.
+   *
+   * ── called at state transitions, never per step ────────────────────────────
+   * A call per physics step would be a floating-point accumulation path for no
+   * gain. The guard below is what keeps it to one call per change, and the
+   * generation stamp is what keeps the guard honest across a rewind — see
+   * `PhysicsWorld.generation`.
+   *
+   * @param {number} index
+   * @param {number} mul  1 = as built. Below 1 is refused; nothing makes a cap
+   *   lighter, and a card that did would be a different card.
+   * @returns {boolean} whether anything was written
+   */
+  setCapMassMul(index, mul) {
+    const want = Math.max(1, mul);
+
+    // The world was replaced. Every entry now describes a world that no longer
+    // exists, so the whole array goes to UNKNOWN — not to 1, which would be a
+    // guess, and a snapshot may well have carried a brace back with it.
+    if (this._massGeneration !== this.physics.generation) {
+      this._massGeneration = this.physics.generation;
+      this._capMassMul.fill(Number.NaN);
+    }
+    if (this._capMassMul[index] === want) return false;
+
+    const body = this.physics.body(this.capBodies[index]);
+    const base = this._capBaseMass[index];
+    if (!body || !(base > 0)) return false;
+
+    /**
+     * Unknown is not the same as different. ASK the body before writing.
+     *
+     * Writing on a mere cache miss is the obvious thing and it is wrong, because
+     * `setAdditionalMass` takes a wake-up flag and a cap that is asleep is meant
+     * to stay that way. Waking every cap at the top of every turn puts them all
+     * back in the solver's active set, where gravity and the ground contact are
+     * integrated afresh — measured, that alone moved the knockout and football
+     * determinism digests on a run where nobody was holding the card at all.
+     * Curling stayed put only because `mode.cards === false` short-circuits
+     * before any of this, which made the fault read as a card problem when it
+     * was a wake-up.
+     *
+     * A ratio of two f32 masses is approximate, so this is a tolerance rather
+     * than an equality — but the two answers it has to tell apart are 1 and at
+     * least 1.2, and the ratio's own error is around 1e-7.
+     */
+    if (!Number.isFinite(this._capMassMul[index]) && Math.abs(body.mass() / base - want) < 1e-4) {
+      this._capMassMul[index] = want;
+      return false;
+    }
+
+    // Woken, because the mass genuinely just changed and a sleeping cap would
+    // otherwise carry the old inertia into the next contact it is dragged into.
+    // Reached only on a real transition — at most twice per card played.
+    body.setAdditionalMass(base * (want - 1), true);
+    body.recomputeMassPropertiesFromColliders();
+    this._capMassMul[index] = want;
+    return true;
+  }
+
+  /**
+   * What `index` is currently multiplied by, ASKED OF THE WORLD.
+   *
+   * Not read out of the write cache above. The cache exists to avoid redundant
+   * writes and is deliberately invalidated by a rewind; a reader that trusted it
+   * would answer 1 for a cap that came back from a snapshot heavy. The AI's
+   * threat model reads this to divide its push distance per cap, and a threat
+   * model that disagrees with the world it is modelling is worse than none.
+   *
+   * A ratio of two f32 masses, so it is approximate by construction — which is
+   * fine, because nothing physical is computed from it. `setCapMassMul` is what
+   * the solver sees, and it never divides.
+   */
+  capMassMul(index) {
+    const base = this._capBaseMass[index];
+    if (!(base > 0)) return 1;
+    const body = this.physics.body(this.capBodies[index]);
+    if (!body) return 1;
+    return Math.max(1, body.mass() / base);
   }
 
   // ── live tuning ──────────────────────────────────────────────────────────

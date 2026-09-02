@@ -12,6 +12,7 @@ import { CapSwap } from '../game/cards/CapSwap.js';
 import { FxMaterials } from './FxMaterial.js';
 import {
   auraTexture,
+  braceTexture,
   dashTexture,
   flashTexture,
   flatTexture,
@@ -139,6 +140,34 @@ const SMASH_PALETTE = [
   [1.0, 0.72, 0.40],
 ];
 
+/**
+ * 철벽의 팔레트. 일곱 항목이고, 그 길이가 요점이다.
+ *
+ * ── 주기가 서로 소여야 하는 이유 ────────────────────────────────────────────
+ * 혼란 다섯, 강타 넷, 침묵 셋. 한 뚜껑이 강타와 철벽을 동시에 걸 수 있고 — 내
+ * 뚜껑에 강타를 장전한 채 상대 턴을 맞으면 그렇게 된다 — 두 표시가 한 박자로
+ * 돌면 그건 두 카드가 아니라 하나로 읽힌다. 일곱은 3·4·5 어느 것과도 서로 소이므로
+ * 세 표시가 다 겹쳐도 105 주기가 지나야 한 번 만난다.
+ *
+ * ── 그리고 아주 느리게 걷는다 ───────────────────────────────────────────────
+ * `resistPaletteCyclesPerSecond` 는 강타의 2.2 에 대해 0.55 다. 강타의 오라는
+ * 맥동한다 — 장전된 것이니까. 철벽은 **움직이지 않는 상태**이고, 맥동하는 단단함은
+ * 자기모순이다. 그래도 완전히 정지시키지 않은 것은, 아무것도 변하지 않는 스프라이트는
+ * 판에 인쇄된 무늬로 보이기 때문이다. 눈에 띄지 않을 만큼만 걷는다.
+ *
+ * 값의 폭이 좁은 것도 같은 이유다: 혼란의 팔레트는 흰색에서 분홍까지 가고, 이것은
+ * 강철빛 안에서만 움직인다. 밝기가 아니라 온도가 조금 바뀐다.
+ */
+const RESIST_PALETTE = [
+  [0.70, 0.84, 0.96],
+  [0.62, 0.79, 0.94],
+  [0.58, 0.74, 0.92],
+  [0.66, 0.81, 0.95],
+  [0.60, 0.77, 0.93],
+  [0.72, 0.86, 0.97],
+  [0.64, 0.80, 0.94],
+];
+
 const ONEMORE_TINT = [1.0, 0.86, 0.42];
 
 const SWAP_TINT = [0.72, 0.9, 1.0];
@@ -149,6 +178,8 @@ const MAX_SWAP_RINGS = 32;
 
 /** Scratch. 오라와 링이 같은 색을 받으므로 프레임마다 한 번만 푼다. */
 const _tint = new Vector3();
+/** 철벽의 것. `_tint` 와 따로인 것은 두 효과가 같은 프레임에 뜨기 때문이다. */
+const _braceTint = new Vector3();
 
 function smoothstep(x) {
   const t = Math.min(1, Math.max(0, x));
@@ -222,12 +253,34 @@ export class CardFx {
     this._darkenLeft = 0;
     this._wasSealing = false;
 
+    /** Which caps are braced. Empty when nobody is. */
+    this.resistCaps = [];
+    /**
+     * The cast's three beats, counted DOWN in frames. See `_updateResist`.
+     *
+     * Frames rather than a fraction of `burst.t`, for the reason
+     * `smashFlashFrames` is: at two or three frames a window measured in seconds
+     * lands on a different number of them at 60 Hz and at 120, which is the
+     * difference between a beat and nothing.
+     */
+    this._braceLeft = 0;
+    this._wasBracing = false;
+    /**
+     * Frames of white flash owed PER CAP, when a braced cap takes a hit.
+     *
+     * Per cap because the caps are hit separately, and this is the one marker in
+     * the file that answers an event on a particular body rather than a state
+     * the whole side is in.
+     */
+    this._hitLeft = [];
+
     this._buildStun();
     this._buildSwap();
     this._buildFlash();
     this._buildSmash();
     this._buildScreen();
     this._buildSeal();
+    this._buildResist();
   }
 
   setResolution(resolution) {
@@ -240,6 +293,7 @@ export class CardFx {
     this._ensureStun(arena?.capCount ?? 0);
     this._ensureFlash(arena?.capCount ?? 0);
     this._ensureSmash(arena?.capCount ?? 0);
+    this._ensureResist(arena?.capCount ?? 0);
   }
 
   // ── construction ─────────────────────────────────────────────────────────
@@ -362,6 +416,39 @@ export class CardFx {
     }
     for (let i = n; i < this.smashRings.length; i++) this.smashRings[i].mesh.visible = false;
     for (let i = n; i < this.auras.length; i++) this.auras[i].mesh.visible = false;
+  }
+
+  /**
+   * 철벽's one sprite per cap, and there is deliberately only one.
+   *
+   * 강타 has two — a ring that closes and an aura that stays — because it has
+   * two things to say: force gathering, then force held. 철벽 has one thing to
+   * say and says it in one shape, which matters more here than it does there:
+   * this marker appears on THREE OR FOUR CAPS AT ONCE, and two sprites apiece
+   * would be eight objects on a board the player is trying to aim across.
+   */
+  _buildResist() {
+    this.resistGroup = new Group();
+    this.world.add(this.resistGroup);
+    /** @type {Array<{mesh: Mesh, mat: object}>} */
+    this.braces = [];
+  }
+
+  _ensureResist(n) {
+    const tex = braceTexture(this.config.cardFx.resistRingSides, this.config.cardFx.ringTexels);
+    while (this.braces.length < n) {
+      const mat = this.materials.create(tex);
+      const mesh = new Mesh(QUAD, mat);
+      mesh.visible = false;
+      // Under 강타's aura, which is at 16. A cap can carry both — armed with 강타
+      // and then braced when the opponent's turn opens — and the brace is the
+      // quieter of the two, so it goes below rather than over.
+      mesh.renderOrder = 15;
+      this.resistGroup.add(mesh);
+      this.braces.push({ mesh, mat });
+    }
+    for (let i = n; i < this.braces.length; i++) this.braces[i].mesh.visible = false;
+    if (this._hitLeft.length !== n) this._hitLeft = new Array(n).fill(0);
   }
 
   /**
@@ -494,7 +581,7 @@ export class CardFx {
    * @param {import('../game/Match.js').Match} match
    * @param {import('three').Camera} camera  for billboarding
    */
-  update({ dt, match, camera }) {
+  update({ dt, match, camera, struck }) {
     this._now += dt;
 
     // The match's own effect wins; the panel's demo fills in when there is none.
@@ -527,10 +614,12 @@ export class CardFx {
 
     this.chaosCaps = this._chaosCaps(match);
     this.smashCaps = this._smashCaps(match);
+    this.resistCaps = this._resistCaps(match);
     this._updateStun(camera);
     this._updateSwap(match, camera);
     this._updateFlash(match, camera);
     this._updateSmash(camera);
+    this._updateResist(camera, struck);
     this._updateScreen();
     // After `_updateScreen`, which owns the other two full-frame effects. The
     // order is only bookkeeping — they cannot be on at once — but keeping the
@@ -634,6 +723,32 @@ export class CardFx {
     const smash = match?.cards?.smash;
     if (!smash) return [];
     return [...(this._aliveOwned[smash.player] ?? [])];
+  }
+
+  /**
+   * Which caps are braced.
+   *
+   * ── it asks the CARD, not the world ────────────────────────────────────────
+   * The obvious source is `arena.capMassMul(i) > 1`, which is the thing that is
+   * actually true of the body. It is the wrong source, because §2-A applies the
+   * mass only for the OPPONENT's turn — so on the turn the card is played the
+   * caps would carry no marker at all, and the player would spend a card and see
+   * nothing happen. What the marker means is "this is armed", which is exactly
+   * what 강타's aura means on the turn IT is played, and `smashOn` is what that
+   * one asks.
+   *
+   * Same shape as `_smashCaps` and `_chaosCaps`, deliberately: three effects
+   * that answer the same kind of question should not answer it three ways.
+   */
+  _resistCaps(match) {
+    const cards = match?.cards;
+    const arena = this.arena;
+    if (!cards || !arena) return [];
+    const out = [];
+    for (let p = 0; p < 2; p++) {
+      if (cards.resistOn(p)) out.push(...(this._aliveOwned[p] ?? []));
+    }
+    return out;
   }
 
   /**
@@ -878,6 +993,154 @@ export class CardFx {
     }
   }
 
+  /**
+   * 철벽: an angular ring lying flat on the board, and the one flash that says
+   * it did something.
+   *
+   * ── it is the quietest marker in this file, and that is a constraint ───────
+   * Every other per-cap effect here marks ONE cap: 혼란's stars go on the
+   * victim, 강타's aura on the cap about to shoot, 원모어's flash is a quarter
+   * of a second long. This one is on every cap the player owns — three in
+   * survival, four in football — for the whole of the opponent's turn, while
+   * that opponent is trying to read the board and aim across it. So the size,
+   * the alpha and the motion are all sized down from 강타's rather than across
+   * from them. See `config.cardFx.resistRingSize`.
+   *
+   * ── and it does not pulse ──────────────────────────────────────────────────
+   * 강타's aura pulses because something is being LOADED. A brace is a state
+   * that is not going anywhere, and a "hardness" that throbs is a contradiction.
+   * The palette walks — see `RESIST_PALETTE` — slowly enough not to read as
+   * motion, only slowly enough not to read as printed on the board.
+   */
+  _updateResist(camera, struck) {
+    const cfg = this.config.cardFx;
+    const burst = this._burst?.cardId === 'resist' ? this._burst : null;
+
+    // The cast, armed on the leading edge and counted down in frames. The same
+    // bookkeeping as 강타's inversion and 침묵's darkening, and for the reason
+    // given at length on `_updateSeal`: `Match.cardFx` builds a fresh object
+    // every frame, so the latch has to be a BOOLEAN transition.
+    const bracing = !!burst;
+    if (bracing && !this._wasBracing) {
+      this._braceLeft =
+        Math.max(0, Math.round(cfg.resistPressFrames)) +
+        Math.max(0, Math.round(cfg.resistSettleFrames)) +
+        Math.max(0, Math.round(cfg.resistGlintFrames));
+    }
+    this._wasBracing = bracing;
+
+    const settleFrames = Math.max(1, Math.round(cfg.resistSettleFrames));
+    const glintFrames = Math.max(1, Math.round(cfg.resistGlintFrames));
+    const owed = this._braceLeft;
+    if (owed > 0) this._braceLeft--;
+
+    /**
+     * Where in the three beats we are, read off the countdown.
+     *
+     * `owed` runs press+settle+glint down to zero, so the press is the top of
+     * the count, the settle is the middle, and the glint is the tail. Reading it
+     * backwards from one counter keeps the three beats in a fixed order at any
+     * frame rate — which is the whole reason they are counted rather than timed.
+     */
+    const inSettle = owed > glintFrames && owed <= glintFrames + settleFrames;
+    const inGlint = owed > 0 && owed <= glintFrames;
+    // 1 at the moment it is flung out, 0 once it has sat down.
+    const settleK = inSettle ? (owed - glintFrames) / settleFrames : 0;
+
+    cyclePalette(RESIST_PALETTE, this._now, cfg.resistPaletteCyclesPerSecond, _braceTint);
+
+    const armed = new Set(this.resistCaps);
+    for (let i = 0; i < this.braces.length; i++) {
+      const b = this.braces[i];
+      if (!armed.has(i) || !this.arena) {
+        b.mesh.visible = false;
+        // The debt is dropped with the marker. A cap whose brace expired while a
+        // flash was owed must not light up again when it is next braced.
+        this._hitLeft[i] = 0;
+        continue;
+      }
+
+      /**
+       * ── the hit flash: the card's ONLY visible output ────────────────────
+       * What 철벽 does is make something NOT happen — the cap that would have
+       * gone off the board stays on it. With no marker for that, a player cannot
+       * tell the card working from the card doing nothing, and the honest
+       * reading of a quiet turn is that they wasted a card.
+       *
+       * `struck` is the frame's collision set from `ContactAudio`, which is the
+       * one collision observer in the project — there is no `EventQueue`
+       * anywhere, deliberately. A second detector written for this would be a
+       * second answer to the same question, and the day the two disagreed the
+       * crack and the flash would land on different frames.
+       *
+       * The mass is asked as well as the card, and the two are genuinely
+       * different questions. The ring is drawn while the card is ARMED, which
+       * under §2-A includes the holder's own turn — when the brace is not yet in
+       * the world and the cap is its ordinary weight. A flash on a cap that was
+       * not actually heavier would be the marker claiming credit for a shove it
+       * did nothing about, which is the one lie this effect exists to prevent.
+       */
+      if (struck?.has(i) && this.arena.capMassMul(i) > 1) {
+        this._hitLeft[i] = Math.max(0, Math.round(cfg.resistHitFrames));
+      }
+
+      const hit = this._hitLeft[i];
+      if (hit > 0) this._hitLeft[i]--;
+
+      const com = this.arena.capCom(i);
+      b.mesh.position.set(com.x, com.y + cfg.resistRingHeight, com.z);
+
+      /**
+       * Whose cast this is. `_marks` rather than `capOwner`, which is the bug
+       * this file has had reported twice — the aura was given the alive test and
+       * the ring beside it was not, and two markers went on burning on a body at
+       * the bottom of the board.
+       *
+       * It matters here beyond the dead-cap case: both players can be braced at
+       * once, so a cast lands while the OTHER side's rings are already standing,
+       * and the beats belong only to the caps that just got them.
+       */
+      const mine = burst ? this._marks(burst.player, i) : false;
+
+      // Flung out, then sat down. Only on the cast, and only on the caster's own.
+      const grow = mine && settleK > 0
+        ? 1 + settleK * settleK * Math.max(0, cfg.resistSettleOvershoot - 1)
+        : 1;
+      b.mesh.scale.setScalar(cfg.resistRingSize * grow);
+
+      /**
+       * Billboarded like every other sprite here, and it should not be.
+       *
+       * §6.2 asks for a ring that LIES ON THE BOARD rather than standing up, and
+       * a flat quad laid in the xz plane is the honest way to draw that. It is
+       * not what happens, because `capCom` is the only anchor these markers have
+       * and the camera in this game tilts a long way toward the horizon: a quad
+       * lying flat collapses to a line at the shallow end of the tilt range, and
+       * a marker that vanishes at some camera angles is worse than one that is
+       * merely upright. The flatness is carried by the SHAPE instead — a hard
+       * octagon at low alpha reads as something the cap is sitting in, where the
+       * aura's soft radial reads as something rising off it.
+       */
+      if (camera) b.mesh.quaternion.copy(camera.quaternion);
+
+      // Toward white on a hit, from the steel-blue walk otherwise. Not a
+      // separate sprite: the ring flashing is the ring saying it held, and a
+      // second object would be a second thing that happened.
+      const k = hit > 0 ? Math.max(0, Math.min(1, cfg.resistHitStrength)) : 0;
+      b.mat.uniforms.uTint.value.set(
+        _braceTint.x + (1 - _braceTint.x) * k,
+        _braceTint.y + (1 - _braceTint.y) * k,
+        _braceTint.z + (1 - _braceTint.z) * k,
+      );
+      const base = Math.max(0, cfg.resistRingStrength);
+      // The glint is one frame-counted lift at the tail of the cast, not a fade.
+      // A fade would say the state is ending; the state has just begun.
+      const glint = inGlint && mine ? 0.5 : 0;
+      b.mat.uniforms.uOpacity.value = Math.min(1, base + glint + (1 - base) * k);
+      b.mesh.visible = true;
+    }
+  }
+
   /** The frame-wide pair: the sweep, and the edge. */
   _updateScreen() {
     const cfg = this.config.cardFx;
@@ -1021,6 +1284,31 @@ export class CardFx {
       if (after > 0) {
         const k = Math.max(0, 1 - after * 1.8);
         scale *= 1 + k * k * cfg2.smashPulseAmount;
+        touched = true;
+      }
+    }
+
+    /**
+     * 철벽's press: the cap settles down onto the board for a few frames.
+     *
+     * DOWN, not out. Every other cap gesture in this file grows — 강타 swells
+     * when the force lands, 원모어 blinks bigger — because they are all things
+     * arriving at the cap. This one is the cap taking a set, so it goes the
+     * other way, and it is small: a cap that visibly shrank would read as
+     * leaving rather than as bracing.
+     *
+     * Counted in frames by `_updateResist` and read back here, so the press,
+     * the ring and the glint stay in the same order at any refresh rate. Read
+     * rather than recomputed, because two counters for one beat is two beats.
+     */
+    if (burst?.cardId === 'resist' && this._marks(burst.player, index)) {
+      const press = Math.max(1, Math.round(cfg.resistPressFrames));
+      const glint = Math.max(1, Math.round(cfg.resistGlintFrames));
+      const settle = Math.max(1, Math.round(cfg.resistSettleFrames));
+      // The press is the TOP of the countdown — see `_updateResist`.
+      if (this._braceLeft > glint + settle) {
+        const k = (this._braceLeft - glint - settle) / press;
+        scale *= 1 - k * Math.max(0, cfg.resistPressAmount);
         touched = true;
       }
     }

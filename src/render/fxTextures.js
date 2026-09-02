@@ -265,6 +265,87 @@ export function auraTexture(size = 192) {
  * 링이 아니라 채워진 원반이다 — 이것은 뚜껑이 **있던 자리**를 표시하고, 그 크기에서
  * 빈 모양은 지나간 뚜껑의 유령이 아니라 더 작은 두 번째 뚜껑으로 읽힌다.
  */
+/**
+ * 철벽의 링. 이 파일에서 유일하게 **각지고 가장자리가 단단한** 스프라이트다.
+ *
+ * ── 규칙을 어기는 것이 아니라 규칙이 반대를 가리킨다 ────────────────────────
+ * 이 파일의 머리말은 그라디언트를 기본으로 삼고 하드 스텝을 "반대의 신호"라고
+ * 부른다. 여기가 바로 그 반대다. 다른 모든 표시는 뚜껑에 **일어나는 일**이라
+ * 빛처럼 번지는 것이 맞다 — 오라는 장전된 힘이고, 별은 어지러움이고, 링은 떠나는
+ * 것이다. 철벽은 일어나는 일이 아니라 뚜껑이 **된 것**이고, 단단해진 것의
+ * 가장자리가 흐리면 그건 단단하지 않다.
+ *
+ * 그래서 팔각형이고, 획 하나이고, 안팎으로 감쇠가 없다. 각짐이 곧 굳음이다.
+ *
+ * ── 그런데 완전한 하드 엣지는 아니다 ────────────────────────────────────────
+ * 획 자체는 균일하지만 바깥으로 한 겹 아주 옅은 후광이 있다. 순수한 1픽셀 계단은
+ * 밉맵과 원근 축소를 지나면서 사라졌다 나타났다 하고 — 판 위에 눕는 표시라
+ * 카메라가 기울면 반드시 축소된다 — 깜빡이는 링은 맥동하는 링이다. §6.2 가
+ * 금지하는 바로 그것이므로, 얇은 후광이 그것을 막는다.
+ *
+ * ── 세 개나 네 개가 동시에 뜬다 ─────────────────────────────────────────────
+ * 알파가 이 파일에서 가장 낮은 축인 이유다. 강타의 오라는 한 뚜껑에 하나 뜨지만
+ * 이것은 서바이벌 셋, 축구 넷에 한꺼번에 뜨고, 그동안 플레이어는 그 사이로 판을
+ * 읽어야 한다.
+ *
+ * @param {number} sides  팔각 또는 육각. `cardFx.resistRingSides`.
+ * @param {number} size   텍셀
+ */
+export function braceTexture(sides = 8, size = 192) {
+  const n = Math.max(3, Math.round(sides));
+  const s = Math.max(16, Math.round(size));
+  const key = `brace:${n}:${s}`;
+  if (cache.has(key)) return cache.get(key);
+
+  const { canvas: cv, ctx } = canvas(s, s);
+  ctx.clearRect(0, 0, s, s);
+  const c = s / 2;
+  // 꼭짓점이 텍스처 가장자리에 닿지 않게. 획 두께와 후광이 밖으로 나가야 한다.
+  const r = c * 0.78;
+  const path = (radius) => {
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      // 한 변이 위를 향하도록 반 칸 돌린다. 꼭짓점이 위로 오면 별처럼 보이고,
+      // 별은 혼란의 것이다.
+      const a = ((i + 0.5) / n) * Math.PI * 2;
+      const px = c + Math.cos(a) * radius;
+      const py = c + Math.sin(a) * radius;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+  };
+
+  ctx.lineJoin = 'miter';
+  // 마이터 그대로. 둥근 모서리는 각진 링을 다시 원으로 되돌린다.
+  ctx.miterLimit = 8;
+
+  // 바깥 후광 먼저, 그 위에 획. 축소될 때 획이 사라져도 형태가 남는다.
+  ctx.strokeStyle = withAlpha('#ffffff', 0.16);
+  ctx.lineWidth = s * 0.075;
+  path(r);
+  ctx.stroke();
+
+  ctx.strokeStyle = withAlpha('#ffffff', 0.95);
+  ctx.lineWidth = s * 0.032;
+  path(r);
+  ctx.stroke();
+
+  // 꼭짓점마다 짧은 안쪽 턱. 팔각형만으로는 "링"이고, 턱이 있으면 "받치는 것"이다.
+  ctx.lineCap = 'butt';
+  ctx.lineWidth = s * 0.028;
+  ctx.strokeStyle = withAlpha('#ffffff', 0.55);
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(c + Math.cos(a) * r * 0.995, c + Math.sin(a) * r * 0.995);
+    ctx.lineTo(c + Math.cos(a) * r * 0.80, c + Math.sin(a) * r * 0.80);
+    ctx.stroke();
+  }
+
+  return finish(key, cv);
+}
+
 export function trailTexture(size = 128) {
   const s = Math.max(8, Math.round(size));
   const key = `trail:${s}`;

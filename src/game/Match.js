@@ -274,6 +274,7 @@ export class Match {
       return;
     }
     this._deploy(shooter);
+    this._syncCapMass();
     this.state = MATCH_STATE.AIM;
     this._acc = 0;
     this.alpha = 0;
@@ -338,6 +339,48 @@ export class Match {
    * A no-op in both of the other modes: their rule sets answer false, because
    * their pieces are all on the field from `Arena.build`.
    */
+  /**
+   * Put 철벽's mass on the caps that should be carrying it, and take it off the
+   * caps that should not.
+   *
+   * ── it runs alongside `_deploy`, and for the identical reason ─────────────
+   * BEFORE `takeSnapshot`, which is a few lines above in `_beginAim`. That
+   * snapshot is the canonical state everything downstream starts from — the
+   * trajectory preview, the AI's rollouts, the shot, every replay — and mass is
+   * part of a rigid body's state that Rapier's world serialisation carries
+   * (measured: a braced cap round-trips bit-identically, mass, inertia and
+   * centre of mass alike). So getting the mass right here is the whole of
+   * getting it right everywhere: `predict.js` and `RolloutArena` both build
+   * their worlds out of these bytes and inherit it without knowing the card
+   * exists. A brace applied after the snapshot would be a brace the preview
+   * drew straight through.
+   *
+   * ── armed vs LIVE: §2-A is this one comparison ────────────────────────────
+   * `CardEffects` records only that a player has the card armed. The brace is
+   * for the OPPONENT's reply, so it is live exactly while it is not that
+   * player's own turn — which is `owner !== currentPlayer`, asked here because
+   * this is where whose-turn-it-is is known. Two consequences fall out of it
+   * rather than needing rules of their own: a 원모어 chain leaves the holder
+   * unbraced for their whole run of turns, and a brace that outlives a reply is
+   * impossible because `onTurnEnd` has already cleared the slot by the time this
+   * next runs.
+   *
+   * ── it is a no-op in the overwhelming majority of turns ───────────────────
+   * `Arena.setCapMassMul` compares against what it last wrote and returns
+   * without touching Rapier when nothing changed, so this is a loop and a few
+   * comparisons on every turn where nobody is holding the card. What it must
+   * never become is a per-STEP call: see the note there.
+   */
+  _syncCapMass() {
+    if (this.mode.cards === false) return;
+    const current = this.rules.currentPlayer;
+    for (let i = 0; i < this.arena.capCount; i++) {
+      const owner = this.arena.capOwner[i];
+      const live = owner !== current && this.cards.resistOn(owner);
+      this.arena.setCapMassMul(i, live ? this.cards.massMulFor(owner) : 1);
+    }
+  }
+
   _deploy(shooter) {
     if (!this.rules.needsDeploy?.(shooter)) return;
     const spot = this.arena.layout.throwSpot?.(this.arena, this.rules.onLane?.() ?? null);

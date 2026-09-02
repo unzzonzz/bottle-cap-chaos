@@ -27,6 +27,7 @@
  * @property {boolean} smashArmed       this player's next shot is already boosted
  * @property {boolean} silencedMe       this player may not play ANY card this turn
  * @property {boolean} silenceCastByMe  this player has already sealed the opponent
+ * @property {boolean} resistArmed      this player's caps are already braced
  */
 
 /** @typedef {{ok: true}|{ok: false, reason: string}} Usable */
@@ -164,6 +165,55 @@ export const CARDS = [
     // cap through a wall.
     canUse: (s) =>
       s.smashArmed ? { ok: false, reason: '이미 강타가 걸려 있습니다' } : OK,
+  },
+  {
+    id: 'resist',
+    name: '철벽',
+    /**
+     * 철벽 — stacked horizontal courses, drawn in `ui/icons.js`.
+     *
+     * The glyph is a key into `CARD_ICON` and is no longer rendered; this one is
+     * a lookalike for the courses the icon draws, so a build where the icon
+     * table has not caught up still falls back to something wall-shaped.
+     *
+     * NOT a shield. There is no shield anywhere in this game, and a shield is a
+     * thing you CARRY — it says "I am protected wherever I go", where this card
+     * says "I do not move from here". The icon is the opposite reading of 강타's
+     * `≫`: that one is an open stroke thrusting right, this one is the closed
+     * course it runs into.
+     */
+    glyph: '▤',
+    // §2-A. Purely defensive: the brace is applied for the OPPONENT's reply and
+    // this player's own fire is untouched, so there is no price to write on the
+    // face and writing one would be a lie. 강타 states its cost because it has
+    // one; the symmetry between the two cards is in the mechanism — a mass
+    // multiplier that exactly cancels an impulse multiplier — not in the
+    // sentence.
+    text: '다음 상대 발사에 덜 밀려난다',
+    /**
+     * Cold steel blue. Opposite 강타's warm orange, which is the card it exists
+     * to answer, so a board carrying both reads as two opposed forces.
+     *
+     * A FALLBACK, like every accent in this file. `PALETTE.card` is what the
+     * hand actually draws — see the note on `accentOf` — and the reasoning about
+     * which card this must not be confused with lives there, with the
+     * measurements, because the answer depends on the other five palette values
+     * and not on the five written here.
+     */
+    accent: '#2b8aca',
+    /**
+     * Not stackable, for the reason 원모어 and 강타 are not: the brace is a
+     * MULTIPLIER on mass, so two of them is a square. One is a cap that is hard
+     * to move; two is a cap that does not move, and a piece that cannot be
+     * pushed off has left the game the card was played in.
+     *
+     * The reason says what a second one would have bought rather than restating
+     * the state, exactly as 혼란's and 침묵's do.
+     */
+    canUse: (s) =>
+      s.resistArmed
+        ? { ok: false, reason: '이미 철벽이 걸려 있습니다 — 겹쳐도 더 버티지 않습니다' }
+        : OK,
   },
   {
     id: 'silence',

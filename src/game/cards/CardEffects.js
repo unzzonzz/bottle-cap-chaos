@@ -114,6 +114,29 @@ export class CardEffects {
      * to still be true when the AI arrives.
      */
     this.silence = [null, null];
+    /**
+     * ONE SLOT PER BENEFICIARY, indexed by the player whose caps are braced.
+     *
+     * `resist[p]` is `{}` while player `p` has 철벽 armed and null when they do
+     * not. It carries nothing: the multiplier is derived from 강타's — see
+     * `massMulFor` — and there is no seed, because nothing about this card is
+     * random.
+     *
+     * ── it is a slot per player for the reason chaos and silence are ─────────
+     * Not because a second one would overwrite something, but because both
+     * players can be braced at once and a single record could not say so. Both
+     * of the other two have the long version of this note above.
+     *
+     * ── armed is not the same as LIVE, and Match owns the difference ─────────
+     * §2-A: the brace covers the OPPONENT's next shot, never the holder's own.
+     * That is a fact about whose turn it is, and whose turn it is lives in the
+     * rule set rather than here — so this records only that the card is armed,
+     * and `Match._syncCapMass` decides when the world carries it. Storing a
+     * `live` flag here instead would have to be flipped at a turn boundary, and
+     * it would then be wrong for 원모어: the holder's SECOND shot is still their
+     * own, and a flag flipped at the first turn end would brace them against it.
+     */
+    this.resist = [null, null];
   }
 
   // ── queries ──────────────────────────────────────────────────────────────
@@ -144,6 +167,12 @@ export class CardEffects {
       silencedMe: this.silencedOn(player),
       /** 침묵's self-block, and the exact analogue of `chaosCastByMe`. */
       silenceCastByMe: this.castSilenceOnOpponent(player),
+      /**
+       * 철벽's self-block, and the analogue of `smashArmed` rather than of
+       * `chaosCastByMe`: this card is cast on MYSELF, so the slot to read is my
+       * own and there is no `~CastByMe` counterpart to write.
+       */
+      resistArmed: this.resistOn(player),
     };
   }
 
@@ -184,6 +213,11 @@ export class CardEffects {
     return !!onThem && onThem.by === player;
   }
 
+  /** Whether this player has 철벽 armed. The one question `Match` asks. */
+  resistOn(player) {
+    return !!this.resist[player];
+  }
+
   trajectoryOn(player) {
     return !!this.trajectory && this.trajectory.player === player;
   }
@@ -218,6 +252,68 @@ export class CardEffects {
   /** The same, for the charge cone's half-angle. See `impulseMulFor`. */
   spreadMulFor(player) {
     return this.smashOn(player) ? Math.max(0, this.config.cards.smashSpreadMul) : 1;
+  }
+
+  /**
+   * What this player's caps are multiplied in MASS by. 1 when nothing is armed.
+   *
+   * ── the number is 강타's, and it is not written down twice ─────────────────
+   * The card's promise is that a braced cap is shoved less by the ratio 강타
+   * shoves more, so a second `resistMassMul` on the config would be a second
+   * dial for one number — and the first time somebody tuned 강타 alone the two
+   * would stop cancelling, silently, while the card face went on claiming it.
+   * So this is a function of `smashImpulseMul` and there is no key for it.
+   *
+   * ── but the function is NOT 1/k, and that took measuring ───────────────────
+   * The obvious derivation is the one a fixed impulse gives:
+   *
+   *     강타   v = k·J / m
+   *     철벽   v = J / (k·m)      ← so multiply mass by k, and they cancel
+   *
+   * That is right for an impulse applied TO the cap — a shot, a flick — and a
+   * braced cap is not shot, it is HIT. A collision does not deliver a fixed
+   * impulse: it delivers whatever the two masses agree on. For a striker `m1`
+   * arriving at `v1` into a stationary `m2`,
+   *
+   *     v2' = m1(1 + e)·v1 / (m1 + m2)
+   *
+   * so with `m2 = a·m1` the struck cap's response falls as `2 / (1 + a)`, not as
+   * `1 / a`. Measured on the real compound collider at three ranges, the two
+   * agree to three decimals — a = 1.5 gives 0.797/0.796/0.793 against a
+   * predicted 0.800, and a = 4 gives 0.394/0.393/0.382 against 0.400.
+   *
+   * Setting `2 / (1 + a) = 1 / k` and solving gives the multiplier below:
+   *
+   *     a = 2k − 1
+   *
+   * At the default k = 1.5 that is 2.0, and it does what the card says: a plain
+   * shot moves a braced cap at 0.662 of the speed it moves a bare one, against
+   * the 1/k = 0.667 the card promises. Used naively, `a = k` gives 0.797 — the
+   * card would be delivering barely half the effect written on it.
+   *
+   * ── what still does not cancel exactly, and why nothing can fix it ─────────
+   * 강타 + 철벽 lands at 0.961 / 0.999 / 1.170 of a plain shot at gaps of 6, 12
+   * and 24 units. The residue is 강타's own RANGE amplification: friction takes
+   * energy per unit distance, so a boosted cap arrives with more than k times
+   * the speed of an unboosted one and by more the further it has come — 1.45x at
+   * six units and 1.77x at twenty-four. Cancelling that would need a multiplier
+   * that knew how far the shot had travelled, which is not a card. The card face
+   * therefore says "덜 밀려난다" and does not promise a cancellation.
+   *
+   * ── it is a method here rather than a getter on the config ────────────────
+   * `config.js` does `structuredClone(CONFIG)` at module scope to build
+   * `CONFIG_DEFAULTS`, and `structuredClone` evaluates a getter and writes down
+   * the VALUE — so a derived key would be live on `CONFIG` and frozen on the
+   * defaults `ReplayRunner` starts from. Deriving at the read site has neither
+   * problem, and keeps `cards` one key smaller on the wire.
+   *
+   * Clamped at 1, not at 0. `impulseMulFor` clamps at 0 because a zero impulse
+   * is merely a shot that does nothing; a mass multiplier below 1 would make the
+   * braced cap LIGHTER than it started, which is the opposite of the card.
+   */
+  massMulFor(player) {
+    if (!this.resistOn(player)) return 1;
+    return Math.max(1, 2 * Math.max(0, this.config.cards.smashImpulseMul) - 1);
   }
 
   /**
@@ -298,6 +394,24 @@ export class CardEffects {
           turns: Math.max(1, Math.round(this.config.cards.silenceTurns)),
         };
         return { physical: false };
+      /**
+       * Into MY OWN slot — the only card here that is cast on the caster.
+       *
+       * Not physical, and that is not an oversight. §2-A applies the brace for
+       * the OPPONENT's reply, so nothing about the world changes on this turn:
+       * the mass lands when the opponent's `_beginAim` puts it there, which is
+       * before that turn's snapshot is taken. The world the shot about to be
+       * fired will be fired into is unchanged, so the turn's existing snapshot
+       * stays valid and `physical: true` would re-snapshot a world that never
+       * moved — and reopen the aim through the swap's path, which has a
+       * kinematic exchange behind it and this does not.
+       *
+       * No seed and no duration. It is a fact about one player for exactly one
+       * opposing shot, and `onTurnEnd` is where that gets spent.
+       */
+      case 'resist':
+        this.resist[player] = {};
+        return { physical: false };
       case 'swap':
         return { physical: true };
       default:
@@ -364,6 +478,25 @@ export class CardEffects {
       if (seal.turns <= 0) this.silence[shooter] = null;
     }
 
+    /**
+     * The OPPONENT's brace is spent by the shot that just ended this turn.
+     *
+     * `1 - shooter`, and the mirror of chaos's line at the top of this method:
+     * that one clears the slot belonging to the player who just shot, because a
+     * deviation is bought against their OWN shot. A brace is bought against the
+     * other player's, so it is the other index that expires here.
+     *
+     * Which also gets 원모어 right without knowing about it. A holder who takes
+     * two turns in a row runs this twice, and both runs clear the opponent's
+     * slot rather than their own — so their brace survives to meet the reply it
+     * was played for, and the opponent's brace covers the FIRST of the two shots
+     * and not the second. One shot, as the face says.
+     *
+     * Not gated on a shot having been fired, for the reason the seal is not: a
+     * turn that passed is still the turn the card was waiting for.
+     */
+    this.resist[1 - shooter] = null;
+
     if (this.oneMore?.player === shooter) {
       this.oneMore = null;
       return true;
@@ -403,6 +536,10 @@ export class CardEffects {
       // `onTurnEnd`, so a shared object would let a replayed turn count down a
       // snapshot that the next replay is going to be restored from.
       silence: this.silence.map((v) => (v ? { ...v } : null)),
+      // Per slot and by value, like `silence`. The record is empty today, and
+      // copying it anyway is what stops a field added to it later from being
+      // shared between a live effect and the snapshot a replay restores from.
+      resist: this.resist.map((v) => (v ? { ...v } : null)),
     };
   }
 
@@ -424,6 +561,12 @@ export class CardEffects {
     // snapshot must come back unsealed rather than as `undefined[player]`.
     this.silence = Array.isArray(s.silence)
       ? s.silence.map((v) => (v ? { ...v } : null))
+      : [null, null];
+    // Tolerates a state saved before this card existed, exactly as `silence`
+    // above does — an old mid-turn snapshot has to come back unbraced rather
+    // than as `undefined[player]`.
+    this.resist = Array.isArray(s.resist)
+      ? s.resist.map((v) => (v ? { ...v } : null))
       : [null, null];
   }
 }

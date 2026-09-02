@@ -69,6 +69,22 @@ export class PhysicsWorld {
     /** Steps run since the world was built. The sim's only clock. */
     this.steps = 0;
 
+    /**
+     * Bumped every time the WORLD IS REPLACED — `reset` and `restore`.
+     *
+     * Not a clock and not in the hash: it is a cache stamp for the one kind of
+     * state that lives on a body and is not written every step. `Arena` keeps a
+     * per-cap mass multiplier so 철벽 is applied at a state transition rather
+     * than every frame, and a snapshot carries the mass with it — so after a
+     * rewind the cache describes a world that no longer exists, and the cap it
+     * describes may have come back heavier or lighter than the cache believes.
+     *
+     * A counter rather than a callback because there is no ordering to get
+     * wrong: whoever caches something derived from a body compares stamps when
+     * it next looks, and a rewind it never noticed cannot leave it stale.
+     */
+    this.generation = 0;
+
     this.world = new RAPIER.World({ x: 0, y: GRAVITY_Y, z: 0 });
     this._applyIntegration();
     this._bodyCache = new Map();
@@ -95,6 +111,7 @@ export class PhysicsWorld {
     this._bodyCache.clear();
     this._colliderCache.clear();
     this.steps = 0;
+    this.generation++;
   }
 
   /** @param {number} handle */
@@ -144,6 +161,7 @@ export class PhysicsWorld {
     this.world = next;
     this._bodyCache.clear();
     this._colliderCache.clear();
+    this.generation++;
     // A snapshot carries its own integration parameters, so these are already
     // right — reapplied anyway so that a live tweak to solver iterations does
     // not silently revert on the next rewind and desync the preview from the

@@ -143,6 +143,90 @@ function iconSmash(ctx, size, color) {
 }
 
 /**
+ * 철벽 — three courses of brickwork with a stroke stopped flat against them.
+ *
+ * ── it has to be the opposite reading of 강타's chevrons ────────────────────
+ * That icon is two open strokes thrusting right; put the two side by side and
+ * this one is what they run into. So the courses are HORIZONTAL — square across
+ * the thrust — and the short stroke on the left arrives and stops rather than
+ * passing through. The stopping is the whole icon: courses on their own are a
+ * wall, and a wall on its own does not say what it is for.
+ *
+ * ── it was three plain bars, and three plain bars is a LIST icon ────────────
+ * The first version drew three staggered rectangles. Rendered beside the other
+ * five it read as text alignment or as a bar chart, and worse, this card's own
+ * background motif is horizontal bands — so the icon and the panel behind it
+ * were the same shape and the icon dissolved into it. `cardTexture`'s motif note
+ * is explicit that a background which makes the icon hard to read is a failure.
+ *
+ * Brickwork fixes both at once. The JOINTS are what a plain bar has not got:
+ * they alternate course to course, which no chart or list does, and they are
+ * fine detail against the motif's broad smooth bands, so the two stop competing.
+ *
+ * ── not a shield ───────────────────────────────────────────────────────────
+ * There is no shield anywhere in this game, and a shield is CARRIED. It says "I
+ * am protected wherever I go", where this card says "I do not move from here".
+ * A wall is the thing that stays put.
+ */
+function iconResist(ctx, size, color) {
+  setup(ctx, size, color);
+
+  // The wall takes the right, leaving a lane for the stroke to arrive down.
+  const left = size * 0.36;
+  const right = size * (1 - PAD * 0.7);
+  const top = size * 0.22;
+  const courses = 3;
+  const gap = size * 0.035;
+  const h = (size * 0.56 - gap * (courses - 1)) / courses;
+  const r = size * 0.022;
+  const span = right - left;
+
+  for (let i = 0; i < courses; i++) {
+    const y = top + i * (h + gap);
+    /**
+     * Alternating half-brick offset, and it is the entire difference between a
+     * wall and three bars: the joints have to LINE UP WRONG course to course.
+     * An odd course opens with a short brick so the bond starts at the left edge
+     * rather than wherever the loop happens to land.
+     */
+    const bond = i % 2 ? span * 0.28 : 0;
+    let x = left;
+    let first = true;
+    while (x < right - 0.5) {
+      const w = Math.min(first && bond ? bond : span * 0.56, right - x);
+      ctx.beginPath();
+      if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, w, h, r);
+      else ctx.rect(x, y, w, h);
+      ctx.fill();
+      x += w + gap;
+      first = false;
+    }
+  }
+
+  /**
+   * Arrives and stops flat against the wall.
+   *
+   * No arrowhead: an arrow is a thing still travelling, and the point is that it
+   * is not. Butt cap rather than the file's usual round one, so the end reads as
+   * blocked rather than as tapering.
+   *
+   * ── it has to be thinner than a course, and it has to not touch ────────────
+   * Drawn at a course's own weight and run flush against the wall, it read as a
+   * longer brick on the middle row — the icon lost the collision entirely and
+   * went back to being masonry. Half the course height and a hairline of
+   * daylight is what separates "a stroke stopped by the wall" from "part of the
+   * wall": the gap is small enough to read as contact and large enough that the
+   * two shapes stay two shapes.
+   */
+  ctx.lineCap = 'butt';
+  ctx.lineWidth = h * 0.5;
+  ctx.beginPath();
+  ctx.moveTo(size * PAD * 0.7, size * 0.5);
+  ctx.lineTo(left - gap * 1.6, size * 0.5);
+  ctx.stroke();
+}
+
+/**
  * 침묵 — a padlock.
  *
  * The glyph was a slashed circle, which is the generic "no". A padlock says the
@@ -646,6 +730,7 @@ export const ICON = {
   chaos: iconChaos,
   onemore: iconOnemore,
   smash: iconSmash,
+  resist: iconResist,
   silence: iconSilence,
   lock: iconSilence,
   recenter: iconRecenter,
@@ -670,6 +755,7 @@ export const CARD_ICON = {
   '✳': 'chaos',
   '↻': 'onemore',
   '≫': 'smash',
+  '▤': 'resist',
   '⊘': 'silence',
 };
 

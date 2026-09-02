@@ -2149,7 +2149,21 @@ async function boot(canvas) {
 
     // Before the view, so a cap's shake and shrink are on this frame's transform
     // rather than on the last one's.
-    cardFx.update({ dt, match, camera: gameCamera.camera });
+    /**
+     * The frame's collisions, read once and shared.
+     *
+     * `MatchAudio` owns the only collision observer in the project — there is no
+     * `EventQueue` anywhere, deliberately — and 철벽's ring has to flash on the
+     * frame a braced cap is hit. So the reading is pulled forward to here and
+     * both the sound and the ring see the same one. `matchAudio.update` below
+     * does not read it again; see the note on `observe`.
+     *
+     * Still read-only, so this changes nothing about the simulation: a match
+     * played with the sound off produces the same hashes as one played with it
+     * on, and that is still true with the call moved.
+     */
+    matchAudio.observe();
+    cardFx.update({ dt, match, camera: gameCamera.camera, struck: matchAudio.struckCaps });
     view.update(match.alpha, match.rules.alive, cardFx);
 
     /**

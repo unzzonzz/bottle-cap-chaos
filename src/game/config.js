@@ -712,6 +712,7 @@ export const CONFIG = {
       chaos: 1,
       onemore: 1,
       smash: 1,
+      resist: 1,
       silence: 1,
     },
     /** Card width in frame pixels. Height follows at 1.5x. */
@@ -1001,6 +1002,23 @@ export const CONFIG = {
      */
     smashSpreadMul: 1.5,
     /**
+     * ── 철벽 has no multiplier of its own, and that is deliberate ────────────
+     * The card's promise is that a braced cap is shoved less by the ratio this
+     * number shoves more, so 철벽's mass multiplier is DERIVED from it — as
+     * `2k − 1`, which is not the obvious `k` and `CardEffects.massMulFor`
+     * measures out why at length.
+     *
+     * A `resistMassMul` key here would be a second dial for one number. The
+     * first time somebody moved `smashImpulseMul` alone the two would stop
+     * cancelling — silently, because nothing prints the ratio and the card face
+     * would go on claiming it. So the mass multiplier is READ from
+     * `smashImpulseMul`, once, in `CardEffects.massMulFor`, and there is nothing
+     * to tune here. Moving the slider above moves both halves together.
+     *
+     * Adding one would also cost a key in `SYNCED_CONFIG_PATHS` for a value that
+     * is a pure function of a key already there.
+     */
+    /**
      * 침묵: how many of the victim's own turns the seal lasts.
      *
      * One, as the card's face says. It is a dial rather than a constant because
@@ -1054,6 +1072,16 @@ export const CONFIG = {
        * pitch, and 0.6 of a frozen board for two frames of flash is a stall.
        */
       silence: 0.35,
+      /**
+       * 철벽. Shorter than 강타's 0.55 and longer than 침묵's 0.35.
+       *
+       * The cast is three beats — a press, a ring that overshoots and sits down,
+       * one glint — and all three are counted in FRAMES rather than in this
+       * window (see `cardFx.resist*Frames`), so what this length actually buys
+       * is the card's own flight to the middle of the screen at `useFlySeconds`
+       * 0.32 plus enough afterwards to see the ring settle.
+       */
+      resist: 0.45,
     },
   },
 
@@ -1259,6 +1287,97 @@ export const CONFIG = {
      *  only — applied after the physics transform, exactly like the chaos wobble. */
     smashJitterAmount: 0.07,
     smashJitterHz: 19,
+
+    // ── 철벽's brace, which is the quietest marker in the file ────────────
+    /**
+     * ── this one is on THREE OR FOUR CAPS AT ONCE, and nothing else is ───────
+     * 강타's aura marks the armed player's caps too, but 강타 and 철벽 are not in
+     * the same position: an armed player is ABOUT TO SHOOT, so their aura is on
+     * screen for one aim and then gone. A brace is on for the whole of the
+     * opponent's turn, on survival's three caps or football's four, while the
+     * player is trying to read the board and aim through them.
+     *
+     * So everything below is sized DOWN from 강타's numbers rather than across
+     * from them. It is not a taste preference and it is not timidity — it is the
+     * one constraint this effect has that no other effect in the file does.
+     */
+    /**
+     * Quad size in world units. The octagon inside it is 0.78 of this.
+     *
+     * ── it has to CLEAR the cap, and the first value did not ─────────────────
+     * 3.6 was picked to sit under 강타's `smashAuraSize` of 4.2, on the reasoning
+     * that this marker has to be the quieter one. Measured on the board, the
+     * octagon it produced was 2.8 units across against a cap 3.2 wide — the ring
+     * was drawn INSIDE the cap it was marking, and read as a rim highlight on
+     * the cap rather than as anything around it.
+     *
+     * 5.0 puts the octagon at 3.9, a comfortable margin outside the cap's edge,
+     * which is the only size at which a ring is a ring. The quietness belongs to
+     * the ALPHA, not to the diameter: a marker made quiet by being hidden under
+     * the thing it marks is not quiet, it is absent.
+     */
+    resistRingSize: 5.0,
+    /** How far above the cap's centre of mass it lies. Low: it sits ON the board. */
+    resistRingHeight: 0.32,
+    /**
+     * How bright it holds. Well under the aura's 0.85.
+     *
+     * Four of these at 0.85 is a board with four bright rings on it and a ball
+     * somewhere underneath. §0.4 wants the position readable while an effect is
+     * running, and four simultaneous markers is the case that tests it.
+     */
+    resistRingStrength: 0.42,
+    /**
+     * Corners on the ring. Six or eight — angular is the whole statement.
+     *
+     * A circle is the shape every other marker in this file already uses, and it
+     * says "field" or "aura". Flat facets say the cap has been braced into
+     * something with sides. Eight reads as hard at this size without turning
+     * into a circle again; six starts to read as a nut.
+     */
+    resistRingSides: 8,
+    /**
+     * How fast the ring walks its palette.
+     *
+     * SLOW, and it never pulses in brightness — see `RESIST_PALETTE`. A hardness
+     * that throbs is a contradiction: 강타's aura pulses because something is
+     * being LOADED, and this is a state that is not going anywhere.
+     */
+    resistPaletteCyclesPerSecond: 0.55,
+    /**
+     * The cast, in FRAMES. `smashFlashFrames` says why frames.
+     *
+     * Three beats: the cap presses down for `resistPressFrames`, the ring
+     * overshoots outward and settles over `resistSettleFrames`, and a single
+     * crystalline glint runs for `resistGlintFrames`. At two or three frames
+     * apiece, a window measured in seconds would land on a different count at 60
+     * and at 120 Hz — which at this length is the difference between a beat and
+     * nothing.
+     */
+    resistPressFrames: 3,
+    resistSettleFrames: 7,
+    resistGlintFrames: 3,
+    /** How far the cap presses down, as a scale. Tiny — it is bracing, not shrinking. */
+    resistPressAmount: 0.06,
+    /** How far the ring overshoots before it sits down, as a multiple of its size. */
+    resistSettleOvershoot: 1.7,
+    /**
+     * Frames the ring flashes white when a braced cap actually takes a hit.
+     *
+     * ── the card's only visible OUTPUT, and it must not be cut ───────────────
+     * Everything else 철벽 does is a NON-event: the cap that would have gone off
+     * the board does not. A player with no marker for that cannot tell the card
+     * worked from the card doing nothing, and the honest reading of a quiet turn
+     * is that they wasted it.
+     *
+     * The hit is read off `ContactAudio`, which is already the one collision
+     * observer in the project — see `CardFx._updateResist`. A second detector
+     * would be a second answer, and the day the two disagreed the sound and the
+     * flash would land on different frames.
+     */
+    resistHitFrames: 3,
+    /** How far toward white the ring goes on that hit, 0..1. */
+    resistHitStrength: 0.9,
 
     // ── the trajectory sweep and its line ────────────────────────────────
     /** Height of the swept band, in frame pixels. */
@@ -2081,6 +2200,22 @@ export const CONFIG = {
       /** 침묵 needs the opponent to actually be holding something. */
       silenceMinCards: 2,
       /**
+       * 철벽 when my worst-placed cap is at least this far out, 0..1.
+       *
+       * `exposureOf` is a CHEBYSHEV fraction of the brink, so 0.6 is a cap three
+       * fifths of the way to the edge it would fall off — far enough that one
+       * good hit finishes it, near enough that it turns up regularly rather than
+       * only in already-lost positions.
+       *
+       * On the worst cap, not the average, and `cardPolicy` says why: the brace
+       * covers every cap the player owns, so its value is set by the one that is
+       * actually in trouble.
+       *
+       * Football reads this against a different quantity — the pressure on the
+       * net rather than a distance to a rim — and overrides it below.
+       */
+      resistEdgeMin: 0.6,
+      /**
        * How many cards the AI may spend in one turn.
        *
        * The brief said one, written when the cards were judged independently.
@@ -2355,6 +2490,17 @@ export const CONFIG = {
          */
         cards: {
           oneMoreMinScore: 180,
+          /**
+           * 철벽's threshold on football's scale rather than knockout's.
+           *
+           * The common 0.6 is a fraction of the distance to a rim, and there is
+           * no rim here — `myEdgeRisk` is `goalThreat`, a product of two 0..1
+           * terms, so it lives an order of magnitude lower and 0.6 would mean
+           * the card was never played at all. 0.18 is comparable to the value
+           * 혼란 tests the DIFFERENCE of two of these against (`chaosThreatMin`
+           * 0.12), which is the only other rule reading this quantity.
+           */
+          resistEdgeMin: 0.18,
         },
       },
     },
