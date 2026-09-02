@@ -29,6 +29,11 @@ import { registerStrategy } from './strategy.js';
  * past would be a change to the game wearing a refactor's clothes, and this is
  * the measurement that would have caught it.
  *
+ * Those three are a record of THAT check and are deliberately not updated as
+ * the fixtures move. Football's is now afaddf2e: 철벽 made the draw pool six, so
+ * the regenerated log plays a different card at one turn. The knockout and
+ * curling figures still reproduce.
+ *
  * ── what is survival-shaped here, and would not port ────────────────────────
  * Almost all of it, which is the point:
  *
