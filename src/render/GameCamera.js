@@ -563,13 +563,36 @@ export class GameCamera {
    *   themselves. Taking their zoom away there would be undoing their setup, not
    *   helping them.
    */
-  faceTo(azimuth, { zoom = true } = {}) {
+  /**
+   * @param {object} [opts]
+   * @param {boolean} [opts.zoom]  tween the zoom back to the default framing
+   * @param {boolean} [opts.pan]
+   *   recentre the pan and let go of any follow. Defaults to `zoom`, which is
+   *   what every caller wanted while the two were one flag.
+   *
+   *   ── they are two questions, and against an AI the answers differ ────────
+   *   "카메라가 자동으로 따라가는 것만 초기화되고 내가 움직인 건 초기화 안되게."
+   *   The PAN is what the automatic follow moves — `followTo` writes the pan
+   *   target and nothing else, and both the ball follow and `CamTracker` reach
+   *   the view through it — so recentring the pan is exactly "undo the chase".
+   *   The ZOOM is only ever set by the player, through `zoomBy`. Resetting it
+   *   throws away a decision the automatic camera never made.
+   *
+   *   While these were one flag that distinction could not be expressed: a
+   *   handover either reset both or neither, so keeping the zoom meant also
+   *   leaving the camera parked wherever the cap had been chased to.
+   */
+  faceTo(azimuth, { zoom = true, pan = zoom } = {}) {
     this.spin = 0;
     this.userTurned = false;
-    if (zoom) {
+    if (pan) {
       const home = this.defaultFraming(azimuth);
       this.panTarget.x = home.panX;
       this.panTarget.z = home.panZ;
+      // Let go of whatever was steering the pan, or a follower rewriting the
+      // target every frame would put it straight back. It lives with the pan
+      // rather than with the zoom because following IS panning.
+      this._following = false;
     }
 
     if (this.rotatable && azimuth !== null && azimuth !== undefined) {
@@ -580,7 +603,6 @@ export class GameCamera {
     }
     if (zoom) {
       this._autoZoom = { from: this.zoom, to: this.defaultFraming(azimuth).zoom, t: 0 };
-      this._following = false;
     }
   }
 

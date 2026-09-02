@@ -686,7 +686,27 @@ async function boot(canvas) {
    *
    * @returns {boolean} did it reset the framing outright?
    */
-  function faceCurrentPlayer(force = false) {
+  /**
+   * Does this match keep the player's zoom across a turn change?
+   *
+   * Both halves have to be true: somebody has to be playing the computer (so
+   * there is no incoming player to reset the view for) and the mode has to ask
+   * for it. Read live rather than latched — `setOpponent` can swap the far seat
+   * mid-match, and the very next handover has to behave like the new one.
+   */
+  function aiKeepsZoom() {
+    return hasAi() && !!match.mode.camera?.keepZoomVsAi;
+  }
+
+  /**
+   * @param {boolean} [force]  reset the framing whether or not the turn changed
+   * @param {{keepZoom?: boolean}} [opts]
+   *   Override the zoom half of that reset. `CamTracker` passes it because its
+   *   hand-back is a forced reframe that is NOT the player asking for the
+   *   default framing — see the call site. Omitted, the policy below decides,
+   *   which is what keeps the reset button meaning what it says.
+   */
+  function faceCurrentPlayer(force = false, { keepZoom = null } = {}) {
     const p = match.rules.currentPlayer;
     /**
      * ── against an AI the bearing is PINNED to the person's own half ────────
@@ -724,8 +744,11 @@ async function boot(canvas) {
     // `force` wins, and that is what keeps the reset button honest: it calls
     // this with `force` and must always pull the framing back to default.
     if (force || handover) {
-      const keepFraming = !force && hasAi() && !!match.mode.camera?.keepZoomVsAi;
-      gameCamera.faceTo(bearing, keepFraming ? { zoom: false } : undefined);
+      // The pan is ALWAYS recentred here — that is the automatic camera's
+      // contribution and it is exactly what should be undone. Only the zoom is
+      // in question, and only the player ever sets that.
+      const keep = keepZoom ?? (!force && aiKeepsZoom());
+      gameCamera.faceTo(bearing, keep ? { zoom: false, pan: true } : undefined);
       return true;
     }
 
@@ -1989,7 +2012,16 @@ async function boot(canvas) {
       enabled: !!match.mode.camera?.track,
       keepZ: match.mode.camera?.keepLineZ?.(match.arena) ?? null,
       reframed,
-      onReturn: () => faceCurrentPlayer(true),
+      /**
+       * The tracker has finished riding the shot and is handing the view back.
+       *
+       * `force`, because this is not a turn change and the framing has to be
+       * reasserted anyway — but NOT a request for the default zoom. Against an
+       * AI this fires after every single shot, so left as a plain
+       * `faceCurrentPlayer(true)` it pulled the player's zoom back out twice a
+       * turn no matter what the handover did.
+       */
+      onReturn: () => faceCurrentPlayer(true, { keepZoom: aiKeepsZoom() }),
     });
 
     // The camera does have one: rotation inertia and the pan glide run on WALL

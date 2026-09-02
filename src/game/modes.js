@@ -116,6 +116,23 @@ export const MODES = {
        * have put it.
        */
       ownHalfBearing: (player) => (player === 0 ? 0 : Math.PI),
+
+      /**
+       * Against an AI, a handover keeps the zoom. See football's note.
+       *
+       * ── this mode needed the tracker taught as well ────────────────────────
+       * Football only had the handover to fix. Here `track` is on, so after
+       * every shot `CamTracker` rides the thrown cap and then hands the view
+       * back through `onReturn` — which calls `faceCurrentPlayer(true)`, and
+       * `force` is precisely the flag that means "reset regardless". So the
+       * zoom was being pulled out twice a turn by two different paths, and
+       * setting this alone would have fixed neither.
+       *
+       * The tracker's return now keeps the zoom too and still recentres the pan,
+       * which is what its own `_ease` is for. The reset button is untouched: it
+       * is the one caller that means the default framing literally.
+       */
+      keepZoomVsAi: true,
     },
 
     /**
@@ -258,17 +275,20 @@ export const MODES = {
        * aiming a shot at a ball 1.9 units across means zooming in — which the
        * AI's reply then threw away, every single turn.
        *
-       * The BEARING is still pinned and still applied; only the zoom and the pan
-       * are kept. That is exactly what the non-handover path already does, so
-       * this is not a new camera behaviour, it is the existing one reached from
-       * one more place. The reset button is unaffected — it calls
-       * `faceCurrentPlayer(true)`, and `force` overrides this.
+       * The BEARING is still applied and the PAN is still recentred; only the
+       * zoom is kept. Recentring the pan is the point rather than an oversight:
+       * the ball follow leaves the pan target wherever the ball stopped, and
+       * "카메라가 자동으로 따라가는 것만 초기화" is exactly that — undo what the
+       * automatic camera did, keep what the player did. The zoom is the only
+       * one of the three a player ever sets.
        *
-       * Not set on knockout or curling. The same argument would apply to
-       * knockout against an AI and it is deliberately not made here: that mode
-       * was not asked about, its board fits on screen at the default zoom, and a
-       * camera that behaves differently in two modes for reasons nobody wrote
-       * down is worse than one that is inconsistent on purpose.
+       * The reset button is unaffected — it calls `faceCurrentPlayer(true)` with
+       * no `keepZoom`, and that is the one caller which means the default
+       * framing literally.
+       *
+       * Knockout sets it too, and needed a second fix to go with it — see the
+       * note there. Curling does not: both players throw from the same end, so
+       * there is no handover framing to keep or discard.
        */
       keepZoomVsAi: true,
     },
