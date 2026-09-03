@@ -122,7 +122,19 @@ export function bootMenuDebug(ctx) {
   rib.add(p, 'ribFrom', 0, 120, 1).name('리브 시작 높이 (mm)').onChange(rebuild);
   rib.add(p, 'ribTo', 40, 190, 1).name('리브 끝 높이 (mm)').onChange(rebuild);
   rib.add(p, 'ribFade', 0.5, 20, 0.5).name('리브 페이드 (mm)').onChange(rebuild);
-  rib.add(p, 'radialPerRib', 2, 6, 1).name('리브당 세로줄').onChange(rebuild);
+  /**
+   * `radialPerRib` 슬라이더가 여기 있었고, **패널 전체를 죽이고 있었다.**
+   *
+   * 그 파라미터는 분할 수가 `ribs * radialPerRib` 이던 시절의 것이다. 분할이
+   * `columns` 로 갈라져 나가면서 `BOTTLE_DEFAULTS` 에서 사라졌는데
+   * (`bottleProfile` 의 `columns` 주석이 왜 갈랐는지 적어 두었다) 이 줄이 남았다.
+   * `lil-gui` 는 없는 속성을 받으면 던지고, 그 예외가 `bootMenu` 를 통째로
+   * 무너뜨려서 `?debug=1` 로 열면 파란 화면과 패널만 남았다 — 빌드도 테스트도
+   * 통과하는데 디버그 경로만 죽어 있어서 여기까지 눈에 띄지 않았다.
+   *
+   * 분할 수는 이제 그래픽 품질 티어가 정한다(`core/quality.js`). 패널에서
+   * 손으로 돌릴 값이 아니므로 슬라이더를 되살리지 않고 지운다.
+   */
 
   const label = gui.addFolder('라벨 / 내용물');
   label.add(p, 'labelFrom', 40, 160, 1).name('라벨 하단 (mm)').onChange(rebuild);
