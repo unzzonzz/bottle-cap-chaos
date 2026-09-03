@@ -42,22 +42,22 @@ import { ROLE, SIZE, SPACE } from '../core/tokens.js';
  * as the game being broken.
  *
  * ── the frame is virtual and 4:3 is guaranteed ──────────────────────────────
- * The camera covers a fixed 640x480 box whatever the render target is set to,
+ * The camera covers the shared frame box whatever the render target is set to,
  * exactly as `CardLayer` does, and `Viewport._fit` letterboxes the canvas to
  * 4:3 at every window size. So the display aspect is a CONSTANT and there is no
- * frustum to recompute — a portrait phone gets a smaller 4:3 box, not a
- * different shape. What the brief actually wants out of that requirement is
+ * frustum to reshape — a small window gets a smaller 4:3 box, never a different
+ * shape. What the brief actually wants out of that requirement is
  * here regardless: every position below is derived from a frame edge and a
  * margin, and there is not a world coordinate hard-coded anywhere.
  */
 
-/** The layout box, in frame pixels. 4:3, matching the display. */
 /**
- * The layout box, in frame pixels — now the shared one.
+ * The layout box, in frame pixels — the shared, live one.
  *
  * Re-exported rather than redeclared so every existing `HUD_FRAME.width` read
- * keeps working, but it is the LIVE object from core/frame.js: 640 wide always,
- * 480 tall in landscape, taller in portrait. See that file's header.
+ * keeps working, but it is the LIVE object from core/frame.js: 4:3 always, 640
+ * wide in any window with 800 CSS px of canvas or more, narrower below that so
+ * the UI scales up. See that file's header.
  */
 export const HUD_FRAME = FRAME;
 

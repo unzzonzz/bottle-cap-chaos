@@ -31,9 +31,9 @@ import { DISPLAY_ASPECT } from '../core/Viewport.js';
  * rather than at four of them.
  *
  * It costs screen. The football pitch's diagonal is 18% longer than its half
- * length, so portrait fills 76% of the frame height instead of 89%. A mode that
- * cannot turn keeps the tight rectangle fit and is unaffected — which is why
- * the knockout board still frames exactly as it always did.
+ * length, so a standing pitch fills 76% of the frame height instead of 89%. A
+ * mode that cannot turn keeps the tight rectangle fit and is unaffected — which
+ * is why the knockout board still frames exactly as it always did.
  *
  * ── zoom 1 IS the whole field ────────────────────────────────────────────────
  * The distance is the fit divided by the zoom, and the zoom clamps at 1 from
@@ -158,15 +158,14 @@ export class GameCamera {
     /**
      * The play area's shape, which the camera takes as its aspect.
      *
-     * Was the fixed 4:3 of `DISPLAY_ASPECT`. On a portrait phone the play area
-     * is no longer 4:3 — it is whatever is left after the HUD and card bands —
-     * and a camera that kept framing 4:3 inside a taller region showed the same
-     * horizontal slice with the map cut off top and bottom at the region's
-     * edges. Matching the region means a tall screen shows MORE board, which is
-     * the whole point of giving the board that space.
+     * Written from `main.js` on resize, alongside `boardCssWidth`, and what it
+     * gets handed is `FRAME.aspect` — the canvas's shape exactly. That is 4:3 to
+     * within the frame height's rounding in every window, so this stays within a
+     * tenth of a percent of the `DISPLAY_ASPECT` it is initialised to.
      *
-     * Written from `main.js` on resize, alongside `boardCssWidth`. 4:3 on every
-     * landscape window, so nothing there moves.
+     * It is still pushed in rather than read as a constant because the aspect it
+     * must agree with is the CANVAS's, and the canvas is sized from the frame.
+     * Two places deciding that independently is how they drift.
      */
     this.boardAspect = DISPLAY_ASPECT;
     this.camera = new PerspectiveCamera(FOV, DISPLAY_ASPECT, 1, 1200);
@@ -199,9 +198,8 @@ export class GameCamera {
   }
 
   get tanX() {
-    // The PLAY AREA's aspect, not the display's — `fitDistance`, the pan clamp
-    // and the pan gain all key off this, and all three are about the region the
-    // scene is actually drawn into. See `boardAspect`.
+    // The aspect the scene is actually drawn into — `fitDistance`, the pan
+    // clamp and the pan gain all key off this. See `boardAspect`.
     return this.boardAspect * this.tanY;
   }
 

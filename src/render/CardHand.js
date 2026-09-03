@@ -63,55 +63,6 @@ export function cardScale(cfg) {
 }
 
 /**
- * How much of a hand shows, given the band it has to live in.
- *
- * ── why this is a function and not three config numbers ─────────────────────
- * `idleExposure`, `activeExposure` and `inactiveExposure` were authored against
- * a hand that hangs off the EDGE of a 4:3 frame with the board behind it: 54
- * pixels of card peeking up, raised to 120 when the pointer comes near. That is
- * the right shape when the alternative is covering the play area.
- *
- * In portrait the hand has a band of its own and the reasoning inverts. Nothing
- * is behind it to protect, so peeking 54 pixels into a 333-pixel band just looks
- * like the cards fell off the bottom of the screen. Worse, the tuck-until-hovered
- * behaviour those numbers exist to serve cannot work on a phone at all: there is
- * no hover on a touch screen, so a hand that only comes up when the pointer
- * approaches is a hand that comes up when you are already dragging it.
- *
- * So with a band the exposures are derived from the band instead — a share of it,
- * capped by the card's own height so a very tall band never blows the card up
- * past its own size. Without one, the authored numbers are returned untouched
- * and every existing layout is bit-identical.
- *
- * Exported because `HudLayer` has to agree about where the OPPONENT's parked
- * hand reaches down to — it hangs the score off that line, and the two drifting
- * apart is exactly the bug `PARKED_HAND_REACH` used to be.
- *
- * @param {number} band       frame pixels of band this hand lives in, 0 if none
- * @param {number} cardHeight the card's own height in frame pixels
- * @param {number} rootScale  the hand's current scale
- */
-export function handExposure(cfg, band, cardHeight, rootScale) {
-  if (!(band > 0)) {
-    return { idle: cfg.idleExposure, active: cfg.activeExposure, parked: cfg.inactiveExposure };
-  }
-  const card = cardHeight * rootScale;
-  return {
-    // The WHOLE card, sitting on the frame's bottom edge. `expose` is measured
-    // from that edge to the card's top, so an exposure of exactly the card's
-    // height puts its lower edge on the edge and all of it in view. Anything
-    // more would float the hand off the bottom of the screen, which reads as a
-    // bug rather than as a hand on a table; anything less goes back to peeking.
-    // The band's own share caps it so a short band never over-exposes.
-    idle: Math.min(card, band * 0.55),
-    // Clear of the idle line by enough that the lift is unmistakable.
-    active: Math.min(card + 40, band * 0.78),
-    // The opponent's, at the top. Smaller — it is not yours and not playable.
-    parked: Math.min(card * 0.62, band * 0.42),
-  };
-}
-
-/**
  * Unit quad, gripped at the bottom edge.
  *
  * Two triangles. There is no reason for more: the card is flat, it is unlit,
@@ -667,11 +618,21 @@ export class CardHand {
       Math.max(cfg.inactiveScale, fit),
     );
 
-    // The band this hand lives in — its own edge's, not the other one's. Zero
-    // in landscape, where `handExposure` hands back the authored numbers.
-    const band = atBottom ? (this.frame.bottomBand ?? 0) : (this.frame.topBand ?? 0);
-    const ex = handExposure(cfg, band, h, rootScale);
-    const endExposure = atBottom ? lerp(ex.idle, ex.active, r) : ex.parked;
+    /**
+     * How much of the hand shows: the authored numbers, straight from config.
+     *
+     * A `handExposure()` helper stood here that took a BAND — frame pixels the
+     * frame had reserved above and below the board — and derived the three
+     * exposures from it as a share, falling back to these same config values
+     * when the band was zero. The band only ever existed for a portrait phone,
+     * where a hand peeking 54 pixels into a 333-pixel reservation read as cards
+     * that had fallen off the bottom of the screen. The frame is 4:3 for every
+     * window now, the band is gone from `frame.js`, and the fallback branch is
+     * the only one that ever ran on a desktop.
+     */
+    const endExposure = atBottom
+      ? lerp(cfg.idleExposure, cfg.activeExposure, r)
+      : cfg.inactiveExposure;
     const expose = swapFrac * endExposure;
     /**
      * The edge the hand hangs off. `expose` is literally how many frame pixels

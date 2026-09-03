@@ -7,7 +7,7 @@ import {
   Vector2,
   WebGLRenderer,
 } from 'three';
-import { BOARD_ASPECT, FRAME, MAX_FRAME_WIDTH, updateFrame } from './frame.js';
+import { FRAME, updateFrame } from './frame.js';
 import { PALETTE } from './palette.js';
 import { onQualityChange, QUALITY } from './quality.js';
 
@@ -26,12 +26,13 @@ ColorManagement.enabled = true;
 /**
  * The 3D camera's aspect. Still 4:3.
  *
- * ── this is the BOARD's aspect, not necessarily the canvas's ────────────────
- * On the match page the canvas may be taller than 4:3, with the play area in a
- * 4:3 sub-rectangle — see `core/frame.js`. The 3D camera still frames 4:3, so
- * every consumer talking about the CAMERA (GameCamera, the menu's, the viewer's)
- * is correct to use this. `_fit` asks the frame instead, because the CANVAS is
- * not necessarily 4:3.
+ * ── it is the frame's aspect too, and that is new ───────────────────────────
+ * The canvas could once be taller than 4:3, with the play area in a 4:3
+ * sub-rectangle, which is why this constant and the frame's own aspect were two
+ * different numbers. They are the same number now — see `core/frame.js` on why
+ * the frame no longer grows. This stays as the DEFAULT a camera is built with;
+ * `main.js` still pushes `FRAME.aspect` in on resize, which differs from 4/3 by
+ * the height's rounding and is what the canvas is actually shaped to.
  */
 export const DISPLAY_ASPECT = 4 / 3;
 
@@ -66,16 +67,8 @@ function resolvePixelRatioCap(override) {
  * See `core/Composer.js`.
  */
 export class Viewport {
-  /**
-   * @param {boolean} [portrait]
-   *   Let the canvas grow taller than the board's 4:3 and report a frame with
-   *   bands above and below it. The match page turns this on; the menu and the
-   *   cap viewer leave it off, because both lay out against a 4:3 canvas top to
-   *   bottom and neither has a board to keep square.
-   */
-  constructor({ canvas, portrait = false, pixelRatioCap = null }) {
+  constructor({ canvas, pixelRatioCap = null }) {
     this.canvas = canvas;
-    this.portrait = portrait;
     /**
      * 인자로 준 값이 이기고, 없으면 티어가 정한다.
      *
@@ -188,12 +181,12 @@ export class Viewport {
   /**
    * The board's rectangle inside the drawing buffer, in DEVICE pixels, y-UP.
    *
-   * 언제나 버퍼 전체다. 밴드가 켜진 세로 화면에서도 그렇다 — 밴드는 UI 가 붙는
-   * 예약 영역이지 보드에서 잘라낸 구멍이 아니다. `frame.js` 의 `playHeight` 주석에
-   * 왜 그렇게 정했는지, 잘라내 봤을 때 뚜껑이 어떻게 늘어났는지 적혀 있다.
+   * 언제나 버퍼 전체다. 보드는 프레임이고 프레임은 캔버스이므로, 이 셋 사이에
+   * 오프셋이 생길 자리가 없다.
    *
-   * 함수로 남는 이유는 호출부다: `boardClientRect` 가 포인터 매핑 전체를 여기에
-   * 걸고 있고, 보드가 다시 프레임의 일부가 되는 날 고칠 곳이 한 곳이 된다.
+   * 그런데도 함수로 남는 이유는 호출부다: `boardClientRect` 가 포인터 매핑
+   * 전체를 여기에 걸고 있다. 상수 `{x:0,y:0}` 를 호출부마다 인라인하면 보드가
+   * 다시 프레임의 일부가 되는 날 고칠 곳이 세 곳이 된다.
    */
   boardRect() {
     return { x: 0, y: 0, w: this.resolution.x, h: this.resolution.y };
@@ -214,8 +207,8 @@ export class Viewport {
    * The board's rectangle in CLIENT coordinates — a drop-in for the
    * `canvas.getBoundingClientRect()` every pointer mapping used to call.
    *
-   * That is the point of the shape: with `portrait` off it returns exactly the
-   * canvas rect, so every call site can switch to it unconditionally.
+   * That is the point of the shape: it returns exactly the canvas rect, so every
+   * call site can use it unconditionally.
    */
   boardClientRect() {
     const r = this.canvas.getBoundingClientRect();
@@ -259,10 +252,18 @@ export class Viewport {
     const availW = Math.max(2, window.innerWidth);
     const availH = Math.max(2, window.innerHeight);
 
-    if (this.portrait) updateFrame(availW, availH);
-    const aspect = this.portrait
-      ? FRAME.aspect
-      : MAX_FRAME_WIDTH / Math.round(MAX_FRAME_WIDTH / BOARD_ASPECT);
+    /**
+     * One path, where there were two.
+     *
+     * The match page used to resolve a frame that could be taller than 4:3 and
+     * fit the canvas to THAT, while the menu and the cap viewer fitted to a
+     * fixed 4:3. The frame is 4:3 for everyone now, so both branches compute the
+     * same shape and the flag that chose between them is gone. `FRAME.aspect`
+     * rather than `BOARD_ASPECT` so the canvas matches the orthographic UI box
+     * exactly — see the note on `aspect` in `frame.js`.
+     */
+    updateFrame(availW, availH);
+    const aspect = FRAME.aspect;
 
     let w = availW;
     let h = Math.round(w / aspect);

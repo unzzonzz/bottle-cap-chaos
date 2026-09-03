@@ -246,10 +246,14 @@ export class AimInput {
   /**
    * Board-plane point under a client coordinate, or null if the ray misses.
    *
-   * From the BOARD's rect rather than the window or the canvas: the canvas is
-   * letterboxed inside a window of any shape, and in portrait the board is
-   * itself a band inside the canvas with the HUD above it and the cards below.
-   * Using either of the outer boxes would put the aim off by the bars.
+   * From the BOARD's rect rather than the WINDOW: the canvas is letterboxed
+   * inside a window of any shape, and using the window would put the aim off by
+   * the bars.
+   *
+   * The board's rect is the canvas's exactly — see `Viewport.boardRect`, which
+   * has always returned the whole buffer and now cannot return anything else.
+   * It is still asked for by name so that the day the board becomes a
+   * sub-rectangle again, this call site is already correct.
    */
   pick(clientX, clientY) {
     const r = this._boardRect();

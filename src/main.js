@@ -48,7 +48,6 @@ import { ThinkBudget } from './game/ai/ThinkBudget.js';
 import { CardLayer, FRAME } from './render/CardLayer.js';
 import { CardFx } from './render/CardFx.js';
 import { CardFlight } from './render/CardFlight.js';
-import { setFieldAspect, updateFrame } from './core/frame.js';
 import { bootPhysicsDebug } from './debug/PhysicsDebug.js';
 import { MetricsOverlay, NO_METRICS } from './debug/MetricsOverlay.js';
 import { hardenWebView } from './platform/webview.js';
@@ -306,25 +305,14 @@ async function boot(canvas) {
   await initRapier();
 
   /**
-   * `portrait: true` — 켜져 있고, 그게 하는 일은 하나다.
+   * 세 진입점이 같은 인자로 부른다. 예전에는 아니었다.
    *
-   * ── 예전 주석 두 개가 서로를 부정하고 있었다 ──────────────────────────────
-   * 하나는 "이 플래그가 HUD 와 손패를 보드 위아래 밴드에 놓는다"고 했고, 바로
-   * 아래 것은 "밑 밴드에 미해결 렌더링 아티팩트가 있어서 OFF 로 나간다"고 했다.
-   * 인자는 `true` 다. 둘 다 틀렸다기보다, 서로 다른 두 가지를 같은 것으로 부르고
-   * 있었다.
-   *
-   * 이 플래그가 하는 일은 프레임이 보드의 4:3 보다 높아질 수 있게 하는 것뿐이다.
-   * 세로 폰에서 캔버스가 위아래 검은 띠 없이 화면을 채우는 게 그 결과다. 가로
-   * 창에서는 정확히 4:3 으로 떨어지므로 데스크톱은 이 플래그와 무관하다.
-   *
-   * HUD 와 손패를 밴드에 놓는 것은 **다른 문제**이고, `frame.js` 의 `playHeight`
-   * 한 줄로 꺼져 있다. 이유와 켜는 조건은 그쪽 주석에 있다.
-   *
-   * 메뉴와 캡 뷰어는 이 플래그를 끈다 — 둘 다 4:3 캔버스에 위아래로 배치하고
-   * 정사각으로 지켜야 할 보드가 없다.
+   * 프레임이 4:3 보다 높아질 수 있게 하는 플래그가 하나 있었고, 게임과 메뉴는
+   * 켜고 캡 뷰어는 껐다. 프레임이 어느 창에서나 4:3 인 지금 그 플래그의 두 분기는
+   * 같은 값을 내므로 사라졌다 — `core/frame.js` 헤더에 왜 프레임이 더 이상
+   * 자라지 않는지 적혀 있다.
    */
-  const viewport = new Viewport({ canvas, portrait: true });
+  const viewport = new Viewport({ canvas });
   // 이방성 상한은 렌더러가 있어야 알 수 있다. 텍스처가 만들어지기 전에.
   setTextureRenderer(viewport.renderer);
   const retro = new GlossMaterials({ resolution: viewport.resolution });
@@ -702,13 +690,14 @@ async function boot(canvas) {
   );
 
   /**
-   * The frame has to know the field's shape before anything is laid out against
-   * it. `rebuildAll` repeats this on every mode change; this is the first one,
-   * and without it the opening match gets the 4:3 default region regardless of
-   * what it actually plays on.
+   * The first fan-out the three layers built above ever get.
+   *
+   * `retro`, `introLayer` and `modal` all registered their `onResize` AFTER the
+   * constructor ran its own `_fit`, so this is what hands them the resolution
+   * for the first time. It is not about the frame's shape — that is settled and
+   * 4:3 — which is why the `setFieldAspect` call that used to stand here is
+   * gone: the field's aspect never reached `resolveFrame` at all.
    */
-  setFieldAspect(match.arena.layout.extents.x / match.arena.layout.extents.z);
-  updateFrame(window.innerWidth, window.innerHeight);
   viewport.refit();
 
   const gameCamera = new GameCamera({
@@ -1426,7 +1415,7 @@ async function boot(canvas) {
    * `REFERENCE_BOARD_CSS`.
    */
   const syncCameraScale = () => {
-    gameCamera.setBoardCssWidth(viewport.boardClientRect().width, FRAME.boardAspect);
+    gameCamera.setBoardCssWidth(viewport.boardClientRect().width, FRAME.aspect);
   };
   syncCameraScale();
   viewport.onResize(syncCameraScale);
@@ -1627,17 +1616,15 @@ async function boot(canvas) {
     gameCamera.setFixedPitch(pitchFor(match.mode));
     gameCamera.setRotatable(!!match.mode.camera?.rotatable);
     /**
-     * The play area takes the FIELD's shape, so the frame has to be told what
-     * that is — a square knockout board and a long curling lane want very
-     * different regions, and giving both the screen's shape wastes half of it
-     * on one and crops the other. Before `setExtents`, so the camera's own
-     * re-fit below already sees the region it will be drawn into.
+     * The camera takes the new field; the FRAME does not move.
+     *
+     * A `setFieldAspect` + `refit` pair stood here, on the theory that the play
+     * area took the field's shape and a square board therefore wanted a
+     * different region from a long lane. The frame never read that value, and it
+     * is 4:3 for every mode now, so the refit it gated could only ever hand the
+     * listeners the numbers they already had.
      */
     const ext = match.arena.layout.extents;
-    if (setFieldAspect(ext.x / ext.z)) {
-      updateFrame(window.innerWidth, window.innerHeight);
-      viewport.refit();
-    }
     gameCamera.setExtents(ext);
     /**
      * 그림자 카메라도 같은 필드에 맞춘다.

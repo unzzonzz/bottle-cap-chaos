@@ -142,7 +142,7 @@ export function bootMenu(
   // Portrait, like the match page. The menu has no board to keep square, so it
   // simply takes the window's shape and the arrangement below stacks instead of
   // sitting side by side. See src/core/frame.js.
-  const viewport = new Viewport({ canvas, portrait: true });
+  const viewport = new Viewport({ canvas });
   setTextureRenderer(viewport.renderer);
   const retro = new GlossMaterials({ resolution: viewport.resolution });
 
@@ -196,11 +196,11 @@ export function bootMenu(
   const composer = new SceneComposer({ viewport, scene, camera, bloom: cfg.view.bloom });
 
   /**
-   * The authored arrangement, kept so the portrait one can be undone.
+   * The authored arrangement, kept because `applyArrangement` overwrites it.
    *
-   * `placeCamera` rewrites these four on every resize, and a resize back to a
-   * wide window has to restore what the config actually says rather than
-   * whatever the last narrow window left behind.
+   * `cfg.items` is scaled in place on every resize, so the authored numbers have
+   * to survive somewhere or the second resize scales an already-scaled value and
+   * the column walks itself to nothing.
    */
   /**
    * How far the camera has been pulled back to hold the visible WIDTH.
@@ -224,19 +224,6 @@ export function bootMenu(
     pitch: cfg.items.pitch,
   };
 
-  /**
-   * Bottle above, menu below — but only when the frame is actually tall.
-   *
-   * The authored layout puts the bottle left of centre and the item column
-   * right of it, which is the right answer in a 4:3 box and the wrong one in a
-   * portrait phone, where it leaves both squeezed into a narrow half. Stacking
-   * them is the same design in the other axis: the bottle is still the thing you
-   * look at first and the column is still a column.
-   *
-   * Everything is expressed against the frame so it holds at any scale. The
-   * bottle keeps its distance from its own floor pool — shifting one without the
-   * other would leave it hovering over a light that stayed behind.
-   */
   /**
    * 항목 열은 프레임에 비례한다. 640 에서 저술한 값을 그 비율로 줄인다.
    *
@@ -262,29 +249,29 @@ export function bootMenu(
     return k;
   }
 
-  function applyArrangement(u) {
-    const tall = FRAME.tall;
+  /**
+   * The authored pose, rescaled to whatever width the frame resolved to.
+   *
+   * ── there was a second arrangement here ─────────────────────────────────────
+   * A `tall` branch stacked the bottle above the column instead of placing it
+   * left of one, for a portrait phone where the side-by-side layout squeezed
+   * both into a narrow half. `FRAME.tall` was the switch and it is gone with the
+   * band system — the frame is 4:3 in every window now, so the stacked pose
+   * could never be reached again and a pose nothing can reach is a pose that
+   * will be wrong the next time the tokens move.
+   *
+   * `u` is still taken: `scaleColumn` is about to make the plates smaller and
+   * the caller has already computed the units-per-pixel that goes with them.
+   */
+  function applyArrangement(_u) {
     const k = scaleColumn();
-    if (!tall) {
-      Object.assign(cfg.bottle, {
-        originX: LANDSCAPE_POSE.originX,
-        originY: LANDSCAPE_POSE.originY,
-        floorY: LANDSCAPE_POSE.floorY,
-      });
-      cfg.items.columnX = Math.round(LANDSCAPE_POSE.columnX * k);
-      cfg.items.columnY = Math.round(LANDSCAPE_POSE.columnY * k);
-      return;
-    }
-    // Both centred horizontally; the bottle in the upper third, the column under
-    // it. The fractions are of the frame, so a taller phone spreads them further
-    // apart rather than changing their relationship to each other.
-    const riseFramePx = FRAME.height * 0.26;
-    const drop = LANDSCAPE_POSE.originY - LANDSCAPE_POSE.floorY;
-    cfg.bottle.originX = 0;
-    cfg.bottle.originY = LANDSCAPE_POSE.originY + riseFramePx * u;
-    cfg.bottle.floorY = cfg.bottle.originY - drop;
-    cfg.items.columnX = 0;
-    cfg.items.columnY = -Math.round(FRAME.height * 0.19);
+    Object.assign(cfg.bottle, {
+      originX: LANDSCAPE_POSE.originX,
+      originY: LANDSCAPE_POSE.originY,
+      floorY: LANDSCAPE_POSE.floorY,
+    });
+    cfg.items.columnX = Math.round(LANDSCAPE_POSE.columnX * k);
+    cfg.items.columnY = Math.round(LANDSCAPE_POSE.columnY * k);
   }
 
   // ── contents ─────────────────────────────────────────────────────────────
@@ -453,16 +440,20 @@ export function bootMenu(
      * Pull back far enough that the WIDTH the camera sees does not change.
      *
      * `fov` is vertical. Narrowing the aspect while holding it therefore narrows
-     * the visible width in proportion — at a phone's 0.46 the camera sees a
-     * third of the world it saw at 4:3, and the bottle, which had been a seventh
-     * of the width, becomes half of it. That is what "the bottle is enormous"
-     * actually was: not a scale bug, a field-of-view one.
+     * the visible width in proportion, and backing off by the same ratio
+     * restores it exactly — so the bottle keeps the size it was designed at
+     * whatever shape the projection is.
      *
-     * Backing off by the same ratio restores the visible width exactly, so the
-     * bottle keeps the size it was designed at and the extra room a tall screen
-     * buys is spent on HEIGHT — which is where the menu column now lives.
+     * ── it used to earn its keep. Now it corrects a rounding residue ──────────
+     * This was written for a portrait phone, where the aspect fell to 0.46, the
+     * camera saw a third of the world it saw at 4:3, and the bottle — a seventh
+     * of the width — became half of it. That was never a scale bug; it was a
+     * field-of-view one.
      *
-     * 1 at 4:3 and wider, so no landscape window moves.
+     * The frame is 4:3 in every window now, so the only thing left for this to
+     * correct is the frame height's rounding to a whole pixel: at most 0.1%,
+     * which is a pull-back of a tenth of a percent. Kept rather than pinned to 1
+     * because it is the correct general statement and it costs one `max`.
      */
     camWiden = Math.max(1, BOARD_ASPECT / camera.aspect);
     camera.position.set(0, cfg.camera.height * camWiden, cfg.camera.distance * camWiden);
