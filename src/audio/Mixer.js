@@ -380,6 +380,22 @@ export class Mixer {
    *
    * Seeded from the audio stream, so it is not `Math.random` and it is not the
    * game's — see `audioRng`.
+   *
+   * ── it is WHITE, and that is the one open question about it ─────────────
+   * Equal power per hertz, so power per OCTAVE rises 3 dB an octave and half of
+   * it sits in the top octave alone. Every band-pass in `soundBank` fights that
+   * — a two-pole filter's 6 dB an octave leaves a net slope of only about 3 —
+   * which is why the noise layers there carry Qs that look tight for what they
+   * are, and why nine of them were measured hissing at a 12 kHz centroid before
+   * anyone noticed.
+   *
+   * Tilting this buffer instead — pink, or a one-pole low-pass near 5 kHz —
+   * would turn that net 3 dB an octave into 9 and fix the whole class in one
+   * place. It is the better fix and it has not been taken, because it moves all
+   * thirty-nine noise layers at once, including the six collisions tuned by
+   * measurement against the buffer as it is. If the top end still needs coming
+   * down, this is the lever, and `cap_cap`'s body gain is what has to be
+   * re-measured after pulling it.
    */
   /**
    * 잔향의 임펄스 응답. 절차적으로 만든다 — 이 프로젝트에 오디오 파일은 없다.

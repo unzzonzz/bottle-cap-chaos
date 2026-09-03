@@ -212,7 +212,31 @@ function tone(o = {}) {
   };
 }
 
-/** One filtered-noise layer, same arrangement. */
+/**
+ * One filtered-noise layer, same arrangement.
+ *
+ * ── Q is load-bearing here, and it does not look like it ────────────────────
+ * The shared buffer is WHITE noise: equal power per hertz, which means its
+ * power per OCTAVE rises at 3 dB an octave. A two-pole band-pass rolls off at 6
+ * dB an octave. So above the centre those two nearly cancel — the net slope is
+ * about −3 dB an octave, and a band-pass that looks narrow on paper still hands
+ * over a great deal of top end.
+ *
+ * Measured: `band(1500, 1500, 1.2)` on this buffer — a Q that reads as "gently
+ * focused" — puts 27% of its energy above 4 kHz and has a spectral centroid of
+ * 5.6 kHz, nearly two octaves above the band it names. Raising Q to 2.2 halves
+ * the first number. That is why the beds in this file carry Qs that look tight
+ * for what they are: they are not resonances, they are the roll-off the noise
+ * does not have.
+ *
+ * The other lever is the buffer itself. Tilting it — pink, or a one-pole
+ * low-pass around 5 kHz — would turn that net −3 dB an octave into −9 and tame
+ * every layer at once, which is the structurally right fix and is deliberately
+ * NOT taken here: it moves all thirty-nine noise layers, including the six
+ * collisions that were just tuned by measurement, and it is a bigger change
+ * than the fault being repaired. It is the next lever, not this one. See
+ * `Mixer._makeNoise`.
+ */
 function noise(o = {}) {
   return {
     gain: o.gain ?? 0.35,
@@ -258,9 +282,69 @@ function low(from, to = from, sweep = 0.09) {
  */
 const BLIP_CEILING = 7200;
 
-/** A high-pass. Air, paper, shimmer. */
+/**
+ * A high-pass. For a TONE layer, whose spectrum has a top of its own.
+ *
+ * ── never on noise, and that took a measurement to notice ───────────────────
+ * Nine noise layers used this and every one of them was a fault. A high-pass
+ * has no upper bound, and white noise carries equal power per hertz — so half
+ * of the shared buffer's energy is in the top octave alone (12–24 kHz). A
+ * high-pass on it does not select "air": it deletes the bottom and hands over
+ * everything above the corner, which is the brightest possible thing the buffer
+ * can produce.
+ *
+ * Measured on `card_hover` and `draw_clear`, the two worst: spectral centroid
+ * 12.4 kHz and 12.1 kHz, with 66% and 65% of the energy above 8 kHz. That is
+ * not a texture. It is hiss, sitting in the octave the ear is least willing to
+ * forgive, and it is what the player reported as a high-pitched burst.
+ *
+ * An oscillator is different: a square at 880 Hz has harmonics that thin out on
+ * their own, so high-passing it removes weight without exposing anything. That
+ * is the one remaining caller.
+ *
+ * For noise, use `air`.
+ */
 function high(from, to = from, sweep = 0.09) {
   return { type: 'highpass', freq: from, freqEnd: to, q: 0.7, sweep };
+}
+
+/**
+ * The highest a noise band may be CENTRED, in Hz.
+ *
+ * The counterpart of `BLIP_CEILING`, and it exists for the same reason that one
+ * does — read that note first, because it describes this failure and then only
+ * fixes it for tones: "사각파의 고차 배음이 그대로 남으면 새 잔향의 꼬리에 실려
+ * 쉭쉭거리기 때문이다". High content riding the reverb tail hisses.
+ *
+ * Noise is worse at it than any oscillator, and it had no ceiling at all. 7000
+ * is where a band centre still reads as bright without the band's own skirt
+ * reaching into the top octave: a Q of 2 puts 14 kHz 12 dB down from there.
+ *
+ * It is a CENTRE ceiling, not a wall — a band-pass has a skirt above it, and
+ * that skirt is the whole point. What is banned is an unbounded shelf.
+ */
+const NOISE_CEILING = 7000;
+
+/**
+ * Air, paper, shimmer. What `high` was being used for, with a top on it.
+ *
+ * A band-pass whose centre sweeps, so the gesture a high-pass sweep was making
+ * survives — opening upward reads as something taking off, closing downward as
+ * something landing or being wiped away. What does not survive is the open
+ * shelf above it.
+ *
+ * `q` is the width. Around 1.0 is nearly two octaves and still reads as a
+ * broadband rush; 2.5 is narrow enough to be a tick with a pitch to it. Below
+ * about 0.8 the skirts are shallow enough that the ceiling stops meaning much.
+ */
+function air(from, to = from, q = 2, sweep = 0.09) {
+  return {
+    type: 'bandpass',
+    freq: Math.min(from, NOISE_CEILING),
+    freqEnd: Math.min(to, NOISE_CEILING),
+    q,
+    sweep,
+  };
 }
 
 /**
@@ -543,7 +627,7 @@ export const SOUNDS = {
     gain: 0.5,
     voices: 1,
     jitter: 0,
-    noise: noise({ gain: 1, attack: 0.09, decay: 0.2, filter: band(1500, 1500, 1.2) }),
+    noise: noise({ gain: 1, attack: 0.09, decay: 0.2, filter: band(1500, 1500, 2.2) }),
   },
 
   /** A cap turning over. Short, and it reads as rotation because it steps up. */
@@ -565,7 +649,7 @@ export const SOUNDS = {
       stepRatio: 1.26,
       stepGain: 0.8,
     }),
-    noise: noise({ gain: 0.2, decay: 0.05, filter: high(1800, 3400, 0.07) }),
+    noise: noise({ gain: 0.2, decay: 0.05, filter: air(2200, 1600, 2.2, 0.07) }),
   },
 
   /** Off the edge. The pitch falls with it, which is the whole sound. */
@@ -599,7 +683,7 @@ export const SOUNDS = {
     gain: 0.3,
     cooldown: 0.05,
     tone: tone({ wave: 'square', freq: F.A5, gain: 0.3, decay: 0.022, filter: low(BLIP_CEILING) }),
-    noise: noise({ gain: 0.25, decay: 0.02, filter: high(3000, 3000, 0.02) }),
+    noise: noise({ gain: 0.25, decay: 0.02, filter: air(2600, 2600, 2.5, 0.02) }),
   },
 
   /** Release. The loudest thing a player does on purpose. */
@@ -683,7 +767,7 @@ export const SOUNDS = {
     cooldown: 0.12,
     jitter: 0.3,
     tone: tone({ wave: 'sawtooth', freq: deg(4), freqEnd: deg(13), gain: 0.26, decay: 0.2, filter: low(1600, 6200, 0.2) }),
-    noise: noise({ gain: 0.14, decay: 0.2, filter: high(1800, 6000, 0.2) }),
+    noise: noise({ gain: 0.14, decay: 0.2, filter: air(2200, 4600, 1.3, 0.2) }),
     scale: 4,
     /** The one UI sound that is allowed a little room: it IS the room changing. */
     send: 0.1,
@@ -769,7 +853,7 @@ export const SOUNDS = {
     gain: 0.078,
     cooldown: 0.06,
     voices: 2,
-    noise: noise({ gain: 0.4, decay: 0.055, filter: high(2200, 5200, 0.05) }),
+    noise: noise({ gain: 0.4, decay: 0.055, filter: air(2400, 1800, 2.2, 0.05) }),
     send: 0.03,
   },
 
@@ -778,7 +862,7 @@ export const SOUNDS = {
     priority: 2,
     gain: 0.24,
     cooldown: 0.05,
-    noise: noise({ gain: 0.4, decay: 0.07, filter: band(1400, 2600, 1.2, 0.06) }),
+    noise: noise({ gain: 0.4, decay: 0.07, filter: band(1600, 2200, 2.4, 0.06) }),
   },
 
   /** One tick per slot crossed while reordering. Tiny by design. */
@@ -908,7 +992,7 @@ export const SOUNDS = {
       stepGain: 0.94,
       filter: high(700),
     }),
-    noise: noise({ gain: 0.12, decay: 0.22, filter: high(3200, 6000, 0.2) }),
+    noise: noise({ gain: 0.12, decay: 0.22, filter: air(3000, 4800, 1.5, 0.2) }),
     scale: 5,
     /** Scanning ahead is a sound that goes somewhere. The wettest card. */
     send: 0.3,
@@ -1127,7 +1211,7 @@ export const SOUNDS = {
       stepRatio: STEP.FIFTH,
       stepGain: 0.86,
     }),
-    noise: noise({ gain: 0.12, decay: 0.26, filter: high(3600, 7000, 0.24) }),
+    noise: noise({ gain: 0.12, decay: 0.26, filter: air(3200, 5000, 1.6, 0.24) }),
   },
 
   // ── the orbs sit there in silence ──────────────────────────────────────
@@ -1157,7 +1241,7 @@ export const SOUNDS = {
       stepRatio: STEP.FIFTH,
       filter: low(5000),
     }),
-    noise: noise({ gain: 0.14, decay: 0.14, filter: high(4000, 8000, 0.13) }),
+    noise: noise({ gain: 0.14, decay: 0.14, filter: air(3400, 5200, 1.6, 0.13) }),
   },
 
   /** Hand full. A refusal, and it must not sound like a pickup at any point. */
@@ -1202,9 +1286,22 @@ export const SOUNDS = {
       gain: 1,
       attack: 0.07,
       decay: 0.25,
-      // Wide and high. A narrow band here is a resonance, and a resonance is a
-      // pipe — which is the thing this sound was rebuilt to stop being.
-      filter: band(4200, 4200, 1.1),
+      /**
+        * ── measured at the rate it actually runs at, which is the point ─────
+        * `MenuAudio` drives this loop's rate from 0.7 to 1.45, and the rate
+        * carries the band centre with it. At 4.2 kHz and Q 1.1 that meant 66%
+        * of the energy above 4 kHz and 17% above 8 kHz — on a bed that is HELD
+        * for the whole of the shake. Auditioned at rate 1 it measured half
+        * that, which is how it survived: the panel plays it at rest.
+        *
+        * The original note stands and constrains the fix: "A narrow band here
+        * is a resonance, and a resonance is a pipe — which is the thing this
+        * sound was rebuilt to stop being." So Q goes to 2.4 and not to 3.5,
+        * which is where the brightness would be lowest and the fizz would be a
+        * whistle. Carbonation is thousands of tiny bubbles; it has to stay wide.
+        * An octave down and a little tighter: 25% above 4 kHz, 4% above 8.
+        */
+       filter: band(2200, 2200, 2.4),
     }),
   },
 
@@ -1363,7 +1460,7 @@ export const SOUNDS = {
       filter: low(5200),
     }),
     tone2: tone({ wave: 'triangle', freq: F.TENOR, freqEnd: F.G4, gain: 0.32, decay: 0.45, filter: low(1800) }),
-    noise: noise({ gain: 0.2, decay: 0.4, filter: high(3400, 7600, 0.36) }),
+    noise: noise({ gain: 0.2, decay: 0.4, filter: air(3200, 5200, 1.4, 0.36) }),
   },
 
   /**
@@ -1635,7 +1732,7 @@ export const SOUNDS = {
     priority: 7,
     gain: 0.4,
     jitter: 0.2,
-    noise: noise({ gain: 0.55, attack: 0.02, decay: 0.3, curve: 'lin', filter: high(500, 6400, 0.28) }),
+    noise: noise({ gain: 0.55, attack: 0.02, decay: 0.3, curve: 'lin', filter: air(2400, 800, 1.6, 0.28) }),
   },
 
   draw_save: {
