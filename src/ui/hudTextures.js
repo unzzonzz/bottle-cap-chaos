@@ -12,7 +12,6 @@ import {
   glassPanel,
   roleButton,
   roleSkin,
-  roundRectPath,
   skinFor,
 } from './glass.js';
 import { drawIcon } from './icons.js';
@@ -132,9 +131,9 @@ const BTN = PALETTE.button;
  * ── the numbers are as big as the plate allows ──────────────────────────────
  * They are the one thing on screen that has to be readable at a glance from
  * across a 640x480 frame, so they get 26 of the plate's 42 pixels and the
- * caption gets what is left. Each is drawn in its OWN player colour, and the
- * same colour is repeated as a solid bar down the outer edge — the bar is what
- * you can still tell apart once the quantiser has been at two similar hues.
+ * caption gets what is left. Each is drawn in its OWN player ink, and that ink
+ * is the whole of the colour coding — the pair of solid bars down the outer
+ * edges said the same thing a second time and have gone.
  *
  * 42 tall and not the 64 it started at, because of what is above and below it
  * on a knockout board — see the band `HudLayer.layout` has to fit it into.
@@ -160,13 +159,15 @@ export function scorePlateTexture(board, { width, height, scale = 1 }) {
 
   glassPanel(ctx, { x: 0, y: 0, w: fw, h: fh, radius: RADIUS.panel });
 
-  // 팀 색 바. 색으로 읽히려면 선이 아니라 면이어야 한다.
-  const bar = 10;
-  for (const [color, x] of [[board.left.color, SPACE.sm], [board.right.color, fw - SPACE.sm - bar]]) {
-    ctx.fillStyle = color;
-    roundRectPath(ctx, x, SPACE.sm, bar, fh - SPACE.sm * 2, bar / 2);
-    ctx.fill();
-  }
+  /**
+   * 팀 색 바는 없다. 색은 **숫자 자체**가 말한다.
+   *
+   * 예전에는 양쪽 바깥 가장자리에 팀 색 막대가 한 줄씩 서 있었다. 그것이 하던
+   * 일 — 어느 쪽 숫자가 누구 것인지 — 은 `inkFor` 가 숫자를 그 팀의 잉크로
+   * 칠하는 것으로 이미 되어 있고, 두 번 말하는 쪽이 막대였다. 알파 이진화를
+   * 걷어낸 뒤로는 44px 숫자의 색조가 그대로 살아 나오므로, 막대가 보험이던
+   * 이유(양자화가 두 색을 뭉갠다)도 남아 있지 않다.
+   */
 
   const mid = fw / 2;
   const numberY = fh * 0.56;
@@ -349,11 +350,11 @@ export function iconButtonTexture(icon, state, { size, scale = 1, role = null })
 }
 
 /**
- * The turn line: whose go it is, or who won.
+ * The turn line: whose go it is, or who won. Also the intro's name plate.
  *
- * The colour swatch survives the move out of the DOM because it is doing real
- * work — "PLAYER 2" and "PLAYER 1" are four pixels apart at this size and the
- * block of colour is what actually distinguishes them at a glance.
+ * "PLAYER 2" and "PLAYER 1" are four pixels apart at this size, so something on
+ * the plate has to carry the colour. It used to be a swatch beside the text; it
+ * is the text itself now, in the same team ink the score's numbers use.
  */
 /**
  * ── it grows to fit its text now, and it had to ───────────────────────────
@@ -415,19 +416,26 @@ export function turnPlateTexture(text, color, { width, height, scale = 1, maxWid
     elevation: ELEVATION.raised,
   });
 
-  // 팀 색 알약. 판이 pill 이므로 안쪽 표시도 pill 이어야 같은 언어가 된다.
-  const bar = 8;
-  ctx.fillStyle = color;
-  roundRectPath(ctx, pad + SPACE.xs, pad + SPACE.xs, bar, height - (pad + SPACE.xs) * 2, bar / 2);
-  ctx.fill();
-
+  /**
+   * 색 알약은 없다. 팀 색은 **글자**가 입는다.
+   *
+   * 알약은 판 왼쪽 안쪽에 세로로 선 8픽셀짜리 색 막대였다. 판이 pill 이라 그
+   * 안의 표시도 pill 이면 같은 언어라는 게 이유였지만, 실제로 보이는 것은
+   * 이름 앞에 붙은 정체 불명의 막대 하나였다 — 이름표에도, 턴 판에도.
+   *
+   * 그 막대가 하던 일은 "PLAYER 1 과 PLAYER 2 를 글자를 읽기 전에 구분하기"
+   * 하나이고, 그건 라벨을 그 팀의 잉크(`inkFor`)로 칠하면 같은 자리에서 같은
+   * 거리에서 그대로 된다. 막대를 지우면 왼쪽 여백이 라벨의 것이 되므로 글자는
+   * 판 가운데로 간다 — 뚜껑 아래 걸리는 이름표는 원래 가운데 정렬이어야 했다.
+   */
   applyTracking(ctx, TYPE.label.tracking);
   drawText(ctx, {
     text: label,
-    x: pad + SPACE.xs * 2 + bar + SPACE.xs,
+    x: frameW / 2,
     y: height / 2 + fitted.size * 0.36,
     font,
-    color: PALETTE.ui.text,
+    color: inkFor(color),
+    align: 'center',
   });
   applyTracking(ctx, 0);
 
