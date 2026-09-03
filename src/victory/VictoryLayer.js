@@ -292,9 +292,6 @@ export class VictoryLayer {
      */
     this._busy = false;
 
-    /** Frame pixels of the bottom edge the device owns. See `setSafeInsets`. */
-    this._safeBottom = 0;
-
     /** -1 is a draw. Undefined until `begin`. */
     this.winnerIndex = -1;
     this._draw = false;
@@ -314,26 +311,6 @@ export class VictoryLayer {
     // Same as the HUD: a frame that changed shape needs the ortho box refitted
     // and everything anchored to an edge placed again.
     if (refitFrameCamera(this.camera)) this.layout();
-  }
-
-  /**
-   * Lift the button row clear of a home indicator.
-   *
-   * The row is the only thing in this layer near an edge — the result band sits
-   * well inside — and it had 30 frame pixels of clearance, which is not quite
-   * enough: a landscape iPhone's indicator strip is about 26 of them, so the hit
-   * quads finished 4 pixels above a region the OS treats as its own. `max`
-   * rather than `+` because the existing clearance already covers most of the
-   * inset; adding would push 재시작 and 나가기 visibly up the screen on a phone
-   * for no reason a player could see.
-   *
-   * @param {{top:number,right:number,bottom:number,left:number}} insets frame px
-   */
-  setSafeInsets(insets) {
-    const bottom = Math.max(0, insets?.bottom ?? 0);
-    if (bottom === this._safeBottom) return;
-    this._safeBottom = bottom;
-    this.layout();
   }
 
   /**
@@ -405,11 +382,10 @@ export class VictoryLayer {
     /**
      * The row's floor: the lowest the HIT quad may reach, not the plate.
      *
-     * The quad is what the OS competes with, and it hangs `hitMargin` below the
-     * plate — so the constraint is written against the quad and the plate's
-     * position is derived back from it. See `setSafeInsets`.
+     * The quad hangs `hitMargin` below the plate, so the constraint is written
+     * against the quad and the plate's position is derived back from it.
      */
-    const floor = -VICTORY_FRAME.height / 2 + (this._safeBottom ?? 0);
+    const floor = -VICTORY_FRAME.height / 2;
     /**
      * 버튼 크기도 프레임을 따라간다. 폭에는 프레임 상한이 걸린다 — 두 버튼과
      * 간격을 합치면 저술 폭에서 330 이고, 421 프레임에서 그대로 두면 79% 다.

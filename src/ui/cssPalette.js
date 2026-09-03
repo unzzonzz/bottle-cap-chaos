@@ -30,11 +30,11 @@ import { MOTION } from '../core/tokens.js';
  * light blue is a transition nobody will see. Fallbacks would put the values
  * back in two places to solve a problem that no longer exists.
  *
- * The one thing this cannot cover is the paint BEFORE the web view has any
- * document at all — the native splash. That colour lives in
- * `capacitor.config.json` and in the Android resources, and there is no way to
- * make those read a JavaScript module; they are called out in `docs/palette.md`
- * as the two places that have to be changed by hand alongside this file.
+ * The one thing this cannot cover is the paint BEFORE the stylesheet has been
+ * applied — the browser's own initial canvas. `index.html` pins that with
+ * `<meta name="color-scheme" content="light">`, which is why a reload does not
+ * flash dark. That meta tag is the one place outside this module with an opinion
+ * about the background, and `docs/palette.md` names it.
  */
 export function applyCssPalette(root = document.documentElement) {
   const set = (name, value) => root.style.setProperty(name, value);

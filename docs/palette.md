@@ -70,7 +70,7 @@ grep -rInE "#[0-9a-fA-F]{6}" src/ | grep -v "^src/core/palette.js"
 - 실패해도 절대 throw 하지 않는다. 폴백 폰트로 읽히는 UI가 원하는 실패 모드다
 
 **남은 것: `BCC Sans` 로 등록할 woff2 파일이 없다.** 지금은 개발 머신에 설치된
-Pretendard 로 해결되지만 Capacitor 빌드에는 들어가지 않는다. 필요한 것:
+Pretendard 로 해결되지만 그게 없는 기계에서는 폴백으로 떨어진다. 필요한 것:
 
 1. Pretendard woff2 (OFL) 를 `src/ui/fonts/` 에 넣고 라이선스 파일 동봉
 2. 서브셋: UI 문자 + **완성형 한글 전체(11172자)**. 닉네임이 사용자 입력이고
@@ -81,12 +81,12 @@ Pretendard 로 해결되지만 Capacitor 빌드에는 들어가지 않는다. �
 
 ## 자바스크립트가 닿지 않는 곳
 
+모바일 빌드가 사라지면서 이 목록은 한 줄로 줄었다. 네이티브 스플래시도,
+`Info.plist` 의 `UIUserInterfaceStyle` 도, 웹뷰 배경색도 더 이상 없다.
+
 | 위치 | 무엇 | 현재 |
 |---|---|---|
-| `capacitor.config.json` | 웹뷰 배경 3곳 | `#1a76c4` = `bg.skyTop`. 팔레트가 바뀌면 손으로 맞춰라 |
-| `ios/App/App/Info.plist` | `UIUserInterfaceStyle` | `Light`. 없으면 다크모드 폰에서 런치 스크린이 검다 |
-| `ios/.../Splash.imageset/` | 스플래시 PNG 3장 | 아직 Capacitor 기본값. 재생성 필요 |
-| `android/.../drawable*/splash.png` | 스플래시 PNG 10장 | 아직 Capacitor 기본값. 재생성 필요 |
+| `index.html` | `<meta name="color-scheme">` | `light`. 스타일시트가 적용되기 전 브라우저가 칠하는 초기 캔버스와, 폼 컨트롤·스크롤바의 기본 색을 정한다 |
 
 `src/ui/styles.css` 는 닿는다 — `src/ui/cssPalette.js` 가 `--bcc-*` 커스텀
 프로퍼티로 밀어 넣는다. 스타일시트에 hex 리터럴을 쓰지 마라. **예외 하나**:

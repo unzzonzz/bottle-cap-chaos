@@ -10,11 +10,16 @@
  * composited by the browser outside the WebGL frame and costs nothing the
  * numbers are trying to report.
  *
- * ── why it is not behind ?debug=1 ──────────────────────────────────────────────
- * The existing panel (`PhysicsDebug`) is gated on `?debug=1` in the launch URL,
- * which in a Capacitor app is unreachable: there is no address bar. The gate here
- * is a tap on the badge, and the choice is persisted, so the panel can be raised
- * and lowered on a phone with no keyboard.
+ * ── two gates, not one ────────────────────────────────────────────────────────
+ * `?debug=1` decides whether this is CONSTRUCTED at all — without it `main.js`
+ * holds the `NO_METRICS` stub and nothing here runs. Clicking the badge then
+ * cycles what it SHOWS, and that choice is persisted, so a long measuring
+ * session can collapse the readout without losing the sampling behind it.
+ *
+ * The badge gate predates the flag gate: this used to mount unconditionally,
+ * because it had to be reachable where no address bar existed. It does not any
+ * more, and a panel that costs frames has no business in a build nobody is
+ * measuring — see docs/metrics.md on how much it costs.
  *
  * ── what "accumulator is behind" actually means here ───────────────────────────
  * This is the number the whole exercise turns on, and it is worth being precise

@@ -31,7 +31,7 @@ import { GameCamera } from './render/GameCamera.js';
 import { CamTracker } from './render/CamTracker.js';
 import { TrackPathView } from './render/TrackPathView.js';
 import { AiCandidateView } from './render/AiCandidateView.js';
-import { HudLayer, HUD_FRAME } from './ui/HudLayer.js';
+import { HudLayer } from './ui/HudLayer.js';
 import { VictoryLayer } from './victory/VictoryLayer.js';
 import { VICTORY_STAGE } from './victory/VictoryClock.js';
 import { fadeIn, fadeOut } from './ui/pageFade.js';
@@ -51,7 +51,6 @@ import { CardFlight } from './render/CardFlight.js';
 import { setFieldAspect, updateFrame } from './core/frame.js';
 import { bootPhysicsDebug } from './debug/PhysicsDebug.js';
 import { MetricsOverlay, NO_METRICS } from './debug/MetricsOverlay.js';
-import { SafeArea } from './platform/safeArea.js';
 import { hardenWebView } from './platform/webview.js';
 import { bootViewer } from './viewer/bootViewer.js';
 import { bootMenu } from './menu/bootMenu.js';
@@ -127,11 +126,10 @@ if (routed) {
  *
  * The frame the menu leaves on is now a shut letterbox, and `Cinematic` closes
  * it to `PALETTE.bg.skyTop` precisely because that is already `--bcc-void` —
- * what the line below paints the document, what the browser paints around a
- * letterboxed canvas, and what `capacitor.config.json` gives the web view. So
- * the menu's last frame, the gap, and this page's first frame are one colour
- * with nothing assigned anywhere, and there is no longer an inline style that
- * has to be kept in agreement with three other files.
+ * what the line below paints the document, and what the browser paints around a
+ * letterboxed canvas. So the menu's last frame, the gap, and this page's first
+ * frame are one colour with nothing assigned anywhere, and there is no longer an
+ * inline style that has to be kept in agreement with other files.
  */
 // The stylesheet names `var(--bcc-*)` and nothing else, so this has to run
 // before the letterbox, the page fade or either developer overlay is painted.
@@ -226,8 +224,8 @@ viewSettings.onChange(applyViewSettings);
  * resolves. A pinch made while the physics core is still loading would otherwise
  * be handled by the browser, which zooms the page and leaves it zoomed.
  *
- * Most of the blocking is CSS and native config; this is only the handful with
- * no declarative form. See src/platform/webview.js for what lives where.
+ * Most of the blocking is CSS; this is only the handful with no declarative
+ * form. See src/platform/webview.js for what lives where.
  */
 hardenWebView();
 
@@ -1418,48 +1416,20 @@ async function boot(canvas) {
   viewport.onResize(({ resolution }) => victory.setResolution(resolution));
 
   /**
-   * The notch and the home indicator, converted into this frame's own pixels.
+   * The camera's screen scale, so a cap is the same physical size in any window.
    *
-   * Registered LAST of the seven resize listeners, deliberately: `_fit` has
-   * already written `canvas.style.width/height` by the time any listener runs,
-   * but `getBoundingClientRect` reads the laid-out box, and putting this after
-   * the others keeps the read as far from the write as the fan-out allows.
-   *
-   * `measure()` returns true only when the frame-pixel answer actually moved, so
-   * the three `layout()` calls behind these setters fire on an orientation
-   * change and not on the dozen resizes a sliding URL bar produces. Every one of
-   * them is a no-op on identical insets in any case; this just avoids the work.
-   *
-   * The insets are zero on a desktop browser and — because the canvas is
-   * letterboxed to 4:3 and centred — zero in portrait on a phone as well. See
-   * src/platform/safeArea.js.
-   */
-  /**
-   * The camera's screen scale, so a cap is the same physical size on a phone.
-   *
-   * The framing is authored in world units, which makes a cap however many
-   * pixels the display gives that slice of board — 40 CSS px on a desktop
-   * canvas, 15 on a phone. `GameCamera.screenZoom` steps the default framing in
-   * by whatever the screen lost; this is the only thing that has to tell it how
-   * wide the board actually is. See the note on `REFERENCE_BOARD_CSS`.
+   * The framing is authored in world units, which makes a cap however many CSS
+   * pixels the canvas gives that slice of board — 40 at the reference width, and
+   * proportionally fewer in a small window. `GameCamera.screenZoom` steps the
+   * default framing in by whatever the canvas lost; this is the only thing that
+   * has to tell it how wide the board actually is. See the note on
+   * `REFERENCE_BOARD_CSS`.
    */
   const syncCameraScale = () => {
     gameCamera.setBoardCssWidth(viewport.boardClientRect().width, FRAME.boardAspect);
   };
   syncCameraScale();
   viewport.onResize(syncCameraScale);
-
-  const safeArea = new SafeArea(canvas, HUD_FRAME);
-  const applySafeArea = () => {
-    const insets = safeArea.frameInsets;
-    hud.setSafeInsets(insets);
-    cards.setSafeInsets(insets);
-    victory.setSafeInsets(insets);
-  };
-  applySafeArea();
-  viewport.onResize(() => {
-    if (safeArea.measure()) applySafeArea();
-  });
 
   /**
    * Restart, under the letterbox.
@@ -1755,16 +1725,13 @@ async function boot(canvas) {
   /**
    * Off unless asked for. The stub keeps the loop's two calls honest.
    *
-   * It was unconditional, because the whole point of it was to be readable on a
-   * phone where `?debug=1` cannot be typed. That was right while the question
-   * was "does this run at all on the device"; it is wrong as a thing sitting in
-   * the corner of a game nobody is measuring. The instrument stays — every
-   * sampling call site and the whole readout are intact — it simply does not
-   * mount itself unless the flag is on.
+   * It was unconditional once, back when the question was "does this run at all"
+   * — it is wrong as a thing sitting in the corner of a game nobody is
+   * measuring. The instrument stays: every sampling call site and the whole
+   * readout are intact, it simply does not mount itself unless the flag is on.
    *
-   * To read numbers on a DEVICE, where there is no address bar to put the flag
-   * in: change this one expression to `true`, rebuild, and change it back. That
-   * is what was done for every measurement in docs/ios.md.
+   * Note that the panel is not free — see docs/metrics.md on why a frame time
+   * read with `?debug=1` on is not the frame time of the shipping build.
    */
   const metrics = debugRequested ? new MetricsOverlay({ bootMs: performance.now() }) : NO_METRICS;
 
@@ -2776,14 +2743,11 @@ async function boot(canvas) {
       aiMs,
       aiThinking,
       label: `${match.mode?.key ?? '?'} vs ${controllers[remoteSeat]?.isAi ? 'ai' : online ? 'online' : 'local'}`,
-      // The render chain and what the device has taken out of it. On a phone
-      // this is the only way to read the safe-area answer without a debugger
-      // attached — and the answer is orientation-dependent, so it has to be
-      // legible while the phone is being turned over.
-      note:
-        `${viewport.resolution.x}x${viewport.resolution.y} → ${viewport.displaySize.x}x${viewport.displaySize.y}\n` +
-        `safe  T${safeArea.frameInsets.top} R${safeArea.frameInsets.right} ` +
-        `B${safeArea.frameInsets.bottom} L${safeArea.frameInsets.left} (frame px)`,
+      // The render chain: the low-res target the world is drawn into, and the
+      // canvas it is scaled up onto. The gap between the two is the upscale, and
+      // it is the first thing to check when the picture looks softer than it
+      // should.
+      note: `${viewport.resolution.x}x${viewport.resolution.y} → ${viewport.displaySize.x}x${viewport.displaySize.y}`,
     });
   }
 
@@ -3096,11 +3060,10 @@ async function boot(canvas) {
     // greys out — can be driven by hand alongside `tick`. It is the stub when
     // the panel is off, so this is always safe to call.
     debug,
-    // The measurement panel and the notch arithmetic. `metrics.snapshot()` is
-    // the one call to make from Safari's Web Inspector while the app is on a
-    // phone — it returns every number the report wants as plain data, so the
-    // figures can be copied out rather than read off a screenshot.
-    metrics, safeArea,
+    // The measurement panel. `metrics.snapshot()` returns every number the
+    // readout shows as plain data, so a run's figures can be copied out of the
+    // console rather than read off a screenshot. See docs/metrics.md.
+    metrics,
     // The two sequences, so a covered frame and a result band can be stepped
     // through by hand alongside `tick` — neither is something you can catch by
     // looking.

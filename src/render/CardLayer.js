@@ -315,26 +315,6 @@ export class CardLayer {
   }
 
   /**
-   * Hand the device's unsafe edges down to both fans.
-   *
-   * Straight through: a hand is placed against a frame edge in `CardHand.update`
-   * and that is the only place the number is used. Kept as one call on the layer
-   * so the loop has one thing to notify, matching `setResolution` above.
-   *
-   * @param {{top:number,right:number,bottom:number,left:number}} insets frame px
-   */
-  setSafeInsets(insets) {
-    for (const h of this.hands) {
-      h.safeInsets = {
-        top: Math.max(0, insets?.top ?? 0),
-        right: Math.max(0, insets?.right ?? 0),
-        bottom: Math.max(0, insets?.bottom ?? 0),
-        left: Math.max(0, insets?.left ?? 0),
-      };
-    }
-  }
-
-  /**
    * Make both fans match what the two players are holding.
    *
    * Called every frame from the loop rather than pushed on a change: the hand

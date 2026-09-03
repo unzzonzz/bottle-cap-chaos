@@ -3,19 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <!--
-      `viewport-fit=cover` hands the web view the whole screen, notch included —
-      src/platform/safeArea.js is what gives the unsafe part back, in the frame
-      pixels the in-canvas UI is laid out in.
-
-      `user-scalable=no, maximum-scale=1` is for the BROWSER build only. iOS
-      Safari has ignored both since iOS 10 and the packaged app does not need
-      them (capacitor.config.json sets `ios.zoomEnabled: false`, which turns
-      zoom off on the WKWebView itself) — but Android's web view and desktop
-      Chrome do honour them, and the game owns its own pinch gesture.
+      `user-scalable=no, maximum-scale=1` because the game owns its own pinch
+      gesture: desktop Chrome honours both, and a browser zoom applied on top of
+      the game's own would fight it for the same two fingers on a trackpad.
+      `src/platform/webview.js` blocks what these two cannot reach.
     -->
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no, maximum-scale=1"
+      content="width=device-width, initial-scale=1, user-scalable=no, maximum-scale=1"
     />
     <!--
       The UI is a light scheme now — white plates, dark navy type — and this is

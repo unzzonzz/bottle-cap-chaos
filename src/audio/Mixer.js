@@ -52,23 +52,25 @@ import { CATEGORIES } from './categories.js';
 /**
  * Is this context stopped in a way a `resume()` would fix?
  *
- * ── `'interrupted'` is not in the spec and iOS returns it anyway ─────────────
+ * ── `'interrupted'` is not in the spec and WebKit returns it anyway ──────────
  * The Web Audio spec names three states — `suspended`, `running`, `closed` — and
  * every `state === 'suspended'` test in the wild is written against that list.
- * WebKit has a fourth. When the audio session is taken away from the page — a
- * phone call, Siri, another app claiming the route, a CarPlay connection, or the
- * app being sent to the background — the context goes to `'interrupted'`, not to
- * `'suspended'`.
+ * WebKit has a fourth, and macOS Safari is WebKit: when the audio session is
+ * taken away from the page the context goes to `'interrupted'`, not to
+ * `'suspended'`. On a desktop that happens when the output device changes under
+ * the page — headphones unplugged, a Bluetooth speaker connecting, an interface
+ * switched in the sound panel — and across a sleep/wake.
  *
  * A test that only knows about `'suspended'` therefore never resumes it, and the
  * failure is total and permanent: `ready` is true (it only excludes `'closed'`),
  * every voice is scheduled without error, and nothing is ever heard again for
- * the rest of the session. On a phone that is one incoming call away, so it is
- * not an edge case — it is the normal path.
+ * the rest of the session. The bug does not reproduce on Chrome, does not throw,
+ * and nobody reports it — they close the tab.
  *
  * `resume()` on an interrupted context is the correct and documented recovery,
  * and calling it on a running one is a harmless no-op, so both callers below can
- * ask this question and act on it unconditionally.
+ * ask this question and act on it unconditionally. The mobile build is gone; the
+ * fourth state is not, because it was never a mobile fact.
  */
 function needsResume(ctx) {
   return ctx.state === 'suspended' || ctx.state === 'interrupted';
@@ -217,7 +219,7 @@ export class Mixer {
      *
      * It used to be second, which made the latch one-way for the lifetime of the
      * page: once true, `playing` answered true through a suspend and through an
-     * iOS `'interrupted'`, so `AudioSystem.play` kept scheduling voices into a
+     * `'interrupted'`, so `AudioSystem.play` kept scheduling voices into a
      * context with no open sink and the `_pending` hold that exists to protect
      * the first sound after a stall never engaged. The sink really does close on
      * an interruption and really does have to reopen, so the honest answer while

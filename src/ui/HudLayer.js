@@ -275,47 +275,6 @@ export class HudLayer {
     this._buttonKey = '';
     this._texScale = -1;
 
-    /**
-     * How much of each frame edge iOS has taken, in frame pixels.
-     *
-     * Zero everywhere but on a notched phone, and zero even there in portrait —
-     * the canvas is letterboxed to 4:3 and centred, so the notch lands in the
-     * black band beside it rather than on the game. It is landscape that bites,
-     * and only along the bottom, where the home indicator strip runs under the
-     * card hand. `SafeArea` does that overlap arithmetic; this is only the
-     * answer. See src/platform/safeArea.js.
-     */
-    this._safe = { top: 0, right: 0, bottom: 0, left: 0 };
-
-    this.layout();
-  }
-
-  /**
-   * Take the unsafe edges out of the layout box.
-   *
-   * Pushed in on change rather than read per frame, for the reason `layout`
-   * itself is not called per frame — and a no-op when nothing moved, so the
-   * resize path can call it unconditionally.
-   *
-   * @param {{top:number,right:number,bottom:number,left:number}} insets frame px
-   */
-  setSafeInsets(insets) {
-    const next = {
-      top: Math.max(0, insets?.top ?? 0),
-      right: Math.max(0, insets?.right ?? 0),
-      bottom: Math.max(0, insets?.bottom ?? 0),
-      left: Math.max(0, insets?.left ?? 0),
-    };
-    const s = this._safe;
-    if (
-      next.top === s.top &&
-      next.right === s.right &&
-      next.bottom === s.bottom &&
-      next.left === s.left
-    ) {
-      return;
-    }
-    this._safe = next;
     this.layout();
   }
 
@@ -370,10 +329,10 @@ export class HudLayer {
      * 가장자리에 **걸쳐** 있기 때문이고 — 여기 붙는 판은 가장자리에서 떨어져
      * 있어야 하므로 네 번째 여백이 필요하다.
      */
-    const edgeTop = MARGIN + this._safe.top;
-    const edgeRight = MARGIN + this._safe.right;
-    const edgeLeft = MARGIN + this._safe.left;
-    const edgeBottom = MARGIN + this._safe.bottom;
+    const edgeTop = MARGIN;
+    const edgeRight = MARGIN;
+    const edgeLeft = MARGIN;
+    const edgeBottom = MARGIN;
 
     /**
      * 상단 중앙. **네 번째 가장자리**로서, 좌우와 같은 여백에 붙는다.

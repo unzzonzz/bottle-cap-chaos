@@ -213,15 +213,6 @@ export class CardHand {
     this.revealing = null;
 
     /**
-     * How far in from each frame edge the device has taken, in frame pixels.
-     *
-     * Only `top` and `bottom` are read — a hand hangs off a horizontal edge —
-     * but the whole set is stored so the field has the same shape everywhere it
-     * appears. `CardLayer.setSafeInsets` writes it. See src/platform/safeArea.js.
-     */
-    this.safeInsets = { top: 0, right: 0, bottom: 0, left: 0 };
-
-    /**
      * 도착과 소멸의 빛. 손 하나에 **한 장**이다.
      *
      * 카드마다 메시를 달면 손패가 다섯 장일 때 쓰이지 않는 쿼드가 다섯 장 있게 되고,
@@ -683,21 +674,10 @@ export class CardHand {
     const endExposure = atBottom ? lerp(ex.idle, ex.active, r) : ex.parked;
     const expose = swapFrac * endExposure;
     /**
-     * The edge the hand hangs off, moved in by whatever iOS has taken.
-     *
-     * `expose` is literally how many frame pixels of card stick out past the
-     * screen edge — the `grip` term cancels — so an inset here does exactly the
-     * right thing: the same amount of card is visible, on the near side of the
-     * home indicator instead of under it. That matters more than it sounds. In
-     * landscape on a notched iPhone the bottom inset is ~26 frame pixels against
-     * an idle exposure of 54, so half of the only visible part of your own hand
-     * was sitting under the indicator strip.
-     *
-     * Zero on every desktop browser, and zero in portrait as well — see the note
-     * on `_safe` in HudLayer, and src/platform/safeArea.js for the arithmetic.
+     * The edge the hand hangs off. `expose` is literally how many frame pixels
+     * of card stick out past it — the `grip` term cancels.
      */
-    const half = this.frame.height / 2;
-    const edge = half - (atBottom ? this.safeInsets.bottom : this.safeInsets.top);
+    const edge = this.frame.height / 2;
     const grip = h * rootScale;
     this.root.position.set(0, atBottom ? -edge + expose - grip : edge - expose + grip, 0);
     this.root.rotation.z = atBottom ? 0 : Math.PI;

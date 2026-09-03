@@ -22,9 +22,9 @@ import { onQualityChange, QUALITY } from './quality.js';
  * it replaced. The cap's wet look is mostly this.
  *
  * ── why it is procedural rather than an HDR file ────────────────────────────
- * The brief bans adding image assets, this game has none, and it ships inside a
- * Capacitor web view that has to work offline — so an .hdr fetched at boot is
- * both a bundle-size problem and a failure mode. What is actually needed here is
+ * The brief bans adding image assets and this game has none, so an .hdr fetched
+ * at boot is both a bundle-size problem and a new failure mode on a cold or slow
+ * connection. What is actually needed here is
  * modest: a bright sky above, a lighter ground below, and a hot spot where the
  * sun is. A three-stop gradient with a soft sun gives every one of those, and
  * `PMREMGenerator` turns it into the roughness-mipped cubemap the material wants.

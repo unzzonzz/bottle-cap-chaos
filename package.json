@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "Bottle Cap Chaos — procedural crown-cap viewer, PS1 render pipeline",
+  "description": "Bottle Cap Chaos — desktop bottle-cap physics game, three modes",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -16,9 +16,6 @@
     "det:collect": "node tools/determinism/collect.mjs",
     "det:ai": "node tools/determinism/ai-harness.mjs run",
     "det:ai:stats": "node tools/determinism/ai-harness.mjs stats",
-    "ios": "npm run build && npx cap sync ios && npx cap open ios",
-    "ios:sync": "npm run build && npx cap sync ios",
-    "android:sync": "npm run build && npx cap sync android",
     "server": "node server/index.js",
     "server:lan": "node tools/lan-address.mjs && node server/index.js",
     "server:test": "node server/test/flow.test.mjs && node server/test/lockstep.test.mjs && node server/test/resilience.test.mjs",
@@ -26,16 +23,12 @@
     "test": "npm run det:node && npm run server:test && npm run det:ai"
   },
   "dependencies": {
-    "@capacitor/android": "^8.5.0",
-    "@capacitor/core": "^8.5.0",
-    "@capacitor/ios": "^8.5.0",
     "@dimforge/rapier3d-compat": "^0.19.3",
     "lil-gui": "^0.21.0",
     "three": "^0.185.1",
     "ws": "^8.21.1"
   },
   "devDependencies": {
-    "@capacitor/cli": "^8.5.0",
     "vite": "^8.1.5"
   }
 }

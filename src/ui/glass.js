@@ -32,10 +32,15 @@ import { FONT_FAMILY } from './fonts.js';
 /**
  * `roundRect` as a path, with a fallback.
  *
- * `CanvasRenderingContext2D.roundRect` is in every engine this ships to except
- * the older WKWebView on iOS 15, which the Capacitor build still supports. The
- * fallback is arcs rather than quadratics because a quadratic corner is visibly
- * not a circle at `RADIUS.panel` and the two would not match across devices.
+ * `CanvasRenderingContext2D.roundRect` landed late — Chrome 99, Safari 16.4,
+ * Firefox 112 — so it is present in every current desktop browser and absent in
+ * one a year or two old. Kept because the cost is a dozen lines that never run,
+ * and the failure without it is a thrown TypeError at texture-bake time rather
+ * than a square corner.
+ *
+ * The fallback is arcs rather than quadratics because a quadratic corner is
+ * visibly not a circle at `RADIUS.panel`, and a UI whose corners change shape
+ * depending on the browser is worse than one whose corners are simply square.
  */
 export function roundRectPath(ctx, x, y, w, h, r) {
   /**

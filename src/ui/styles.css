@@ -2,9 +2,9 @@
    Two static faces, subset from Pretendard and renamed per OFL 1.1 — see NOTICE
    at the repository root and src/ui/fonts/OFL.txt.
 
-   Bundled rather than fetched: this ships inside a Capacitor web view that has
-   to work with no network at all, and a CDN link is a UI that loses its
-   typeface on a plane.
+   Bundled rather than fetched: a CDN link is a UI that loses its typeface on a
+   flaky connection, and it is a third-party request on every cold load for two
+   files that are already in the bundle.
 
    `font-display: swap` is deliberate and is NOT the whole answer. The DOM text
    it governs is one nickname input; every other glyph in this game is baked
@@ -269,24 +269,16 @@ input::placeholder {
    Top LEFT, because lil-gui autoplaces itself top-right at z-index 1001 and a
    right-hand panel would be buried under it whenever `?debug=1` is on.
 
-   The insets matter here in a way they do not for the game: this box is placed
-   against the WINDOW, not against the letterboxed canvas, so unlike the HUD it
-   really can land under a notch. `env()` in CSS is the right tool for a DOM
-   element — see src/platform/safeArea.js for why the in-canvas UI cannot use it.
-
    `pointer-events: none` on the container is load-bearing. `PointerRouter` binds
    pointerdown/move/up on the canvas, so any DOM box laid over the game silently
    swallows shots. Only the badge opts back in. */
 .metrics-hud {
   position: fixed;
-  /* BOTTOM-left, not top-left.
-     Top-left is where the turn plate lives, and while the canvas was letterboxed
-     to 4:3 the overlay sat harmlessly in the black bar beside it. In portrait the
-     canvas is full-width and the top band IS the HUD, so a top-left overlay lands
-     straight on top of the turn plate. The bottom-left corner is clear in both:
-     the card fan is centred, and in landscape it is black bar again. */
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 6px);
-  left: calc(env(safe-area-inset-left, 0px) + 6px);
+  /* BOTTOM-left, not top-left. Top-left is where the turn plate lives. The
+     bottom-left corner is clear: the card fan is centred, and a window wider
+     than 4:3 leaves bare document down there in any case. */
+  bottom: 6px;
+  left: 6px;
   z-index: 25; /* over .boot-error (20), under the modal input and .page-fade (40) */
   display: flex;
   /* Reversed, so the badge stays nearest the corner and the body grows upward

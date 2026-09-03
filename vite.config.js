@@ -5,13 +5,13 @@ export default defineConfig({
    * Where the built page thinks it lives.
    *
    * ── it CANNOT be a constant, and the two consumers disagree ──────────────
-   * Capacitor serves the bundle from the root of a local server inside the app,
-   * so iOS and Android need `/` — `npm run ios` runs this same build. GitHub
-   * Pages serves a project site from `/<repo>/`, and a page built with `/` there
-   * asks for `/assets/...`, which is one directory above everything it needs.
+   * A plain static host — `npm run preview`, or anything serving `dist/` at a
+   * domain root — needs `/`. GitHub Pages serves a project site from `/<repo>/`,
+   * and a page built with `/` there asks for `/assets/...`, which is one
+   * directory above everything it needs.
    *
-   * So the default is the one that must not break — the shipped apps — and the
-   * sub-path is opted into by the thing that needs it. `.github/workflows/
+   * So the default is the one that must not break, and the sub-path is opted
+   * into by the thing that needs it. `.github/workflows/
    * pages.yml` sets it from the repository's own name, so a rename or a fork
    * carries it without editing this file.
    */

@@ -896,9 +896,9 @@ export function bootMenu(
      *
      * There were two lines here painting the window the cap's red, because the
      * covered frame used to be a red cap. They are gone rather than recoloured:
-     * an inline style that has to agree with `Cinematic`, `cssPalette` and
-     * `capacitor.config.json` is three ways for the seam to come back, and the
-     * stylesheet already says the right thing.
+     * an inline style that has to agree with `Cinematic` and `cssPalette` is two
+     * more ways for the seam to come back, and the stylesheet already says the
+     * right thing.
      */
     // The document — and the AudioContext with it — is gone within a frame or
     // two. Ramped on the audio clock so the last voice fades rather than being
