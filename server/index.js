@@ -43,6 +43,11 @@ const timing = {
   heartbeatTimeoutMs: num('HEARTBEAT_TIMEOUT_MS', TIMING.heartbeatTimeoutMs),
   roomTtlMs: num('ROOM_TTL_MS', TIMING.roomTtlMs),
   handoffMs: num('HANDOFF_MS', TIMING.handoffMs),
+  // The message budget. Tighten these in a deployment that faces the open
+  // internet; the defaults are sized for a LAN and for the headless clients in
+  // `server/test/`, which play a whole match inside one millisecond.
+  msgBurst: num('MSG_BURST', TIMING.msgBurst),
+  msgPerSecond: num('MSG_PER_SECOND', TIMING.msgPerSecond),
 };
 
 function num(name, fallback) {

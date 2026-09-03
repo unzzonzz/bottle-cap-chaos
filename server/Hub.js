@@ -11,6 +11,7 @@ import {
   decode,
   encode,
   isValidCode,
+  isValidConfigHash,
   isValidMark,
   makeCode,
   normaliseCode,
@@ -93,6 +94,14 @@ export class Hub {
        */
       misses: 0,
       openedAt: Date.now(),
+      /**
+       * The message budget, as a token bucket. See `TIMING.msgBurst`.
+       *
+       * Full on arrival, so the handshake burst a fresh connection makes is
+       * never the thing that trips it.
+       */
+      tokens: this.timing.msgBurst ?? TIMING.msgBurst,
+      tokensAt: Date.now(),
       send: (type, body) => {
         try {
           socket.send(encode(type, body));
@@ -161,9 +170,57 @@ export class Hub {
     return !!conn && conn.alive && this.conns.has(conn.id);
   }
 
+  /**
+   * Take one message out of this connection's budget. False means it is gone.
+   *
+   * ── the protocol named this defence and nobody built it ───────────────────
+   * `ERR.RATE_LIMITED` and its Korean text have been in `protocol.js` since the
+   * beginning with zero references anywhere in this directory. Reading the
+   * protocol you would conclude a client could not flood the relay; reading the
+   * hub you would find nothing stopping it. That is worse than an absent
+   * defence, because it is an absent defence that documentation says is present.
+   *
+   * ── why the connection is CLOSED and not merely throttled ─────────────────
+   * Dropping the message and staying open sounds gentler and is not: a client
+   * that has hit this is either broken or hostile, and in both cases the useful
+   * thing is for it to find out. A silently-discarding relay leaves a broken
+   * client retrying forever, and it leaves a hostile one paying nothing for the
+   * attempt. It also keeps the accounting simple — there is exactly one way a
+   * connection leaves, and `disconnect` is it, so the opponent is told and the
+   * room is cleaned up by the same path every other drop uses.
+   */
+  spend(conn) {
+    if (!this.isAlive(conn)) return false;
+
+    const burst = this.timing.msgBurst ?? TIMING.msgBurst;
+    const rate = this.timing.msgPerSecond ?? TIMING.msgPerSecond;
+    const now = Date.now();
+    // Refill for the time that has passed, capped at the bucket's size. Clamped
+    // at zero because a clock that steps backwards — and they do — must not hand
+    // out negative tokens.
+    const elapsed = Math.max(0, now - conn.tokensAt) / 1000;
+    conn.tokens = Math.min(burst, conn.tokens + elapsed * rate);
+    conn.tokensAt = now;
+
+    if (conn.tokens < 1) {
+      // Told, then dropped. The error goes first so it is actually on the wire
+      // before `disconnect` closes the socket underneath it.
+      conn.fail(ERR.RATE_LIMITED);
+      this.disconnect(conn, DETECT.RATE_LIMIT);
+      return false;
+    }
+    conn.tokens -= 1;
+    return true;
+  }
+
   // ── the message loop ─────────────────────────────────────────────────────
 
   handle(conn, raw) {
+    // BEFORE `decode`, deliberately: a flood of unparseable frames costs as
+    // much to receive as a flood of valid ones, and `BAD_MESSAGE` on every one
+    // of them is itself an amplifier — one inbound byte, one outbound error.
+    if (!this.spend(conn)) return;
+
     const msg = decode(raw);
     if (!msg) return conn.fail(ERR.BAD_MESSAGE);
 
@@ -239,6 +296,16 @@ export class Hub {
    */
   onHello(conn, msg) {
     if (msg.protocol !== PROTOCOL_VERSION) return conn.fail(ERR.PROTOCOL_MISMATCH);
+    /**
+     * Refused BEFORE the nickname is claimed, so a rejected hello leaves no
+     * name reserved to a connection that is not going to get a match.
+     *
+     * The hole was that two clients sending nothing both stored `''` and
+     * compared equal, so the check that exists to keep mismatched builds apart
+     * passed for the pair least able to agree. See `isValidConfigHash` for why
+     * it tests for A fingerprint rather than for THIS one.
+     */
+    if (!isValidConfigHash(msg.configHash)) return conn.fail(ERR.CONFIG_MISMATCH);
 
     const claimed = this.registry.claim(msg.nickname, conn.id);
     if (!claimed.ok) {
@@ -246,7 +313,7 @@ export class Hub {
     }
 
     conn.nickname = claimed.value;
-    conn.configHash = String(msg.configHash ?? '');
+    conn.configHash = msg.configHash;
     conn.send(S2C.HELLO_OK, {
       nickname: claimed.value,
       protocol: PROTOCOL_VERSION,
@@ -467,13 +534,22 @@ export class Hub {
     const roomId = String(msg.roomId ?? '');
     const room = this.rooms.get(roomId);
     if (!room) return conn.fail(ERR.BAD_TOKEN);
+    /**
+     * The same requirement as `onHello`, and it has to be here too.
+     *
+     * A resumed connection never sends a hello — the token is the whole of the
+     * re-establishment — so this is the ONLY place the game document states what
+     * it is running. Checking one and not the other would leave the hole open on
+     * the path every real match actually takes.
+     */
+    if (!isValidConfigHash(msg.configHash)) return conn.fail(ERR.CONFIG_MISMATCH);
 
     const seat = room.resume(conn, String(msg.token ?? ''));
     if (seat < 0) return conn.fail(ERR.BAD_TOKEN);
 
     conn.roomId = room.id;
     conn.nickname = room.seats[seat].nickname;
-    conn.configHash = String(msg.configHash ?? '');
+    conn.configHash = msg.configHash;
 
     const them = room.seats[room.other(seat)];
     conn.send(S2C.MATCH_FOUND, {

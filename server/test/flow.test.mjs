@@ -6,6 +6,7 @@ import {
   OVER_REASON,
   PROTOCOL_VERSION,
   S2C,
+  TIMING,
   decode,
   encode,
 } from '../../src/net/protocol.js';
@@ -290,8 +291,10 @@ test('the first turn opens only after BOTH have finished the cutscene', () => {
   const fb = b.last(S2C.MATCH_FOUND);
   const ga = client(hub);
   const gb = client(hub);
-  ga.send(C2S.RESUME, { roomId: fa.roomId, token: fa.token });
-  gb.send(C2S.RESUME, { roomId: fb.roomId, token: fb.token });
+  // The hash is required on RESUME as well as on HELLO — a game document never
+  // says hello, so this is the only place it states what it is running.
+  ga.send(C2S.RESUME, { roomId: fa.roomId, token: fa.token, configHash: 'cfg00001' });
+  gb.send(C2S.RESUME, { roomId: fb.roomId, token: fb.token, configHash: 'cfg00001' });
 
   ga.send(C2S.READY, {});
   assert.equal(ga.last(S2C.TURN_BEGIN), undefined, 'clock started on one READY');
@@ -492,6 +495,108 @@ test('the clock stops once a shot is taken, however long the sim runs', async ()
   ga.clear();
   await new Promise((r) => setTimeout(r, 120));
   assert.equal(ga.last(S2C.TURN_SKIP), undefined, 'a fired turn timed out mid-simulation');
+  hub.close();
+});
+
+// ── the two defences the protocol named and the hub did not have ──────────
+
+test('a hello with no config hash is refused', () => {
+  const hub = newHub();
+  for (const bad of [undefined, '', null, 0, {}, 'x'.repeat(65)]) {
+    const c = client(hub);
+    c.send(C2S.HELLO, { protocol: PROTOCOL_VERSION, nickname: 'aa', configHash: bad });
+    assert.equal(c.last(S2C.HELLO_OK), undefined, `accepted ${JSON.stringify(bad)}`);
+    assert.equal(c.last(S2C.ERROR)?.code, ERR.CONFIG_MISMATCH, `wrong code for ${JSON.stringify(bad)}`);
+  }
+  hub.close();
+});
+
+test('two clients that both send nothing are NOT matched', () => {
+  const hub = newHub();
+  // The hole: `String(undefined ?? '')` is `''` on both sides, `'' === ''`, and
+  // the two least compatible clients in the world were paired.
+  const a = client(hub);
+  const b = client(hub);
+  a.send(C2S.HELLO, { protocol: PROTOCOL_VERSION, nickname: 'aa' });
+  b.send(C2S.HELLO, { protocol: PROTOCOL_VERSION, nickname: 'bb' });
+  a.send(C2S.QUEUE_JOIN, { mode: 'knockout' });
+  b.send(C2S.QUEUE_JOIN, { mode: 'knockout' });
+  assert.equal(a.last(S2C.MATCH_FOUND), undefined, 'paired two clients with no config hash');
+  assert.equal(b.last(S2C.MATCH_FOUND), undefined, 'paired two clients with no config hash');
+  // And they never got a name in the first place, so the queue refused them.
+  assert.equal(a.last(S2C.QUEUED), undefined);
+  hub.close();
+});
+
+test('a nickname is not reserved by a hello that the hash check refuses', () => {
+  const hub = newHub();
+  const bad = client(hub);
+  bad.send(C2S.HELLO, { protocol: PROTOCOL_VERSION, nickname: '한별', configHash: '' });
+  assert.equal(bad.last(S2C.HELLO_OK), undefined);
+  // The name has to still be free: refusing after claiming would let anyone
+  // burn a nickname with a malformed hello.
+  const good = client(hub, { nickname: '한별' });
+  assert.equal(good.last(S2C.HELLO_OK)?.nickname, '한별');
+  hub.close();
+});
+
+test('a flood is cut off with RATE_LIMITED and the socket closed', () => {
+  const hub = newHub({ timing: { ...TIMING, msgBurst: 20, msgPerSecond: 1 } });
+  const c = client(hub, { nickname: 'aa' });
+  c.clear();
+  // Far past the budget. Nothing here is a valid message, which is the point:
+  // the limiter runs before `decode`, so unparseable frames are charged too.
+  for (let i = 0; i < 500; i++) c.send('nonsense', {});
+  assert.equal(c.last(S2C.ERROR)?.code, ERR.RATE_LIMITED, 'never rate limited');
+  assert.equal(hub.isAlive(c.conn), false, 'connection survived the flood');
+  // And it is told once, not five hundred times — the connection is gone after
+  // the first refusal, so every later frame is dropped before it reaches a send.
+  assert.equal(c.all(S2C.ERROR).filter((m) => m.code === ERR.RATE_LIMITED).length, 1);
+  hub.close();
+});
+
+test('the bucket refills, so a paced client is never cut', async () => {
+  const hub = newHub({ timing: { ...TIMING, msgBurst: 3, msgPerSecond: 200 } });
+  const c = client(hub, { nickname: 'aa' });
+  c.clear();
+  // The hello already spent one, so wait once for the bucket to come back to
+  // full before counting. At 200/s a 30 ms pause refills six — twice the burst,
+  // so each round starts from a full bucket however the timer actually lands.
+  await new Promise((r) => setTimeout(r, 30));
+  // Nine messages at a rate the refill covers: three, wait, three, wait, three.
+  for (let round = 0; round < 3; round++) {
+    for (let i = 0; i < 3; i++) c.send(C2S.PONG, {});
+    await new Promise((r) => setTimeout(r, 30));
+  }
+  assert.equal(c.last(S2C.ERROR), undefined, 'a paced client was rate limited');
+  assert.ok(hub.isAlive(c.conn), 'a paced client was dropped');
+  hub.close();
+});
+
+test('a whole match at full speed does not touch the limit', async () => {
+  const hub = newHub({ timing: { ...TIMING, turnMs: 60_000 } });
+  const { ga, gb, seats, first } = playing(hub);
+  // 60 turns' worth of INPUT + HASH from both sides, sent as fast as the loop
+  // can push them — far more than a real match and with no wall time between.
+  // This is the case the burst exists to survive; see `TIMING.msgBurst`.
+  let turn = 0;
+  for (let i = 0; i < 60; i++) {
+    const me = seats[turn % 2 === 0 ? first : first === 0 ? 1 : 0];
+    me.send(C2S.INPUT, {
+      turn,
+      event: { seq: 0, kind: 'shot', player: 0, capIndex: 0, dirX: 1, dirZ: 0, power: 0.5, seed: i },
+    });
+    ga.send(C2S.HASH, { turn, hash: 'aaaaaaaa', next: (turn + 1) % 2 });
+    gb.send(C2S.HASH, { turn, hash: 'aaaaaaaa', next: (turn + 1) % 2 });
+    turn++;
+  }
+  for (const c of [ga, gb]) {
+    assert.ok(
+      !c.all(S2C.ERROR).some((m) => m.code === ERR.RATE_LIMITED),
+      'a full-speed match hit the rate limit',
+    );
+    assert.ok(hub.isAlive(c.conn), 'a full-speed match dropped a connection');
+  }
   hub.close();
 });
 

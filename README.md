@@ -115,7 +115,7 @@ Rapier 자체는 Rust 를 WASM 으로 컴파일한 것이고 자기 libm 을 들
 | `npm run det:emit` | 입력 로그를 다시 생성. **평소에는 하지 마라** — 로그가 바뀌면 기준선이 무의미해진다 |
 | `npm run det:ai` | AI 결정론. 같은 상황에서 같은 수를 두는가 |
 | `npm run det:ai:stats` | AI 하네스의 통계 요약 |
-| `npm run server:test` | 릴레이 서버 12 케이스 (흐름 · 락스텝 · 이탈 감지) |
+| `npm run server:test` | 릴레이 서버 56 케이스 (흐름 36 · 락스텝 8 · 이탈 감지 12) |
 
 ### 릴레이 서버
 
@@ -144,6 +144,10 @@ curl localhost:8787/health     # 허브 카운터. 게임을 탓하기 전에 �
 | `SERVER_PORT` 또는 `PORT` | `8787` |
 | `HOST` | `0.0.0.0` |
 | `TURN_MS` `HEARTBEAT_MS` `HASH_TIMEOUT_MS` … | `src/net/protocol.js` 의 `TIMING` |
+| `MSG_BURST` / `MSG_PER_SECOND` | `200` / `50` — 연결당 메시지 예산 (토큰 버킷) |
+
+메시지 예산을 넘긴 연결은 `rate_limited` 를 받고 끊긴다. 기본값은 LAN 과
+테스트 하네스 기준으로 넉넉하게 잡혀 있다 — 공개된 곳에 띄운다면 조인다.
 
 다른 기계에서 붙을 때는 **메뉴 → 설정 → 서버 주소** 에 `ws://<주소>:8787` 을
 넣는다. 비워 두면 `location.hostname` 에서 유도한다.

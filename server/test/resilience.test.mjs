@@ -126,8 +126,10 @@ function playing(hub, mode = 'knockout') {
   b.hangUp();
   const ga = client(hub);
   const gb = client(hub);
-  ga.send(C2S.RESUME, { roomId: fa.roomId, token: fa.token });
-  gb.send(C2S.RESUME, { roomId: fb.roomId, token: fb.token });
+  // A game document never sends HELLO, so RESUME is where it states what build
+  // it is running — the hub requires it there for that reason.
+  ga.send(C2S.RESUME, { roomId: fa.roomId, token: fa.token, configHash: 'cfg1' });
+  gb.send(C2S.RESUME, { roomId: fb.roomId, token: fb.token, configHash: 'cfg1' });
   ga.send(C2S.READY, {});
   gb.send(C2S.READY, {});
   const seats = { [fa.seat]: ga, [fb.seat]: gb };
@@ -298,7 +300,7 @@ test('연출 중(HANDOFF) 이탈 — 통보가 오고 승패가 정해진다', a
 
   // Only B comes back from the navigation; A closed the browser.
   const gb = client(hub);
-  gb.send(C2S.RESUME, { roomId: fb.roomId, token: fb.token });
+  gb.send(C2S.RESUME, { roomId: fb.roomId, token: fb.token, configHash: 'cfg1' });
   gb.clear();
 
   const ms = await timeToNotice('연출 중 이탈 (handoff)', gb, 2000);

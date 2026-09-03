@@ -392,6 +392,34 @@ export function configHash(config) {
   return (h >>> 0).toString(16).padStart(8, '0');
 }
 
+/**
+ * Did this client state what it is running at all?
+ *
+ * ── `''` used to pass the compatibility check ───────────────────────────────
+ * The server stores `String(msg.configHash ?? '')` and pairs two clients when
+ * their stored values are equal. Two clients that sent nothing therefore both
+ * stored `''`, compared equal, and were matched — which is the exact failure the
+ * check exists to prevent, reachable by leaving the field out. The defence
+ * looked present in the protocol and was not enforceable.
+ *
+ * ── it tests for a fingerprint, NOT for THIS fingerprint ────────────────────
+ * The obvious fix is `/^[0-9a-f]{8}$/`, because that is what `configHash` above
+ * returns. It is the wrong fix. The relay deliberately holds no config and has
+ * no opinion about what a fingerprint means — see the note on `Hub.onHello` —
+ * and pinning the FORMAT here puts the server back in the business of knowing,
+ * so that widening the hash later would mean redeploying the relay before a
+ * single client could connect. Comparing opaque strings is the whole design.
+ *
+ * The ceiling is not a format check either. It is there because this string is
+ * stored per connection before the connection has proved anything, and an
+ * unbounded one is a place to put a megabyte.
+ *
+ * @param {unknown} v
+ */
+export function isValidConfigHash(v) {
+  return typeof v === 'string' && v.length > 0 && v.length <= 64;
+}
+
 // ── marks ──────────────────────────────────────────────────────────────────
 
 /**
@@ -487,6 +515,30 @@ export const TIMING = {
    * wrong is a forfeit for a player who did nothing wrong.
    */
   handoffMs: 25 * 1000,
+  /**
+   * The message budget one connection may spend in a burst.
+   *
+   * A token bucket rather than a count per window, because the traffic this has
+   * to survive is bursty by construction and slow on average. A whole match is
+   * two messages a turn — an INPUT and a HASH — plus a PONG every five seconds,
+   * so the SUSTAINED rate a real client needs is under one a second. What it
+   * also does is arrive in clumps: a reconnect replays a handshake, and the
+   * headless clients in `server/test/` play forty turns inside one millisecond
+   * of wall time because nothing there waits for a real clock.
+   *
+   * A fixed window sized for the average would cut those; sized for the clump it
+   * would let a flooder send a clump every window forever. The bucket answers
+   * both — spend the burst as fast as you like, then you are held to the refill.
+   *
+   * 200 is roughly a hundred turns' worth of traffic taken at once, and the
+   * refill is fifty times what a real client sustains. Neither is tight. They do
+   * not need to be: the thing on the other side of this is a client sending
+   * thousands a second, and the gap between that and legitimate play is four
+   * orders of magnitude wide.
+   */
+  msgBurst: 200,
+  /** Tokens refilled per second, i.e. the sustained ceiling. */
+  msgPerSecond: 50,
 };
 
 /**
@@ -515,6 +567,8 @@ export const DETECT = {
   HANDOFF: 'handoff',
   /** They pressed the button. */
   FORFEIT: 'forfeit',
+  /** The connection spent its message budget. See `TIMING.msgBurst`. */
+  RATE_LIMIT: 'rate-limit',
 };
 
 // ── framing ────────────────────────────────────────────────────────────────
