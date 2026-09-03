@@ -1,4 +1,5 @@
 import { CATEGORY } from './categories.js';
+import { scaleRate } from './scale.js';
 
 /**
  * Every sound in the game, as data.
@@ -62,9 +63,18 @@ import { CATEGORY } from './categories.js';
 /**
  * The shared frequency set, in Hz.
  *
- * Two octaves of a pentatonic on A plus the three sub-bass anchors the impacts
- * live in. Named by role rather than by note, because nothing here reads them as
- * music: `SUB` is what a body sounds like, `RING` is what metal sounds like.
+ * Two octaves of a pentatonic on A plus the three sub-bass anchors. Named by
+ * role rather than by note, because nothing here read them as music: `SUB` is
+ * what a body sounds like, `RING` is what metal sounds like.
+ *
+ * ── it turned out to be a scale, and now it has rungs ───────────────────────
+ * Read as a MAJOR pentatonic the same five notes are C D E G A, and `deg()`
+ * below numbers them. The collisions, the interface and the cards all name
+ * their pitches through `deg` now, because they need to be TRANSPOSED and a
+ * bare frequency cannot say which rung it is. What is left naming `F` directly
+ * is everything that never moves — the menu, the orbs, the victory sequence —
+ * and the sub-bass anchors, which are below the bottom of the table's own
+ * scale and belong to sounds that are felt rather than heard as pitch.
  */
 const F = {
   SUB: 55,
@@ -91,7 +101,74 @@ const F = {
   RING: 2093,
 };
 
-/** A minor third, a fourth and a fifth as ratios, for the stepped arpeggios. */
+/**
+ * The tonal centre of the whole game, and the rungs above it.
+ *
+ * ── `F` was already a scale, and nobody had said so ─────────────────────────
+ * The table above is described as "two octaves of a pentatonic on A". Read as a
+ * MAJOR pentatonic — which is what `scale.js` produces — the same five notes are
+ * C, D, E, G, A: a C major pentatonic. So the set every pitched sound in this
+ * file was already drawn from and the set the collision chain walks are the
+ * same set, and all that was missing was a name for the rungs.
+ *
+ * `ROOT` is `F.C4`, chosen so the rungs land on the table rather than beside
+ * it. `deg(7)` is 660 Hz, which is `F.E5` to within two cents — and 660 is the
+ * root `cap_cap` was tuned to before any of this existed, which is the
+ * coincidence that made the whole arrangement possible without retuning
+ * anything.
+ *
+ * ── why a rung and not just a frequency ─────────────────────────────────────
+ * A sound that carries `scale: n` is saying "I am written on rung n", and
+ * `Synth` uses that to work out the INTERVAL to whatever rung it is asked for.
+ * It has to, because a pentatonic is not symmetric: transposing by rungs
+ * measured from each sound's own pitch would give every sound a private scale.
+ * See the note in `Synth.play`.
+ *
+ * So `freq: deg(n)` and `scale: n` belong together, and a definition that sets
+ * one without the other is either fixed on purpose (`goal_post`, which is a
+ * physical object with one mode and must ring the same every time) or wrong.
+ */
+const ROOT = F.C4;
+
+/**
+ * A rung of the shared pentatonic, in Hz. Rounded, because the panel edits it.
+ *
+ * @param {number} n  0 is `ROOT`. Five to the octave; negatives run down.
+ */
+function deg(n) {
+  return Math.round(ROOT * scaleRate(n));
+}
+
+/**
+ * The multiplier from one rung to another. For `stepRatio` and for glides.
+ *
+ * @param {number} from  the rung the layer is written on
+ * @param {number} n     how many rungs to move. Negative runs down.
+ */
+function rungStep(from, n) {
+  return +(scaleRate(from + n) / scaleRate(from)).toFixed(4);
+}
+
+/**
+ * A minor third, a fourth and a fifth as ratios, for the stepped arpeggios.
+ *
+ * ── FIFTH is the only one of these that can be repeated, and only so far ────
+ * `steps` applies ONE ratio over and over, so an arpeggio of more than two
+ * notes stays in the scale only if that ratio walks the scale. Exactly one
+ * interval does: the major pentatonic IS a chain of five fifths — C G D A E —
+ * so multiplying by 1.5 moves one link along it.
+ *
+ * The chain has an END, which is the part that is easy to get wrong. Starting
+ * on C leaves four fifths above; on G, three; on D, two; on A, one; on E, none.
+ * So a four-note figure must begin on C or G, and `card_fx_trajectory` begins
+ * on C for that reason. Start it on D and the fourth note is B, which is in no
+ * other sound in this file.
+ *
+ * Anything else leaves immediately. `THIRD` four times from G gives G, B, D#,
+ * G — one note of four inside the set — which is what `card_fx_trajectory` used
+ * to do. Two-note figures are safe with any of these, because a single interval
+ * can simply be chosen to be a rung; use `rungStep` and say which.
+ */
 const STEP = { THIRD: 1.19, FOURTH: 1.335, FIFTH: 1.5, OCTAVE: 2, DOWN_FIFTH: 0.667, DOWN_FOURTH: 0.749 };
 
 /**
@@ -218,9 +295,12 @@ export const SOUNDS = {
    * than a mood:
    *
    *   PITCH        a sine root you can hum, not filtered noise.
-   *   4:1 PARTIAL  a tuned marimba bar is undercut until its first partial is
-   *                exactly two octaves up, and two octaves is consonant, so the
-   *                bar reads as sweet rather than as clang.
+   *   4:1 PARTIAL  a bar left alone puts its first partial at 2.756 times the
+   *                root — that is just what a free-free bar does — and a
+   *                marimba maker UNDERCUTS the bar until it sits at 4.0
+   *                instead. Two octaves is consonant, so the tuned bar reads as
+   *                sweet where the raw one reads as clang. `goal_post` is the
+   *                one sound in the game that keeps the untuned number.
    *   FALLING      real objects lose tension as they ring, so the pitch sags.
    *                Without it the sound is electronic.
    *   QUIET BODY   noise well under the tone. It supplies mass; past a point it
@@ -323,11 +403,12 @@ export const SOUNDS = {
    *                for 170 ms and drowns the thing being measured.
    *
    *   THE CHAIN    ten hits, `ContactAudio` handing out rungs and holding at its
-   *                ceiling of 7. Measured fundamentals: 653, 733, 823, 978,
-   *                1098, 1306, 1466, 1646 Hz, then 1646 twice more — 0, 2, 4, 7,
-   *                9, 12, 14, 16 semitones. The pentatonic exactly, and the top
-   *                is a major third above the octave rather than somewhere
-   *                shrill.
+   *                ceiling of 7. Measured fundamentals: 653, 777, 872, 1036,
+   *                1164, 1306, 1553, 1744 Hz, then 1744 twice more — 0, 3, 5, 8,
+   *                10, 12, 15, 17 semitones above the root. Rungs 7 to 14 of the
+   *                shared scale: E G A C D E G A. The top is a sixth above the
+   *                octave rather than somewhere shrill, and it is the same A
+   *                that `deg(14)` gives every other sound in the file.
    */
   cap_cap: {
     category: CATEGORY.IMPACT,
@@ -350,7 +431,7 @@ export const SOUNDS = {
      */
     tone: tone({
       wave: 'sine',
-      freq: 660,
+      freq: deg(7),
       freqEnd: 624,
       gain: 0.5,
       attack: 0.002,
@@ -401,8 +482,11 @@ export const SOUNDS = {
       filter: band(6600, 3200, 7, 0.03),
     }),
 
-    /** The chain walks up this. `ContactAudio._chain` hands out the rung. */
-    scale: true,
+    /**
+     * Rung 7 of the shared pentatonic, which is the 660 Hz written above. The
+     * chain walks UP from here — `ContactAudio._chain` hands out the offset.
+     */
+    scale: 7,
     velGain: 0.85,
     /** Zero, and deliberately. The scale owns the pitch; see `Synth`'s header. */
     velPitch: 0,
@@ -413,18 +497,37 @@ export const SOUNDS = {
     send: 0.16,
   },
 
-  /** Cap on wall or fence. Deliberately duller and lower than cap on cap. */
+  /**
+   * Cap on wall or fence. `cap_cap`'s recipe, hitting something that does not
+   * ring back.
+   *
+   * ── the same four parts, three of them turned down ──────────────────────
+   * A fence is wood. It takes the energy and gives very little of it back as
+   * pitch, so: the root two rungs down, the partial at half level and a third
+   * of the length, and the body doing much more of the work. That last one is
+   * not a bigger number — it is a WIDER filter. `cap_cap`'s body is a Q=7
+   * resonance standing in for a partial, and wood has no such mode; a low-pass
+   * passes far more of the noise at a lower written gain, which is both what
+   * wood sounds like and how the level gets there without leaving the panel's
+   * 0..1 range.
+   */
   cap_wall: {
     category: CATEGORY.IMPACT,
     priority: 2,
-    gain: 0.42,
+    gain: 0.5,
     cooldown: 0.05,
     voices: 3,
+    tone: tone({ wave: 'sine', freq: deg(5), freqEnd: 496, gain: 0.5, attack: 0.002, decay: 0.1, curve: 'exp' }),
+    tone2: tone({ wave: 'sine', ratio: 4.0, gain: 0.17, attack: 0.0015, decay: 0.03, curve: 'exp' }),
+    noise: noise({ gain: 0.5, attack: 0.001, decay: 0.05, filter: low(1500, 420, 0.05) }),
+    scale: 5,
     velGain: 0.85,
-    velPitch: 0.4,
+    velPitch: 0,
+    velBright: 0.7,
     velLength: 0.5,
-    noise: noise({ gain: 0.4, decay: 0.12, filter: low(900, 260, 0.1) }),
-    tone: tone({ wave: 'triangle', freq: F.LOW, freqEnd: F.THUD, gain: 0.45, decay: 0.11 }),
+    jitter: 0.35,
+    /** A fence is right there. Less room than a cap-on-cap, not more. */
+    send: 0.14,
   },
 
   /**
@@ -542,7 +645,18 @@ export const SOUNDS = {
     priority: 5,
     gain: 0.34,
     cooldown: 0.04,
-    tone: tone({ wave: 'square', freq: F.A5, freqEnd: F.C6, gain: 0.4, decay: 0.045, filter: low(BLIP_CEILING) }),
+    tone: tone({ wave: 'square', freq: deg(9), freqEnd: deg(10), gain: 0.4, decay: 0.045, filter: low(BLIP_CEILING) }),
+    scale: 9,
+    /**
+     * ── every UI sound is nearly dry, and it is the same reason each time ──
+     * A click is FEEDBACK: it says the press landed, and it has to arrive at
+     * the same instant as the press or it stops meaning that. A tail puts the
+     * event in a room, and a room is somewhere the screen is not — the whole
+     * interface starts to feel loose, as though the buttons were somewhere
+     * else. Collisions want the room because they happen on a board; the
+     * interface is under the player's own hand.
+     */
+    send: 0.05,
   },
 
   /**
@@ -568,16 +682,30 @@ export const SOUNDS = {
     gain: 0.22,
     cooldown: 0.12,
     jitter: 0.3,
-    tone: tone({ wave: 'sawtooth', freq: F.A4, freqEnd: F.G6, gain: 0.26, decay: 0.2, filter: low(1600, 6200, 0.2) }),
+    tone: tone({ wave: 'sawtooth', freq: deg(4), freqEnd: deg(13), gain: 0.26, decay: 0.2, filter: low(1600, 6200, 0.2) }),
     noise: noise({ gain: 0.14, decay: 0.2, filter: high(1800, 6000, 0.2) }),
+    scale: 4,
+    /** The one UI sound that is allowed a little room: it IS the room changing. */
+    send: 0.1,
   },
 
+  /**
+   * ── the dialog's three answers are three DIRECTIONS on one scale ────────
+   * Opening rises two rungs, yes rises three, no falls two. Same root for the
+   * two answers so they are heard as a pair, and the only thing separating them
+   * is which way the second note went — which is what the player is being asked.
+   * The old versions used the raw `STEP` ratios, and a fourth and a fifth from
+   * C are both rungs, so this is mostly the same sound with the interval
+   * written down as what it actually is.
+   */
   ui_confirm_open: {
     category: CATEGORY.UI,
     priority: 6,
     gain: 0.3,
     jitter: 0,
-    tone: tone({ wave: 'triangle', freq: F.A4, gain: 0.4, decay: 0.07, steps: 2, stepGap: 0.07, stepRatio: STEP.FOURTH, filter: low(BLIP_CEILING) }),
+    tone: tone({ wave: 'triangle', freq: deg(4), gain: 0.4, decay: 0.07, steps: 2, stepGap: 0.07, stepRatio: rungStep(4, 2), filter: low(BLIP_CEILING) }),
+    scale: 4,
+    send: 0.05,
   },
 
   ui_confirm_yes: {
@@ -585,7 +713,9 @@ export const SOUNDS = {
     priority: 7,
     gain: 0.36,
     jitter: 0,
-    tone: tone({ wave: 'square', freq: F.C5, gain: 0.38, decay: 0.07, steps: 2, stepGap: 0.06, stepRatio: STEP.FIFTH, filter: low(BLIP_CEILING) }),
+    tone: tone({ wave: 'square', freq: deg(7), gain: 0.38, decay: 0.07, steps: 2, stepGap: 0.06, stepRatio: rungStep(7, 3), filter: low(BLIP_CEILING) }),
+    scale: 7,
+    send: 0.05,
   },
 
   ui_confirm_no: {
@@ -593,7 +723,9 @@ export const SOUNDS = {
     priority: 7,
     gain: 0.32,
     jitter: 0,
-    tone: tone({ wave: 'square', freq: F.C5, gain: 0.34, decay: 0.07, steps: 2, stepGap: 0.06, stepRatio: STEP.DOWN_FOURTH, filter: low(BLIP_CEILING) }),
+    tone: tone({ wave: 'square', freq: deg(7), gain: 0.34, decay: 0.07, steps: 2, stepGap: 0.06, stepRatio: rungStep(7, -2), filter: low(BLIP_CEILING) }),
+    scale: 7,
+    send: 0.05,
   },
 
   /** Not allowed. Low, buzzing, and short enough not to be a punishment. */
@@ -603,18 +735,42 @@ export const SOUNDS = {
     gain: 0.4,
     cooldown: 0.18,
     jitter: 0.2,
-    tone: tone({ wave: 'square', freq: 98, freqEnd: 82, gain: 0.5, decay: 0.2, filter: low(700, 420, 0.18) }),
+    // Rung -7 and rung -9: two octaves and change below everything else, and
+    // both still inside the set, so a refusal is dark rather than sour.
+    tone: tone({ wave: 'square', freq: deg(-7), freqEnd: deg(-9), gain: 0.5, decay: 0.2, filter: low(700, 420, 0.18) }),
+    scale: -7,
+    send: 0.05,
   },
 
   // ══ CARDS ══════════════════════════════════════════════════════════════
 
+  /**
+   * A card coming under the cursor.
+   *
+   * ── the quietest sound in the game, and it has to be ────────────────────
+   * A hover fires from motion the player is not thinking about, and crossing a
+   * fan of five cards fires it five times in a second. 0.078 against `cap_cap`'s
+   * 0.62 is 18 dB down, which is where the appendix says to start, and it is
+   * nearly dry as well: a tail on a sound that repeats that fast smears into a
+   * continuous hiss under the hand.
+   *
+   * ── it stays UNPITCHED, against the appendix's advice ───────────────────
+   * The appendix asks for hovers on a low rung of the scale. Not here, and the
+   * reason is already written in `MenuAudio`'s header: hover sounds were
+   * removed from every other screen in the game precisely because they are the
+   * most repeated event there is. A pitched tick repeating five times a second
+   * is a note being hammered; a filtered noise tick is a texture, and a texture
+   * can be ignored. What the scale would buy — agreement with the other cards —
+   * is worth nothing on a sound with no pitch to disagree with.
+   */
   card_hover: {
     category: CATEGORY.CARD,
     priority: 0,
-    gain: 0.2,
+    gain: 0.078,
     cooldown: 0.06,
     voices: 2,
     noise: noise({ gain: 0.4, decay: 0.055, filter: high(2200, 5200, 0.05) }),
+    send: 0.03,
   },
 
   card_drag: {
@@ -642,7 +798,10 @@ export const SOUNDS = {
     gain: 0.3,
     cooldown: 0.12,
     jitter: 0,
-    tone: tone({ wave: 'square', freq: F.C6, gain: 0.34, decay: 0.045, steps: 2, stepGap: 0.042, stepRatio: STEP.THIRD, filter: low(BLIP_CEILING) }),
+    // One rung up, not a bare minor third: `THIRD` from C6 is E flat, which is
+    // in nothing else here.
+    tone: tone({ wave: 'square', freq: deg(10), gain: 0.34, decay: 0.045, steps: 2, stepGap: 0.042, stepRatio: rungStep(10, 1), filter: low(BLIP_CEILING) }),
+    scale: 10,
   },
 
   /** Committed. The generic 'a card was played' hit, under the effect's own. */
@@ -661,17 +820,19 @@ export const SOUNDS = {
     priority: 3,
     gain: 0.26,
     cooldown: 0.08,
+    // Rung 6 down to rung 1: a spring letting go, and both ends on the scale.
     tone: tone({
       wave: 'triangle',
-      freq: 620,
-      freqEnd: 300,
+      freq: deg(6),
+      freqEnd: deg(3),
       gain: 0.4,
       decay: 0.09,
       steps: 2,
       stepGap: 0.075,
-      stepRatio: 0.62,
+      stepRatio: rungStep(6, -5),
       stepGain: 0.7,
     }),
+    scale: 6,
   },
 
   /** Dragged all the way and refused. The shake, in sound. */
@@ -703,10 +864,34 @@ export const SOUNDS = {
   //
   //   궤적    a clean rising arpeggio through a high-pass. Scanning ahead.
   //   혼란    two detuned sawtooths beating against each other. Unstable.
-  //   원모어  the same note again an octave up. Literally a repeat.
+  //   원모어  the same note twice. Literally a repeat.
   //   강타    everything low and loud with a noise punch. Weight.
+  //   철벽    a short root under a long partial. Arriving and stopping.
   //   스왑    two tones crossing in opposite directions. An exchange.
+  //   침묵    noise with the pitch taken out of it. Nothing to hold on to.
+  //
+  // ── and they are seven rungs of ONE scale ──────────────────────────────
+  // "다섯 장이 같은 음계의 다른 칸을 쓴다. 그러면 카드를 연달아 내도 불협이
+  // 나오지 않는다." Rungs, low to high: 강타 -2, 철벽 -8, 혼란 0, 궤적 5,
+  // 원모어 7, 스왑 5. 침묵 has no pitch at all, which is the point of it.
+  //
+  // Nothing sequences these — a card is played when a player plays one — so the
+  // guarantee has to come from the SET rather than from an arrangement. Any two
+  // rungs of a major pentatonic are consonant in any order, which is the whole
+  // reason `scale.js` picked that scale.
 
+  /**
+   * 궤적. Four notes climbing, and they are now four notes OF THE SCALE.
+   *
+   * It used to step by 1.26 — a major third — four times from G, which gives
+   * G, B, D sharp, G: three of the four are in nothing else in this file. The
+   * figure sounded like scanning ahead because it rises, and it sounded like a
+   * different game because of where it rose to.
+   *
+   * A fifth is the one interval that can be repeated inside a pentatonic (see
+   * `STEP`), and starting on C leaves exactly enough of the chain for four
+   * notes: C G D A, rungs 5, 8, 11, 14.
+   */
   card_fx_trajectory: {
     category: CATEGORY.CARD,
     priority: 9,
@@ -714,30 +899,52 @@ export const SOUNDS = {
     jitter: 0,
     tone: tone({
       wave: 'triangle',
-      freq: F.G4,
+      freq: deg(5),
       gain: 0.38,
       decay: 0.07,
       steps: 4,
       stepGap: 0.058,
-      stepRatio: 1.26,
+      stepRatio: STEP.FIFTH,
       stepGain: 0.94,
       filter: high(700),
     }),
     noise: noise({ gain: 0.12, decay: 0.22, filter: high(3200, 6000, 0.2) }),
+    scale: 5,
+    /** Scanning ahead is a sound that goes somewhere. The wettest card. */
+    send: 0.3,
   },
 
+  /**
+   * 혼란. The one card whose two oscillators are NOT a rung apart.
+   *
+   * `tone2` is five hertz off the root rather than a ratio of it, and that has
+   * to stay an absolute number: a beat is a DIFFERENCE in hertz, so expressing
+   * it as a ratio would make the wobble speed change with the pitch. The
+   * appendix asks for "두 칸을 동시에", and two rungs of this scale are
+   * consonant by construction — which is the opposite of what this card is for.
+   * So the root sits on a rung, so the card agrees with the others, and the
+   * detune sits beside it, so the card is still unstable.
+   */
   card_fx_chaos: {
     category: CATEGORY.CARD,
     priority: 9,
     gain: 0.44,
     jitter: 0.3,
-    tone: tone({ wave: 'sawtooth', freq: 300, freqEnd: 176, gain: 0.34, decay: 0.3, filter: low(1500, 600, 0.28) }),
-    // Six hertz apart, which is a wobble rather than a chord and is the closest
-    // a two-oscillator palette gets to "어지러운".
-    tone2: tone({ wave: 'sawtooth', freq: 306, freqEnd: 182, gain: 0.3, decay: 0.3, filter: low(1500, 600, 0.28) }),
+    tone: tone({ wave: 'sawtooth', freq: deg(0), freqEnd: deg(-4), gain: 0.34, decay: 0.3, filter: low(1500, 600, 0.28) }),
+    tone2: tone({ wave: 'sawtooth', freq: deg(0) + 5, freqEnd: deg(-4) + 5, gain: 0.3, decay: 0.3, filter: low(1500, 600, 0.28) }),
     noise: noise({ gain: 0.14, decay: 0.26, filter: band(900, 1800, 2, 0.24) }),
+    scale: 0,
+    send: 0.2,
   },
 
+  /**
+   * 원모어. The same note, twice.
+   *
+   * It used to be the same note an OCTAVE up, which reads as an answer rather
+   * than as a repetition — the second note is a different note. "같은 칸 두 번
+   * (2박자)": one rung, struck twice, on the beat `CardFx`'s frame flash uses.
+   * There is nothing else to say and that is the card.
+   */
   card_fx_onemore: {
     category: CATEGORY.CARD,
     priority: 9,
@@ -745,24 +952,31 @@ export const SOUNDS = {
     jitter: 0,
     tone: tone({
       wave: 'square',
-      freq: F.E5,
+      freq: deg(7),
       gain: 0.36,
       decay: 0.1,
       steps: 2,
       stepGap: 0.13,
-      stepRatio: STEP.OCTAVE,
+      stepRatio: 1,
       filter: low(3400),
     }),
+    scale: 7,
+    send: 0.22,
   },
 
+  /** 강타. The lowest rung any card starts on, and it falls seven more. */
   card_fx_smash: {
     category: CATEGORY.CARD,
     priority: 9,
     gain: 0.58,
     jitter: 0.2,
-    tone: tone({ wave: 'square', freq: 180, freqEnd: 58, gain: 0.55, decay: 0.3, filter: low(1800, 500, 0.26) }),
-    tone2: tone({ wave: 'sawtooth', freq: 90, freqEnd: 44, gain: 0.3, decay: 0.3 }),
+    tone: tone({ wave: 'square', freq: deg(-2), freqEnd: deg(-9), gain: 0.55, decay: 0.3, filter: low(1800, 500, 0.26) }),
+    // An octave under the root, falling with it. `ratio` rather than a second
+    // set of hertz, so the pair cannot come apart if the root is ever moved.
+    tone2: tone({ wave: 'sawtooth', ratio: 0.5, ratioEnd: 0.5 * rungStep(-2, -7), gain: 0.3, decay: 0.3 }),
     noise: noise({ gain: 0.45, decay: 0.18, filter: low(2200, 300, 0.16) }),
+    scale: -2,
+    send: 0.3,
   },
 
   /**
@@ -775,19 +989,29 @@ export const SOUNDS = {
    * (`freqEnd` 가 없다), 짧게 끊기고, 그 위에 조율되지 않은 금속 배음 하나가 더
    * 길게 남는다.
    *
-   * 그 배음이 "금속성 잔향"이다. 3.7배는 옥타브 근처가 아니므로 종이 아니라 눌린
-   * 강판으로 읽힌다 — `cap_cap` 이 같은 이유로 3.6배를 쓴다. 두 소리가 같은 재료의
-   * 것으로 들려야 하는데, 이 카드가 하는 일이 바로 그 뚜껑을 더 두껍게 만드는
-   * 것이기 때문이다.
+   * ── 배음이 3.7 에서 4.0 이 됐다. 근거는 그대로다 ──────────────────────────
+   * 원래 근거: "3.7배는 옥타브 근처가 아니므로 종이 아니라 눌린 강판으로 읽힌다 —
+   * `cap_cap` 이 같은 이유로 3.6배를 쓴다. 두 소리가 같은 재료의 것으로 들려야
+   * 하는데, 이 카드가 하는 일이 바로 그 뚜껑을 더 두껍게 만드는 것이기 때문이다."
+   *
+   * 마지막 문장이 이 값을 결정한다. `cap_cap` 이 4.0 이 됐으므로 같은 재료로
+   * 들리려면 이쪽도 4.0 이다. 뚜껑을 두껍게 만드는 카드가 뚜껑과 다른 금속으로
+   * 울리면 그건 다른 물건이다.
+   *
+   * "금속성 잔향"은 이제 비율이 아니라 **길이**가 만든다. 배음이 기음보다 두 배
+   * 오래 남는다 — `cap_cap` 은 정확히 반대로 배음이 기음의 3분의 1 만에 죽는다.
+   * 막대와 종을 가르는 것이 그 순서이고, 이 카드는 종 쪽이다.
    */
   card_fx_resist: {
     category: CATEGORY.CARD,
     priority: 9,
     jitter: 0,
     gain: 0.5,
-    tone: tone({ wave: 'square', freq: F.THUD, gain: 0.5, decay: 0.16, filter: low(1200, 400, 0.14) }),
-    tone2: tone({ wave: 'triangle', freq: F.THUD * 3.7, gain: 0.18, decay: 0.34, filter: band(1100, 700, 3, 0.3) }),
+    tone: tone({ wave: 'square', freq: deg(-8), gain: 0.5, decay: 0.16, filter: low(1200, 400, 0.14) }),
+    tone2: tone({ wave: 'triangle', ratio: 4.0, gain: 0.18, decay: 0.34, filter: band(1100, 700, 3, 0.3) }),
     noise: noise({ gain: 0.2, decay: 0.07, filter: low(1400, 400, 0.06) }),
+    scale: -8,
+    send: 0.24,
   },
 
   /**
@@ -816,17 +1040,57 @@ export const SOUNDS = {
     cooldown: 0.06,
     voices: 2,
     jitter: 0.04,
-    tone: tone({ wave: 'square', freq: F.G5, freqEnd: F.E5, gain: 0.3, decay: 0.045, filter: low(4200) }),
-    tone2: tone({ wave: 'triangle', freq: F.G5 * 2.9, gain: 0.12, decay: 0.035 }),
+    tone: tone({ wave: 'square', freq: deg(8), freqEnd: deg(7), gain: 0.3, decay: 0.045, filter: low(4200) }),
+    tone2: tone({ wave: 'triangle', ratio: 3.0, gain: 0.12, decay: 0.035 }),
+    /**
+     * ── 음계를 걷지 않는다. `velPitch` 를 안 쓰는 것과 같은 이유다 ────────────
+     * 위의 주석이 이미 그 논거를 적었다: 저쪽은 얼마나 세게 맞았는지를 말하고
+     * 이쪽은 결과를 말한다. 연쇄의 몇 번째냐도 같은 종류의 정보다 — 세 번째로
+     * 버틴 것과 첫 번째로 버틴 것은 똑같이 버틴 것이고, 칸이 올라가면 "더" 버틴
+     * 것으로 읽힌다.
+     *
+     * 대신 8번 칸에 붙박아 둔다. 어떤 칸의 충돌 위에 겹쳐도 협화다.
+     */
+    send: 0.12,
   },
 
+  /** 스왑. Rung 5 and rung 10 trading places — an octave, crossing. */
   card_fx_swap: {
     category: CATEGORY.CARD,
     priority: 9,
     gain: 0.42,
     jitter: 0,
-    tone: tone({ wave: 'triangle', freq: F.C5, freqEnd: F.C6, gain: 0.34, decay: 0.26, filter: low(4000) }),
-    tone2: tone({ wave: 'triangle', freq: F.C6, freqEnd: F.C5, gain: 0.34, decay: 0.26, filter: low(4000) }),
+    tone: tone({ wave: 'triangle', freq: deg(5), freqEnd: deg(10), gain: 0.34, decay: 0.26, filter: low(4000) }),
+    tone2: tone({ wave: 'triangle', ratio: 2.0, ratioEnd: 1.0, gain: 0.34, decay: 0.26, filter: low(4000) }),
+    scale: 5,
+    send: 0.26,
+  },
+
+  /**
+   * 침묵. The card that takes the opponent's cards away, and it had no sound.
+   *
+   * ── it was missing, not quiet ───────────────────────────────────────────
+   * `CARD_FX_SOUND` in `MatchAudio` listed six cards and the catalogue has
+   * seven. Playing 침묵 produced the generic `card_use` and then nothing, which
+   * is the one card in the game whose effect the player could not hear.
+   *
+   * ── and it is the only pitchless card, on purpose ───────────────────────
+   * "소리를 뺏는 카드가 소리가 크면 안 된다." Every other effect is a rung of
+   * the scale; this one is noise with a filter closing over it — a band-pass
+   * falling from 2.6 kHz to 300 with the level going down as it falls, so it
+   * reads as something being shut rather than something being struck. Nothing
+   * to hum, nothing to hold on to, and quieter than every other card in the
+   * fan.
+   *
+   * Nearly dry too. A tail would be the sound continuing after it stopped.
+   */
+  card_fx_silence: {
+    category: CATEGORY.CARD,
+    priority: 9,
+    gain: 0.3,
+    jitter: 0,
+    noise: noise({ gain: 0.55, attack: 0.004, decay: 0.28, curve: 'lin', filter: band(2600, 300, 1.6, 0.22) }),
+    send: 0.05,
   },
 
   /**
@@ -1030,31 +1294,49 @@ export const SOUNDS = {
 
   // ══ FOOTBALL ═══════════════════════════════════════════════════════════
 
-  /** The ball, struck. Lighter and springier than cap on cap, as asked. */
+  /**
+   * The ball, struck. The same bar, bigger.
+   *
+   * Four rungs under `cap_cap` — 0.60 of its root, which is the ratio the
+   * appendix asks for and happens to land exactly on a rung — and ringing half
+   * again as long. Big things are low and they hold on. The partial is quieter
+   * because a ball is not a bar: it has the mode, it just does not carry it.
+   */
   ball_cap: {
     category: CATEGORY.IMPACT,
     priority: 5,
-    gain: 0.5,
+    gain: 0.55,
     cooldown: 0.04,
     voices: 2,
+    tone: tone({ wave: 'sine', freq: deg(3), freqEnd: 372, gain: 0.5, attack: 0.0025, decay: 0.26, curve: 'exp' }),
+    tone2: tone({ wave: 'sine', ratio: 4.0, gain: 0.2, attack: 0.0015, decay: 0.08, curve: 'exp' }),
+    noise: noise({ gain: 0.5, attack: 0.001, decay: 0.035, filter: band(2600, 1300, 5, 0.045) }),
+    scale: 3,
     velGain: 0.8,
-    velPitch: 0.6,
+    velPitch: 0,
+    velBright: 0.6,
     velLength: 0.4,
-    tone: tone({ wave: 'triangle', freq: 520, freqEnd: 340, gain: 0.5, decay: 0.09, filter: low(3600) }),
-    noise: noise({ gain: 0.28, decay: 0.05, filter: band(2000, 1100, 3.4, 0.045) }),
+    jitter: 0.35,
+    send: 0.16,
   },
 
+  /** `cap_wall`, lower and duller again. The ball against the woodwork's fence. */
   ball_wall: {
     category: CATEGORY.IMPACT,
     priority: 4,
-    gain: 0.4,
+    gain: 0.45,
     cooldown: 0.05,
     voices: 2,
+    tone: tone({ wave: 'sine', freq: deg(1), freqEnd: 278, gain: 0.5, attack: 0.003, decay: 0.12, curve: 'exp' }),
+    tone2: tone({ wave: 'sine', ratio: 4.0, gain: 0.12, attack: 0.002, decay: 0.03, curve: 'exp' }),
+    noise: noise({ gain: 0.5, attack: 0.001, decay: 0.06, filter: low(1000, 300, 0.06) }),
+    scale: 1,
     velGain: 0.8,
-    velPitch: 0.45,
+    velPitch: 0,
+    velBright: 0.6,
     velLength: 0.4,
-    tone: tone({ wave: 'triangle', freq: 300, freqEnd: 210, gain: 0.45, decay: 0.08 }),
-    noise: noise({ gain: 0.24, decay: 0.07, filter: low(1400, 600, 0.06) }),
+    jitter: 0.35,
+    send: 0.12,
   },
 
   /**
@@ -1084,27 +1366,73 @@ export const SOUNDS = {
     noise: noise({ gain: 0.2, decay: 0.4, filter: high(3400, 7600, 0.36) }),
   },
 
-  /** The woodwork. A ring that goes nowhere — the sound of nearly. */
+  /**
+   * The woodwork. A ring that goes nowhere — the sound of nearly.
+   *
+   * ── the ONE metal sound in the game, and the only one allowed to clang ──
+   * Every collision above is a TUNED bar: its partial pulled to 4:1, two
+   * octaves, fused with the root. This one is 2.76:1 — measured at 144 cents
+   * off the nearest harmonic, a semitone and a half sharp of nothing — and the
+   * number is not arbitrary. 2.756 is where a uniform free-free bar puts its
+   * second mode when nobody has touched it; 4.0 is where a marimba maker moves
+   * it to by carving the underside away.
+   *
+   * So the whole family is one material in two states. A bottle cap is a
+   * pressed dish that happens to ring sweetly; a goalpost is a length of raw
+   * steel tube that nobody tuned, and it is the one object on the board that
+   * has no business being in tune. Hitting it should ache.
+   *
+   * Two more things follow from it being metal rather than a cap. The partial
+   * lives nearly as long as the root instead of dying in a third of the time,
+   * which is what separates a bell from a bar. And the root barely sags — steel
+   * holds its pitch where a bottle cap does not.
+   *
+   * ── it does NOT walk the scale, and that is not an oversight ────────────
+   * The post is one physical object with one mode. It should ring identically
+   * every time it is hit, so a player learns the sound of nearly rather than
+   * hearing a different near-miss depending on how deep the chain was. It is
+   * written on rung 11 all the same, so the fixed pitch is inside the set every
+   * other sound is drawn from and cannot clash with the rung a chain is on.
+   */
   goal_post: {
     category: CATEGORY.STINGER,
     priority: 7,
     gain: 0.6,
     cooldown: 0.1,
     jitter: 0.15,
+    tone: tone({ wave: 'sine', freq: deg(11), freqEnd: 1150, gain: 0.42, attack: 0.002, decay: 0.44, curve: 'exp' }),
+    tone2: tone({ wave: 'sine', ratio: 2.76, gain: 0.26, attack: 0.0015, decay: 0.34, curve: 'exp' }),
+    noise: noise({ gain: 0.5, attack: 0.001, decay: 0.05, filter: band(4600, 2200, 6, 0.06) }),
     velGain: 0.5,
-    velPitch: 0.25,
-    tone: tone({ wave: 'triangle', freq: 1245, freqEnd: 1180, gain: 0.4, decay: 0.4, filter: high(800) }),
-    tone2: tone({ wave: 'triangle', freq: 1868, freqEnd: 1760, gain: 0.2, decay: 0.28 }),
-    noise: noise({ gain: 0.35, decay: 0.1, filter: band(3400, 1400, 8, 0.09) }),
+    velPitch: 0,
+    velBright: 0.45,
+    /** The biggest room of any collision. A post rings across the whole board. */
+    send: 0.34,
   },
 
-  /** The net taking the pace off. Soft, and it fades rather than stopping. */
+  /**
+   * The net taking the pace off. Soft, and it fades rather than stopping.
+   *
+   * The one collision with essentially no pitch, because netting has none —
+   * there is nothing in it to ring. The root is still there at a tenth of the
+   * level and on rung 0, so the sound belongs to the family and cannot fight
+   * whatever rung the chain reached, but it is a colour under the noise rather
+   * than a note.
+   */
   ball_net: {
     category: CATEGORY.IMPACT,
     priority: 6,
-    gain: 0.3,
+    gain: 0.34,
     cooldown: 0.2,
+    tone: tone({ wave: 'sine', freq: deg(0), freqEnd: 254, gain: 0.1, attack: 0.006, decay: 0.09, curve: 'exp' }),
     noise: noise({ gain: 0.5, attack: 0.01, decay: 0.34, curve: 'lin', filter: low(900, 190, 0.3) }),
+    scale: 0,
+    velGain: 0.7,
+    velPitch: 0,
+    velBright: 0.4,
+    jitter: 0.35,
+    /** A net absorbs. Almost nothing reaches the room. */
+    send: 0.06,
   },
 
   // ── the ball is put back in silence ──────────────────────────────────

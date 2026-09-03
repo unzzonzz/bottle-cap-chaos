@@ -56,13 +56,12 @@ const ROLE_RANK = { cap: 6, ball: 5, frame: 4, net: 3, wall: 2, ground: 1 };
 /**
  * The highest scale rung a chain may reach. See `_chain`.
  *
- * Seven, which on the major pentatonic is an octave and a fifth above the root
- * — 660 Hz up to 1663. Measured rather than guessed: the rungs above it put the
- * fundamental of `cap_cap` above 1.9 kHz, which is inside the ear's most
- * sensitive band, and a chain that reaches there twice in a turn is shrill
- * rather than exciting. Eight caps is the worst case the whole overload
- * apparatus was built around, and a cap of 7 means even that one runs out of
- * ladder before it runs out of patience.
+ * Seven rungs, which takes `cap_cap` from 660 Hz to 1744 — an octave and a
+ * sixth. Measured rather than guessed: rung eight is 2096 Hz, which is inside
+ * the band the ear is most sensitive in, and a chain that arrives there twice
+ * in a turn is shrill rather than exciting. Eight caps in a chain is the worst
+ * case the whole overload apparatus was built around, so a ceiling of 7 means
+ * even that one runs out of ladder before it runs out of patience.
  *
  * It is a module constant and not a `CONFIG` knob on purpose: this is a musical
  * decision, and `config.audio` is a MIX. Nothing on the panel should be able to

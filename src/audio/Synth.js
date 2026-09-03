@@ -50,10 +50,11 @@ import { scaleRate } from './scale.js';
  * two-second buffers inside a single frame.
  *
  * ── pitch is quantised, and that is a design decision made here ──────────
- * A definition may set `scale: true`, and then `opts.degree` moves it by whole
- * rungs of a major pentatonic rather than by a continuous multiplier. The
- * reasoning is in `scale.js`; what matters at this level is that the two paths
- * are exclusive by construction — a sound without `scale` takes exactly the
+ * A definition may name the rung it is written on (`scale: 7`), and then
+ * `opts.degree` moves it by whole rungs of the game's one pentatonic rather
+ * than by a continuous multiplier. The reasoning is in `scale.js` and the rung
+ * table is `soundBank.deg`; what matters at this level is that the two paths
+ * are exclusive by construction — a sound with no `scale` takes exactly the
  * jitter path it always took, so nothing that predates the scale moved.
  *
  * ── loudness moves BRIGHTNESS, not pitch ────────────────────────────
@@ -259,8 +260,9 @@ export class Synth extends SoundPlayer {
     // ── the physical mapping, in one place ─────────────────────────────────
     // "충돌음은 충돌 세기에 따라 볼륨과 피치가 변한다. 고정음 쓰지 마라." Every
     // sound carries how much of each it wants, so a UI click can opt out
-    // entirely (all three at 0) while a collision opts all the way in — without
-    // either of them being a special case anywhere else.
+    // entirely (all four at 0) while a collision opts all the way in — without
+    // either of them being a special case anywhere else. The collisions leave
+    // `velPitch` at zero and take `velBright` instead; the header says why.
     const velGain = clamp01(def.velGain ?? 0);
     const velPitch = clamp01(def.velPitch ?? 0);
     const velLength = clamp01(def.velLength ?? 0);
@@ -286,14 +288,30 @@ export class Synth extends SoundPlayer {
     const brightMul = 1 - velBright + velBright * (0.55 + 0.65 * shaped);
 
     /**
-     * The scale rung, when the definition asks for one. See `scale.js`.
+     * The scale rung, when the definition names one. See `scale.js`.
      *
-     * Exclusive with nothing: a scaled sound still takes its jitter, because the
-     * jitter is now doing a different job — a few tens of cents of wander INSIDE
-     * a rung, so two hits on the same degree are not bit-identical. The rung is
-     * what makes them agree; the jitter is what keeps them from being a copy.
+     * ── `scale` is a NUMBER, and a boolean would be the wrong shape ────────
+     * It is the rung the sound is written ON, and it has to be, because the
+     * scale is shared by the whole game rather than being measured from each
+     * sound's own frequency. A pentatonic is not symmetric: transposing E up by
+     * "one rung of the pentatonic rooted at E" gives F sharp, which is not in
+     * the pentatonic everything else is written in. Do that and each sound
+     * walks its own private scale — every one of them internally consonant, and
+     * no two of them in the same key.
+     *
+     * So the interval is taken between two rungs of the ONE scale, which needs
+     * to know where the sound already sits. `soundBank.deg()` is the other half
+     * of the contract: it turns a rung into the hertz the layer writes, so
+     * `scale` and `tone.freq` cannot drift apart.
+     *
+     * A scaled sound still takes its jitter, which is now doing a different
+     * job: a few tens of cents of wander INSIDE the rung, so two hits on the
+     * same rung are not identical. The rung is what makes them agree; the
+     * jitter is what keeps them from being a copy.
      */
-    const degreeMul = def.scale ? scaleRate(opts.degree ?? 0) : 1;
+    const base = typeof def.scale === 'number' ? def.scale : null;
+    const degreeMul =
+      base === null ? 1 : scaleRate(base + Math.round(opts.degree ?? 0)) / scaleRate(base);
 
     const spread = Math.max(0, (this.config.pitchJitter ?? 0) * (def.jitter ?? 1));
     const rate = Math.max(0.05, (opts.rate ?? 1) * velPitchMul * degreeMul * jitter(spread));
@@ -328,6 +346,8 @@ export class Synth extends SoundPlayer {
      * It is still ONE convolver. This is a routing decision, not a new part of
      * the palette — the distinction the file header draws.
      */
+    // Guarded, so a mixer stub without a room — a test double, an offline
+    // render — is dry rather than a crash. `MockPlayer` is the same idea.
     const sendAmount = this.mixer.sendFor ? this.mixer.sendFor(def, loop) : 0;
     if (sendAmount > 0 && this.mixer.spaceIn) {
       const send = ctx.createGain();

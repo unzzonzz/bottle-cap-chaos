@@ -44,6 +44,12 @@ const CARD_FX_SOUND = {
   smash: 'card_fx_smash',
   resist: 'card_fx_resist',
   swap: 'card_fx_swap',
+  /**
+   * 침묵 was missing from this table and from the bank, so the one card that
+   * takes sound away was also the one card that made none. See its entry in
+   * `soundBank`.
+   */
+  silence: 'card_fx_silence',
 };
 
 /** States in which bodies move under their own power, so contacts are real. */

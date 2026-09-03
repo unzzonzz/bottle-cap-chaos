@@ -10,11 +10,23 @@
  * built inside `unlock()`, which is called from a real press, and every call
  * before that is a no-op rather than a queue.
  *
- * ── the bit crusher is the tone, not a decoration ───────────────────────────
- * The screen is quantised to five bits a channel and dithered on a 4x4 lattice
- * keyed to a 320x240 framebuffer. The brief asks for the audio equivalent and is
- * right to: it is the single device that makes sixty separately-designed sounds
- * belong to one machine. Two halves, and they are different effects:
+ * ── the room is the tone. the bit crusher used to be, and is now unity ──────
+ * The original argument, and it was a good one: the screen was quantised to five
+ * bits a channel and dithered on a 4x4 lattice, and the audio needed the
+ * equivalent — one device applied to everything, so sixty separately-designed
+ * sounds belong to one machine. It is easier to make things belong together by
+ * damaging them identically than by drawing them identically.
+ *
+ * That screen was removed in PHASE 1. The one that replaced it is glass and
+ * water and light, and ITS audio equivalent is not quantisation noise — it is a
+ * short bright room. So the shared device is now the convolver below, reached
+ * from every voice through a send scalar, and the crusher is left in the chain
+ * at unity (`config.audio.crushBits` is 16, where the curve is `null` and the
+ * node is genuinely no processing at all). Kept rather than deleted because the
+ * worklet, the curve and the panel dial all still work, and the day somebody
+ * wants that colour back it is a number.
+ *
+ * The crusher's two halves, for when that day comes:
  *
  *   BIT DEPTH   a `WaveShaperNode` whose curve is a staircase. Exact, cheap,
  *               synchronous, and available on every browser that has Web Audio
@@ -45,6 +57,12 @@
  * volume and because ducking a whole class of sound is otherwise sixty separate
  * multiplications. Master sits after the sum so the settings screen's slider and
  * the panel's category trims cannot fight.
+ *
+ * The SEND does not follow that grouping, and used to. It hangs off each voice
+ * instead, because how much room a sound wants is a property of the sound: a
+ * hover that fires forty times while a cursor crosses a menu and the card
+ * effect it is hovering over share a bus and want opposite amounts. The
+ * category table survives as the default. See `sendFor`.
  */
 
 import { CATEGORIES } from './categories.js';
