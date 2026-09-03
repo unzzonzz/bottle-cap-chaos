@@ -183,14 +183,13 @@ export class IntroLayer {
   /**
    * @param {object} opts
    * @param {import('../core/GlossMaterial.js').GlossMaterials} opts.retro
-   * @param {import('three').Vector2} opts.resolution
    * @param {object} opts.config
    * @param {(player: number) => import('three').Texture} opts.panelFor
    *   The same mark textures the board uses, so the cap shown here is the cap
    *   that is about to be on the table — including an opponent's mark that
    *   arrived over the wire.
    */
-  constructor({ retro, resolution, config, panelFor }) {
+  constructor({ retro, config, panelFor }) {
     this._retro = retro;
     this.config = config;
     this.panelFor = panelFor;
@@ -206,7 +205,7 @@ export class IntroLayer {
     this.camera = frameCamera({ near: -3000, far: 3000 });
     this.camera.position.z = 1000;
 
-    this.ui = new HudMaterials({ resolution });
+    this.ui = new HudMaterials();
     this._geometry = buildCapGeometry({ ...CAP_DEFAULTS, shell: true });
     const capR = this._geometry.userData.radius ?? 1.6;
     this._capScale = CAP_WIDTH / (capR * 2);
@@ -480,8 +479,7 @@ export class IntroLayer {
     return material;
   }
 
-  setResolution(resolution) {
-    this.ui.setResolution(resolution);
+  setResolution(_resolution) {
     refitFrameCamera(this.camera);
   }
 

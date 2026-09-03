@@ -132,7 +132,6 @@ function smoothstep(x) {
 export class HudLayer {
   /**
    * @param {HTMLCanvasElement} canvas  for mapping pointer coordinates
-   * @param {import('three').Vector2} resolution  the low-res target's size
    * @param {() => void} onExit
    */
   /**
@@ -148,7 +147,6 @@ export class HudLayer {
   constructor({
     canvas,
     config,
-    resolution,
     onExit,
     onRecenter,
     atDefaultView,
@@ -184,7 +182,7 @@ export class HudLayer {
     this.scene = new Scene();
     this.camera = frameCamera();
 
-    this.materials = new HudMaterials({ resolution });
+    this.materials = new HudMaterials();
 
     // Hidden until the first `update` gives them a texture. A plate whose
     // sampler has never been bound is undefined behaviour, and the one frame it
@@ -290,8 +288,7 @@ export class HudLayer {
     return m;
   }
 
-  setResolution(resolution) {
-    this.materials.setResolution(resolution);
+  setResolution(_resolution) {
     // The frame can now change SHAPE, not just the target its pixels land in —
     // so the ortho box has to follow, and everything anchored to a frame edge
     // has to be placed again. `layout()` was previously only reachable from the

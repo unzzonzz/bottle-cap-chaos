@@ -463,6 +463,23 @@ export class Match {
     return Math.max(0, cfg.fxSeconds?.[cardId] ?? 0.6);
   }
 
+  /**
+   * Seconds of real time the accumulator is holding but has not stepped.
+   *
+   * The one number that says whether the simulation is keeping up, and the
+   * measurement panel is the only thing that wants it. It was read straight off
+   * `_acc` from `main.js`, which is a private field of a class the render layer
+   * is not supposed to reach into — and the comment there admitted as much.
+   *
+   * A getter rather than making the field public: this is an OBSERVATION, and
+   * nothing outside may write it. Every path that does write it clamps or zeroes
+   * it as part of a step, and a caller setting it would desynchronise the
+   * fixed-step clock from the interpolation `alpha` derived from it.
+   */
+  get backlogSeconds() {
+    return this._acc;
+  }
+
   /** How far through the current card effect, 0..1. What the renderer draws off. */
   get cardFx() {
     if (this.state !== MATCH_STATE.CARD_FX || !this._fx) return null;

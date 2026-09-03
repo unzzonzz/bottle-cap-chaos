@@ -1093,9 +1093,6 @@ export const CONFIG = {
    * screen and cannot change what the turn does.
    */
   cardFx: {
-    /** Vertex snap for the effects, separate from the game's and the cards'. */
-    vertexSnap: 1.0,
-
     // ── the card FACE: hologram, shadow, drop guide ──────────────────────
     /**
      * 왜 카드의 시각 노브가 `cards` 가 아니라 여기 있는가.
@@ -2530,16 +2527,6 @@ export const CONFIG = {
    * frame or a plate's size changed.
    */
   ui: {
-    /**
-     * The HUD's own vertex snap, separate from `view.vertexSnap`.
-     *
-     * 1 — the same as everything else on screen — because exempting the readout
-     * from the look is the thing this whole conversion exists to stop doing.
-     * It is a dial for one specific failure: if the score turns out to shimmer
-     * between two readings as the camera drifts, this comes down until it does
-     * not, and nothing else on screen goes smooth with it.
-     */
-    vertexSnap: 1,
     /**
      * Texels per frame pixel for every HUD plate.
      *

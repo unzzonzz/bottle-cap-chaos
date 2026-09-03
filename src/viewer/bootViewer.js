@@ -21,7 +21,7 @@ import { bootDebug } from './Debug.js';
 export function bootViewer(canvas) {
   const viewport = new Viewport({ canvas });
   setTextureRenderer(viewport.renderer);
-  const retro = new GlossMaterials({ resolution: viewport.resolution });
+  const retro = new GlossMaterials();
 
   const scene = new Scene();
   scene.background = new Color(PALETTE.bg.skyMid);
@@ -34,8 +34,6 @@ export function bootViewer(canvas) {
   scene.add(orbit.pitchGroup);
 
   bootDebug({ cap, orbit, retro, composer });
-
-  viewport.onResize(({ resolution }) => retro.setResolution(resolution));
 
   /**
    * The environment every reflective surface samples.

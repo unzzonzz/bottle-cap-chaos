@@ -215,14 +215,13 @@ function cyclePalette(list, now, rate, out) {
 export class CardFx {
   /**
    * @param {typeof import('../game/config.js').CONFIG} config
-   * @param {import('three').Vector2} resolution
    * @param {{width: number, height: number}} frame  the card scene's layout box
    */
-  constructor({ config, resolution, frame }) {
+  constructor({ config, frame }) {
     this.config = config;
     this.frame = frame;
 
-    this.materials = new FxMaterials({ resolution });
+    this.materials = new FxMaterials();
     this.world = new Group();
     this.screen = new Group();
 
@@ -281,10 +280,6 @@ export class CardFx {
     this._buildScreen();
     this._buildSeal();
     this._buildResist();
-  }
-
-  setResolution(resolution) {
-    this.materials.setResolution(resolution);
   }
 
   /** A rebuild changed the cap count. Sprites are pooled to the new maximum. */

@@ -1432,8 +1432,9 @@ export function bootPhysicsDebug({
 
   // ── how the effects are drawn ────────────────────────────────────────────
   const fxLook = fx.addFolder('연출 (그리기)');
-  fxLook.add(config.cardFx, 'vertexSnap', 0, 1, 0.01).name('연출 버텍스 스냅');
-
+  // `cardFx.vertexSnap` 의 슬라이더가 여기 있었다. `cards.vertexSnap` 과 같은
+  // 이유로 아무것도 읽지 않았는데, 이쪽은 키까지 지웠다 — `cardFx` 는
+  // `SYNCED_CONFIG_PATHS` 밖이라 `configHash` 를 건드리지 않는다.
   fxLook
     .add(config.cardFx, 'stunFrames', 2, 16, 1)
     .name('스턴 프레임 수')
@@ -1726,7 +1727,7 @@ export function bootPhysicsDebug({
   const ui = gui.addFolder('UI (HUD)');
   const relayout = () => hud?.layout();
 
-  ui.add(config.ui, 'vertexSnap', 0, 1, 0.01).name('UI 버텍스 스냅 (게임과 별도)');
+  // `ui.vertexSnap` 의 슬라이더도 같이 나갔다. 셋 중 키가 남은 것은 `cards` 뿐이다.
   ui.add(config.ui, 'textureScale', [0.5, 1, 1.5, 2, 3]).name('UI 텍스처 배율 (1 = 1:1)');
   ui.add(config.ui, 'forceScore', ['auto', 'on', 'off']).name('스코어 강제 표시');
   ui.add(config.ui, 'scoreFadeSeconds', 0.02, 1.5, 0.01).name('스코어 페이드 (s)');

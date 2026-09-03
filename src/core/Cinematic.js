@@ -72,24 +72,24 @@ export function letterboxBar() {
 /**
  * How much each bar overhangs the frame, in frame pixels.
  *
- * The vertex snap moves every corner by up to half a low-resolution pixel and
- * is free to move one INWARD, which on a bar would leave a bright line along the
- * top or bottom edge of the screen. `VictoryLayer.OVERHANG` is the same number
- * for the same reason.
+ * Written for a vertex snap that could move a corner half a low-resolution
+ * pixel INWARD, which on a bar leaves a bright line along the top or bottom
+ * edge of the screen. That snap is gone. The overhang is not, because the
+ * failure it prevents is now reachable by a duller route: the bar is scaled by
+ * `frameScale()` and positioned in frame pixels, both of which round, and a bar
+ * that lands one pixel short of the edge is the same bright line.
+ * `VictoryLayer.OVERHANG` is the same number for the same reason.
  */
 const OVERHANG = 6;
 
 const ease = cubicBezier(MOTION.easeInOut);
 
 export class Cinematic {
-  /**
-   * @param {import('three').Vector2} resolution  the render target's size
-   */
-  constructor({ resolution }) {
+  constructor() {
     this.scene = new Scene();
     this.camera = frameCamera({ near: -10, far: 10 });
 
-    this.materials = new HudMaterials({ resolution });
+    this.materials = new HudMaterials();
     this._quad = new PlaneGeometry(1, 1);
 
     /** 0 = fully open, 1 = fully closed. Anything between is the letterbox. */
@@ -292,8 +292,7 @@ export class Cinematic {
 
   }
 
-  setResolution(resolution) {
-    this.materials.setResolution(resolution);
+  setResolution(_resolution) {
     if (refitFrameCamera(this.camera)) this.layout();
   }
 

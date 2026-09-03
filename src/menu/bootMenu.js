@@ -144,9 +144,7 @@ export function bootMenu(
   // sitting side by side. See src/core/frame.js.
   const viewport = new Viewport({ canvas });
   setTextureRenderer(viewport.renderer);
-  const retro = new GlossMaterials({ resolution: viewport.resolution });
-
-  viewport.onResize(({ resolution }) => retro.setResolution(resolution));
+  const retro = new GlossMaterials();
 
   /**
    * The environment every reflective surface samples.
@@ -338,7 +336,7 @@ export function bootMenu(
    * has to be RENDERED — which only this file can arrange, because only this
    * file owns the pass order.
    */
-  const modal = new ModalLayer({ canvas, resolution: viewport.resolution, config: CONFIG });
+  const modal = new ModalLayer({ canvas, config: CONFIG });
   viewport.onResize(({ resolution }) => modal.setResolution(resolution));
 
   /**
@@ -374,7 +372,7 @@ export function bootMenu(
   let current = 'menu';
 
   /** The letterbox. Its own overlay scene and camera; see `core/Cinematic.js`. */
-  const cinematic = new Cinematic({ resolution: viewport.resolution });
+  const cinematic = new Cinematic();
   viewport.onResize(({ resolution }) => cinematic.setResolution(resolution));
 
   const transition = new Transition({ tuning: cfg.transition });

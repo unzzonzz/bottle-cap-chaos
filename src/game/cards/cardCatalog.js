@@ -153,6 +153,12 @@ export const CARDS = [
     // through that as a lump. Measured on this card set, ⌁ ✳ ↻ lay down 162-292
     // inked pixels — ◈ lays down 402 and reads as an orange blob. ≫ is 228, in
     // the middle of the set, and says thrust.
+    //
+    // THIS CONSTRAINT NO LONGER HOLDS. The alpha threshold and the 5-bit
+    // quantiser it was measured against were both removed in PHASE 1, so a
+    // filled glyph no longer comes through as a lump and the ink-pixel budget
+    // is not a reason to refuse one. The glyphs are unchanged because they read
+    // well, not because they have to be these. See `render/cardTexture.js`.
     glyph: '≫',
     // The cost is IN the card, not in a tooltip. A player who reads only the
     // name plays this expecting a free upgrade, and the shot that then misses

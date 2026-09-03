@@ -315,7 +315,7 @@ async function boot(canvas) {
   const viewport = new Viewport({ canvas });
   // 이방성 상한은 렌더러가 있어야 알 수 있다. 텍스처가 만들어지기 전에.
   setTextureRenderer(viewport.renderer);
-  const retro = new GlossMaterials({ resolution: viewport.resolution });
+  const retro = new GlossMaterials();
 
   const scene = new Scene();
   /**
@@ -336,8 +336,6 @@ async function boot(canvas) {
    * `ArenaView.update` 에 적혀 있다.
    */
   viewport.renderer.shadowMap.autoUpdate = false;
-
-  viewport.onResize(({ resolution }) => retro.setResolution(resolution));
 
   /**
    * The environment every reflective surface samples.
@@ -589,7 +587,6 @@ async function boot(canvas) {
    */
   const introLayer = new IntroLayer({
     retro,
-    resolution: viewport.resolution,
     config: CONFIG,
     panelFor: (player) => frontMarks.textureFor(player),
   });
@@ -602,7 +599,7 @@ async function boot(canvas) {
    * open, so `PointerRouter` never sees a press aimed at a dialog and no branch
    * anywhere else has to know one exists.
    */
-  const modal = new ModalLayer({ canvas, resolution: viewport.resolution, config: CONFIG });
+  const modal = new ModalLayer({ canvas, config: CONFIG });
   viewport.onResize(({ resolution }) => modal.setResolution(resolution));
 
   /**
@@ -1090,7 +1087,6 @@ async function boot(canvas) {
   const cards = new CardLayer({
     canvas,
     config: CONFIG,
-    resolution: viewport.resolution,
     usable: (cardId, player) =>
       player === match.rules.currentPlayer
         ? match.cards.usable(cardId, player)
@@ -1126,8 +1122,8 @@ async function boot(canvas) {
       window.dispatchEvent(new CustomEvent('cardused', { detail: { cardId, player } }));
     },
   });
-  // The card scene snaps to the same framebuffer grid, because it is drawn into
-  // the same target — there is only one grid for either of them to snap to.
+  // Only to refit the ortho box: the card materials stopped wanting a
+  // resolution when the vertex snap went. See `render/FxMaterial.js`.
   viewport.onResize(({ resolution }) => cards.setResolution(resolution));
 
   // The effects. Two roots: one in the world, drawn with the game camera, and
@@ -1135,13 +1131,11 @@ async function boot(canvas) {
   // same low-res target, so a stun star gets the same dither as the turf.
   const cardFx = new CardFx({
     config: CONFIG,
-    resolution: viewport.resolution,
     frame: FRAME,
   });
   cardFx.setArena(match.arena);
   scene.add(cardFx.world);
   cards.scene.add(cardFx.screen);
-  viewport.onResize(({ resolution }) => cardFx.setResolution(resolution));
 
   // Found cards, flying from the board into the hand. Same overlay scene and
   // same materials as the fan, so the card that lands is the card that flew.
@@ -1174,7 +1168,7 @@ async function boot(canvas) {
    * the identical dither and quantiser — and outside the bloom chain, because a
    * bright pass over a hard bar edge blooms the edge.
    */
-  const cinematic = new Cinematic({ resolution: viewport.resolution });
+  const cinematic = new Cinematic();
   cinematic.snap(1);
   viewport.onResize(({ resolution }) => cinematic.setResolution(resolution));
 
@@ -1237,7 +1231,6 @@ async function boot(canvas) {
   const hud = new HudLayer({
     canvas,
     config: CONFIG,
-    resolution: viewport.resolution,
     // 재시작 is gone from the in-game HUD. It was the one control that could
     // throw the match away mid-play, and online it could not be honoured at all
     // — a client rebuilding its own world is a desync by definition, and the
@@ -1359,7 +1352,6 @@ async function boot(canvas) {
   const victory = new VictoryLayer({
     canvas,
     config: CONFIG,
-    resolution: viewport.resolution,
     teamColors: PLAYER_COLORS,
     /**
      * The result, from the seat of whoever is watching.
@@ -2707,12 +2699,14 @@ async function boot(canvas) {
      * part of what a frame costs, and leaving it out would report a loop that
      * looks comfortable while the frame rate says otherwise.
      *
-     * `_acc` is the accumulator's leftover, read rather than exported: it is the
-     * one number that says whether the sim is keeping up, and there is no getter
-     * for it. `steps >= MAX_STEPS_PER_FRAME` (20, Match.js) is a saturated
-     * drain, which the main loop's own 0.05 s clamp should make unreachable —
-     * that clamp allows 6 steps — so anything but zero here means something
-     * other than `frame` is driving the accumulator.
+     * `backlogSeconds` is the accumulator's leftover — the one number that says
+     * whether the sim is keeping up. It used to be read straight off the private
+     * `_acc`; `Match` exposes a getter for it now.
+     *
+     * `steps >= MAX_STEPS_PER_FRAME` (20, Match.js) is a saturated drain, which
+     * the main loop's own 0.05 s clamp should make unreachable — that clamp
+     * allows 6 steps — so anything but zero there means something other than
+     * `frame` is driving the accumulator.
      */
     const tickMs = performance.now() - tickT0;
     // Fed BEFORE the overlay and unconditionally, because this one is load
@@ -2725,7 +2719,7 @@ async function boot(canvas) {
       tickMs,
       physicsMs,
       steps,
-      backlogSec: match._acc ?? 0,
+      backlogSec: match.backlogSeconds,
       saturated: steps >= 20,
       aiMs,
       aiThinking,

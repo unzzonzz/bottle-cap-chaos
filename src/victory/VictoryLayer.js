@@ -156,7 +156,6 @@ function window01(x, [from, to]) {
 export class VictoryLayer {
   /**
    * @param {HTMLCanvasElement} canvas  for mapping pointer coordinates
-   * @param {import('three').Vector2} resolution  the low-res target's size
    * @param {string[]} teamColors
    * @param {() => void} onRestart
    * @param {() => void} onExit
@@ -164,7 +163,6 @@ export class VictoryLayer {
   constructor({
     canvas,
     config,
-    resolution,
     teamColors,
     onRestart,
     outcomeFor = null,
@@ -186,8 +184,8 @@ export class VictoryLayer {
     // meshes depth-tested against each other, and there are no meshes now.
     this.camera = frameCamera({ near: -100, far: 100 });
 
-    this.uiMaterials = new HudMaterials({ resolution });
-    this.fxMaterials = new FxMaterials({ resolution });
+    this.uiMaterials = new HudMaterials();
+    this.fxMaterials = new FxMaterials();
 
     /** One quad for everything. Disposed once, at the end. */
     this._quad = new PlaneGeometry(1, 1);
@@ -305,11 +303,10 @@ export class VictoryLayer {
     this.layout();
   }
 
-  setResolution(resolution) {
-    this.uiMaterials.setResolution(resolution);
-    this.fxMaterials.setResolution(resolution);
+  setResolution(_resolution) {
     // Same as the HUD: a frame that changed shape needs the ortho box refitted
-    // and everything anchored to an edge placed again.
+    // and everything anchored to an edge placed again. The materials no longer
+    // want the number — see `HudMaterial` on the snap pair that did.
     if (refitFrameCamera(this.camera)) this.layout();
   }
 

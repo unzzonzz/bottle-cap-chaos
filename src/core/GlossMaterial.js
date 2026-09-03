@@ -3,7 +3,6 @@ import {
   DoubleSide,
   FrontSide,
   MeshPhysicalMaterial,
-  Vector2,
 } from 'three';
 import { PALETTE } from './palette.js';
 import { onQualityChange, QUALITY } from './quality.js';
@@ -21,13 +20,18 @@ import { trackTextureClone } from './textures.js';
  * a broad, wet specular with a glow around it.
  *
  * ── the API is deliberately the old one ─────────────────────────────────────
- * `new GlossMaterials({ resolution })`, `.create({ color, map, gloss, … })`,
- * `.shared`, `.setResolution()`. Some thirty call sites across `ArenaView`,
- * `PitchView`, `CurlingTableView`, `OrbView`, `Bottle`,
- * `IntroLayer`, `VictoryLayer` and the mark editor pass exactly those
- * options, and rewriting all of them at the same time as changing the shading
- * model would have made a rendering bug indistinguishable from a call-site typo.
- * So the surface is kept and the inside is new.
+ * `new GlossMaterials()`, `.create({ color, map, gloss, … })`, `.shared`. Some
+ * thirty call sites across `ArenaView`, `PitchView`, `CurlingTableView`,
+ * `OrbView`, `Bottle`, `IntroLayer`, `VictoryLayer` and the mark editor pass
+ * exactly those options, and rewriting all of them at the same time as changing
+ * the shading model would have made a rendering bug indistinguishable from a
+ * call-site typo. So the surface is kept and the inside is new.
+ *
+ * The two members that did NOT survive are `{ resolution }` and
+ * `setResolution()`. They existed to tell the old materials how big the render
+ * target's texel grid was, so a vertex could be snapped onto it. There is no
+ * such target, the field was written and never read, and the method said so in
+ * its own doc comment — a no-op on the resize path of all three documents.
  *
  * `snap` is accepted and ignored — it was "this surface's share of the vertex
  * wobble", and there is no wobble.
@@ -123,7 +127,7 @@ const PRESETS = {
 };
 
 export class GlossMaterials {
-  constructor({ resolution } = {}) {
+  constructor() {
     /**
      * The global knobs, live for the debug panel.
      *
@@ -160,8 +164,6 @@ export class GlossMaterials {
     this._materials = new Set();
     this._environment = null;
     this._offQuality = onQualityChange(() => this._applyQuality());
-    /** Kept only so `setResolution` has something to write. Nothing reads it. */
-    this._resolution = new Vector2().copy(resolution ?? new Vector2(1, 1));
   }
 
   /**
@@ -362,16 +364,6 @@ export class GlossMaterials {
       const shader = m.userData.shader;
       if (shader?.uniforms?.uRimStrength) shader.uniforms.uRimStrength.value = this.shared.rimStrength;
     }
-  }
-
-  /**
-   * No-op, kept because the viewport's resize listeners still call it.
-   *
-   * The old materials snapped vertices to the render target's texel grid and so
-   * had to be told how big it was. Nothing here depends on resolution.
-   */
-  setResolution(resolution) {
-    this._resolution.copy(resolution);
   }
 
   /**

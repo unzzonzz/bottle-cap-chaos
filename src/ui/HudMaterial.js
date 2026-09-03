@@ -1,53 +1,34 @@
-import { ShaderMaterial, Vector2, Vector3 } from 'three';
+import { ShaderMaterial, Vector3 } from 'three';
 
 /**
- * The HUD material: unlit, textured, snapped, and with its own snap dial.
- *
- * ── it is not `CardMaterial`, and the difference is one uniform ─────────────
- * Everything else about the two is the same — same PS1 vertex stage, same
- * orthographic overlay, same "paint order is the whole of the sorting". What is
- * different is that `uSnapAmount` here belongs to the HUD ALONE.
- *
- * That is not tidiness, it is the requirement. Vertex snapping quantises a
- * vertex onto the framebuffer grid, and on a shape it is the character of the
- * thing; on a row of 8-pixel digits it is the difference between a score you
- * can read and one that shimmers between two values as the camera drifts. The
- * game and the cards want it at 1. The HUD needs to be able to sit below that
- * without dragging the rest of the screen smooth with it — so it owns the
- * uniform, and the panel gets a separate slider for it.
- *
- * Sharing `CardMaterials.shared` would have been one line and would have made
- * that impossible; it would also have meant editing a card system file, which
- * is off limits.
+ * The HUD material: unlit, textured, and nothing else.
  *
  * ── unlit, and that is the point ────────────────────────────────────────────
  * A readout is a printed thing. Shading it would make the score change
  * brightness with where the light happens to be, which for something whose only
- * job is to be legible is a defect. It still snaps to the framebuffer grid,
- * still goes through the same dither and the same five bits a channel — it is
- * unlit, not exempt.
+ * job is to be legible is a defect.
+ *
+ * ── the snap dial is gone, and it had already stopped doing anything ────────
+ * `uSnapAmount` and `uTargetRes` were here, and the reason given was a good
+ * one: vertex snapping quantises a vertex onto the framebuffer grid, which on a
+ * shape is the character of the thing and on a row of 8-pixel digits is the
+ * difference between a score you can read and one that shimmers between two
+ * values. So the HUD owned its own dial and could sit below the rest of the
+ * screen.
+ *
+ * There is no framebuffer grid to snap to any more — the low-resolution target,
+ * the nearest-neighbour upscale and the five-bit quantiser all went in PHASE 1.
+ * The uniform was left initialised to 0 with nothing writing it, so the branch
+ * compiled, ran and did nothing on every vertex of every frame. A dial that
+ * cannot move is not a dial.
  */
 
 const VERT = /* glsl */ `
-  uniform vec2  uTargetRes;
-  uniform float uSnapAmount;
-
   varying vec2 vUv;
 
   void main() {
     vUv = uv;
-    vec4 clip = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-
-    // Same quantisation as the world's, same w guard. Under an orthographic
-    // camera w is 1, but the guard costs nothing and keeps the two stages
-    // recognisably the same code.
-    if (clip.w > 0.0001 && uSnapAmount > 0.0) {
-      vec2 grid = uTargetRes * 0.5;
-      vec3 ndc = clip.xyz / clip.w;
-      ndc.xy = mix(ndc.xy, floor(ndc.xy * grid) / grid, uSnapAmount);
-      clip.xyz = ndc * clip.w;
-    }
-    gl_Position = clip;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
 
@@ -73,25 +54,15 @@ const SOLID_FRAG = /* glsl */ `
 `;
 
 export class HudMaterials {
-  /** @param {import('three').Vector2} resolution  the low-res target's size */
-  constructor({ resolution }) {
+  constructor() {
     /**
-     * Shared by every HUD material, so one slider moves the whole readout.
-     *
-     * `uSnapAmount` starts at 1 — the same as everything else on screen. It is
-     * a dial rather than a decision: the brief asks for it to come DOWN only if
-     * the text turns out to shimmer, and starting it anywhere else would be
-     * exempting the HUD from the look before finding out whether it needs to be.
+     * Kept, empty, because every material below is built with
+     * `uniforms: { ...this.shared, ... }` and because the next uniform the whole
+     * readout has to share will want to arrive without re-plumbing eight call
+     * sites. It held the snap pair; see the header for where those went.
      */
-    this.shared = {
-      uTargetRes: { value: new Vector2().copy(resolution) },
-      uSnapAmount: { value: 0 },
-    };
+    this.shared = {};
     this._materials = new Set();
-  }
-
-  setResolution(resolution) {
-    this.shared.uTargetRes.value.copy(resolution);
   }
 
   /** @param {import('three').Texture} map */

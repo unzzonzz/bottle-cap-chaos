@@ -38,9 +38,16 @@ import {
  * change colour without a second texture existing.
  */
 
+/**
+ * The vertex stage is a projection and a UV window.
+ *
+ * A `uSnapAmount`/`uTargetRes` pair used to quantise the position onto the
+ * framebuffer grid here, matching the world's stage. There is no low-resolution
+ * target to have a grid, and nothing had written the uniform since PHASE 1 took
+ * it away — the branch ran on every vertex and did nothing. See `HudMaterial`,
+ * which carried the same dead pair.
+ */
 const VERT = /* glsl */ `
-  uniform vec2  uTargetRes;
-  uniform float uSnapAmount;
   uniform vec4  uUvRect;     // xy = origin, zw = size, in 0..1 of the sheet
   uniform vec2  uUvScroll;
 
@@ -48,15 +55,7 @@ const VERT = /* glsl */ `
 
   void main() {
     vUv = uUvRect.xy + (uv + uUvScroll) * uUvRect.zw;
-
-    vec4 clip = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    if (clip.w > 0.0001 && uSnapAmount > 0.0) {
-      vec2 grid = uTargetRes * 0.5;
-      vec3 ndc = clip.xyz / clip.w;
-      ndc.xy = mix(ndc.xy, floor(ndc.xy * grid) / grid, uSnapAmount);
-      clip.xyz = ndc * clip.w;
-    }
-    gl_Position = clip;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
 
@@ -107,18 +106,10 @@ const DARKEN_FRAG = /* glsl */ `
 `;
 
 export class FxMaterials {
-  /** @param {import('three').Vector2} resolution  the low-res target's size */
-  constructor({ resolution }) {
-    /** Shared, so one slider moves every effect on screen. */
-    this.shared = {
-      uTargetRes: { value: new Vector2().copy(resolution) },
-      uSnapAmount: { value: 0 },
-    };
+  constructor() {
+    /** Shared by every effect material. Empty since the snap pair left it. */
+    this.shared = {};
     this._materials = new Set();
-  }
-
-  setResolution(resolution) {
-    this.shared.uTargetRes.value.copy(resolution);
   }
 
   /**

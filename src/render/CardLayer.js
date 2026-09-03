@@ -100,7 +100,6 @@ const INPUT_GATE = 0.5;
 export class CardLayer {
   /**
    * @param {HTMLCanvasElement} canvas  for mapping pointer coordinates
-   * @param {import('three').Vector2} resolution  the low-res target's size
    * @param {(cardId: string, player: number) => void} onCardUsed
    */
   /**
@@ -127,7 +126,7 @@ export class CardLayer {
    *   Deriving "sealed" from "every card is blocked" would be a guess — a hand
    *   holding one 강타 that is already armed satisfies it too.
    */
-  constructor({ canvas, config, resolution, onCardUsed, onReorder, usable, reserved, silenced }) {
+  constructor({ canvas, config, onCardUsed, onReorder, usable, reserved, silenced }) {
     this.canvas = canvas;
     this.config = config;
     this.onCardUsed = onCardUsed ?? (() => {});

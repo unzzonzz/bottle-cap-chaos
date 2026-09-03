@@ -70,10 +70,9 @@ export class ModalLayer {
   /**
    * @param {object} opts
    * @param {HTMLCanvasElement} opts.canvas
-   * @param {import('three').Vector2} opts.resolution
    * @param {object} opts.config
    */
-  constructor({ canvas, resolution, config }) {
+  constructor({ canvas, config }) {
     this.canvas = canvas;
     this.config = config;
     this.open = false;
@@ -81,7 +80,7 @@ export class ModalLayer {
     this.scene = new Scene();
     this.camera = frameCamera();
 
-    this.materials = new HudMaterials({ resolution });
+    this.materials = new HudMaterials();
     this._quad = new PlaneGeometry(1, 1);
 
     /**
@@ -666,8 +665,7 @@ export class ModalLayer {
 
   // ── frame ────────────────────────────────────────────────────────────────
 
-  setResolution(resolution) {
-    this.materials.setResolution(resolution);
+  setResolution(_resolution) {
     // The frame can change shape now, so the ortho box has to follow. The
     // dialog itself is centred on the origin and needs no relayout; the DOM
     // input does, because it is positioned in CSS pixels off the canvas rect.
