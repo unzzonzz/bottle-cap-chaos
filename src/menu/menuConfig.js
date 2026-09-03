@@ -76,8 +76,30 @@ export const MENU_CONFIG = {
      *
      * A volume and not a speed, because how fast the head then climbs is the
      * bottle's business — see the continuity note in `_carbonate`.
+     *
+     * ── it is a FIT, and lowering `fillLevel` invalidated the old one ───────
+     * 300 was not chosen for its own sake. `_carbonate` integrates
+     * dy/dt = Q/A(y), so the number that matters is whether the head reaches
+     * `foamCeiling` by the time the cap goes — the beat the whole transition is
+     * built on, and the reason the note there calls the eruption "a bottle that
+     * has run out of room". A quick tap is `shakeSeconds` 0.38, and the ramp is
+     * `shakeCurve` 1.6, so a tap is worth 0.38/2.6 = 0.146 s of full production.
+     *
+     * Solved against the old fill of 150, the head just reached 192 on a tap at
+     * Q = 223; 300 shipped, i.e. the fit with a 1.35x margin on top.
+     *
+     * `fillLevel` then moved 150 -> 130 to get the surface out of the shoulder
+     * (see the long note there), and that broke the fit twice over. The head now
+     * starts in the BODY, where the cross-section is 25.6 against 7.5 at the old
+     * line — 3.4x the area to fill per millimetre — and it has 62 mm to climb
+     * instead of 42. At 300 a tap left the head at 146.6 mm, still inside the
+     * shoulder: a bottle that fizzes a bit rather than one that is about to go.
+     *
+     * Re-solved the same way: 477 puts the head at the ceiling on a tap, and 640
+     * carries the same 1.35x margin the old value had. Holding the button was
+     * never in question — it reached the ceiling at any of these.
      */
-    foamProduction: 300,
+    foamProduction: 640,
     /** Volume per second draining back. Constant, so the head falls when idle. */
     foamDrain: 34,
     /** The extra production at the moment the cap goes, and how long it lasts. */

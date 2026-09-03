@@ -173,8 +173,58 @@ export const BOTTLE_DEFAULTS = {
   labelOvalWidth: 42,
 
   // ── the contents ─────────────────────────────────────────────────────────
-  /** Where the drink stops. Mid-shoulder, as it is on the reference bottle. */
-  fillLevel: 150,
+  /**
+   * Where the drink stops. In the STRAIGHT BODY, and that is the whole point.
+   *
+   * ── 150 was mid-shoulder, and mid-shoulder is the worst place there is ────
+   * It sat at 85% of the way from `shoulderStart` (128) to `neckBase` (154),
+   * which is exactly where the envelope's curvature peaks. Everything that went
+   * wrong with the liquid went wrong because of that one number:
+   *
+   *   - the surface ring is the TOP ROW of the liquid's side wall, and the row
+   *     under it is the last profile row below the fill — at 150 that was
+   *     146.57. Tilt the surface and slosh it and that one quad has to span
+   *     146.57 to ~163 as a single flat chord, while the glass beside it is
+   *     falling from 19.1 mm to 13.9 mm along an S. The chord's ENDS are
+   *     clamped inside the glass; its MIDDLE is not, and there is no clamp that
+   *     can fix that because there is no vertex there to clamp.
+   *   - measured, by walking the chord against `envelopeAt`: at the shipped
+   *     lean of 22 degrees with the slosh at its 7 mm limit, the chord stood
+   *     1.58 mm OUTSIDE the glass. At 10 degrees with no slosh at all it was
+   *     already 0.02 mm out. The earlier note in `Bottle._slosh` estimated
+   *     0.5 mm; it was reading the vertex, not the face between two of them.
+   *   - `solve()` in `Bottle._slosh` had to iterate against a steep envelope,
+   *     and the residual after its twelve passes was 0.05 mm at 140 and rising.
+   *
+   * ── 130 is in the body, where the envelope is flat ───────────────────────
+   * `waistRatio` is 1.0 and every body control point is 30.0, so from the heel
+   * to `shoulderStart` the profile is a straight line to within 0.14 mm — the
+   * residual wobble of a Catmull-Rom that also has to leave a 29.2 mm heel.
+   * The slope there is 0.008 mm/mm against 1.0 mm/mm mid-shoulder.
+   *
+   * With the envelope flat, the chord has no curve to cut across: the same walk
+   * measures 0.75 mm of CLEARANCE at 22 degrees and 7 mm of slosh, and still
+   * 0.43 mm at 35 degrees — well past any lean this bottle reaches. `solve()`
+   * starts within 0.07 mm of its own answer and lands at a 2 micron residual.
+   *
+   * ── why 130 and not further down the body ────────────────────────────────
+   * Because the label is `labelFrom` 60 to `labelTo` 126, on a 160 degree arc
+   * across the FRONT, and it is opaque. Put the fill line inside that band and
+   * the drink's surface — and the slosh that `Bottle._slosh` spends a hundred
+   * lines computing — is hidden behind cardboard from the only angle the menu
+   * camera ever sees. 130 clears the label's top edge by 4 mm.
+   *
+   * It is 2 mm past `shoulderStart`, which sounds wrong and is not: the S
+   * leaves the body VERTICALLY (see the header), so the radius at 130 is
+   * 29.73 — 99.1% of the body — and the slope is still only 0.06 mm/mm. The
+   * curvature that broke 150 has not started yet.
+   *
+   * Not 128 exactly, even though that is the named landmark: there is a profile
+   * row at exactly 128.00, and `buildLiquidGeometry` selects rows with
+   * `row.y < fill`. Landing the fill on a row makes that comparison decide the
+   * mesh, and it would decide it on the last bit of a float.
+   */
+  fillLevel: 130,
   /**
    * 액체 반지름이 유리 외피의 몇 배인가.
    *
