@@ -7,9 +7,11 @@ import {
   PROTOCOL_VERSION,
   S2C,
   TIMING,
+  configHash,
   decode,
   encode,
 } from '../../src/net/protocol.js';
+import { CONFIG } from '../../src/game/config.js';
 import { Hub } from '../Hub.js';
 
 /**
@@ -598,6 +600,47 @@ test('a whole match at full speed does not touch the limit', async () => {
     assert.ok(hub.isAlive(c.conn), 'a full-speed match dropped a connection');
   }
   hub.close();
+});
+
+// ── what the fingerprint actually covers ──────────────────────────────────
+
+test('every simulation block moves the config hash', () => {
+  const base = configHash(CONFIG);
+  const clone = () => JSON.parse(JSON.stringify(CONFIG));
+  /**
+   * One value out of each synced block, and one out of each block that must
+   * stay OUT of it.
+   *
+   * `ball`, `collider` and `respawn` were missing from `SYNCED_CONFIG_PATHS`
+   * while being read by code that steps the world, so two clients could differ
+   * on a cap's MASS and match anyway. The three `matches` rows are the other
+   * half of the statement: folding in a preview budget or a search depth would
+   * refuse matches between people who merely have different instruments open.
+   */
+  const moves = [
+    ['physics.linearDamping', (c) => (c.physics.linearDamping += 0.01)],
+    ['ball.linearDamping', (c) => (c.ball.linearDamping += 0.01)],
+    ['ball.diameterScale', (c) => (c.ball.diameterScale += 0.01)],
+    ['collider.massGrams', (c) => (c.collider.massGrams += 0.1)],
+    ['collider.friction', (c) => (c.collider.friction += 0.01)],
+    ['respawn.travelSeconds', (c) => (c.respawn.travelSeconds += 0.1)],
+  ];
+  const holds = [
+    ['preview.stepBudget', (c) => (c.preview.stepBudget += 5)],
+    ['view.slowmo', (c) => (c.view.slowmo = 0.5)],
+    ['ai', (c) => { if (c.ai) c.ai.__probe = 1; }],
+  ];
+
+  for (const [name, mutate] of moves) {
+    const c = clone();
+    mutate(c);
+    assert.notEqual(configHash(c), base, `${name} does not reach the config hash`);
+  }
+  for (const [name, mutate] of holds) {
+    const c = clone();
+    mutate(c);
+    assert.equal(configHash(c), base, `${name} was folded into the config hash`);
+  }
 });
 
 // ── report ─────────────────────────────────────────────────────────────────

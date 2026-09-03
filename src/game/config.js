@@ -873,14 +873,6 @@ export const CONFIG = {
     turnSwapSeconds: 0.55,
 
     // ── the look ─────────────────────────────────────────────────────────
-    /**
-     * Vertex snap for the CARD scene, separate from the game's.
-     *
-     * Separate so the two can be judged against each other, not so the cards
-     * can be exempted. At 1 a card jitters as it moves, exactly as the pitch
-     * does, and that is the point of drawing them through this pipeline at all.
-     */
-    vertexSnap: 1.0,
     /** How far the grey goes on a hand that cannot act. 1 is fully desaturated. */
     greyStrength: 1.0,
     /**

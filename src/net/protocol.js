@@ -340,6 +340,29 @@ export function makeCode(random = Math.random) {
  * reads. Presentation settings are deliberately absent — camera, audio and
  * colours cannot move a cap, and folding them in would refuse matches between
  * two people who merely have different volume settings.
+ *
+ * ── three blocks were missing, and they are simulation ─────────────────────
+ * `ball`, `collider` and `respawn` are all read by code that steps the world,
+ * and none of them was on this list. A player who moved one of their sliders
+ * matched normally and then ran a different simulation, and the check written
+ * to prevent exactly that could not see it:
+ *
+ *   ball      `Arena` reads `linearDamping`/`angularDamping` when it builds and
+ *             re-tunes the ball, `FootballPitch` derives its RADIUS from
+ *             `diameterScale`, and `ai/rollout.js` mirrors the damping so a
+ *             look-ahead matches the world it is looking ahead in.
+ *   collider  `Arena` hands the whole block to `describeCapColliders`, which is
+ *             where a cap's SHAPE and MASS come from. There is nothing more
+ *             load-bearing in the file than this one.
+ *   respawn   `BallRespawn` turns `travelSeconds` into a step count, and
+ *             `layout/respawn.js` places the ball from the rest.
+ *
+ * ── two that stay off, and why ─────────────────────────────────────────────
+ * `preview` steps a world of its OWN, built from a snapshot inside
+ * `TrajectoryPreview` and thrown away — `stepBudget` and `sampleEvery` buy
+ * frames and points on a line, not outcomes. `ai` never runs for a remote seat:
+ * online, `OnlineController` holds it, so one player's search depth cannot
+ * reach the other's world.
  */
 export const SYNCED_CONFIG_PATHS = [
   'physics',
@@ -352,6 +375,9 @@ export const SYNCED_CONFIG_PATHS = [
   'knockout',
   'arena',
   'cap',
+  'ball',
+  'collider',
+  'respawn',
 ];
 
 /**
