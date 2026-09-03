@@ -48,8 +48,15 @@ import { CATEGORY } from './categories.js';
  *   voices     how many of this id may be live at once.
  *   jitter     multiplies the global pitch wander. 0 pins the pitch exactly.
  *   velGain    how much of the level `intensity` controls. 0 = a fixed sound.
- *   velPitch   the same for pitch. "강한 충돌은 크고 높게".
+ *   velPitch   the same for pitch. Zero on every collision — see `velBright`.
  *   velLength  the same for the envelope. "약한 충돌은 짧고".
+ *   velBright  the same for BRIGHTNESS: filter corners and the partial's level.
+ *              This is what a hard hit actually changes, and it is what the
+ *              collisions use. See the header of `Synth`.
+ *   scale      quantise the pitch to a rung of the pentatonic, taken from
+ *              `opts.degree`. See `scale.js`.
+ *   send       how much of this sound goes to the shared room, overriding its
+ *              category's default. See `Mixer.sendFor`.
  */
 
 /**
@@ -95,10 +102,26 @@ const STEP = { THIRD: 1.19, FOURTH: 1.335, FIFTH: 1.5, OCTAVE: 2, DOWN_FIFTH: 0.
  * result is a plain object; nothing survives of the function.
  */
 function tone(o = {}) {
+  /**
+   * A layer names its pitch in ONE unit, never both.
+   *
+   * `ratio` is against `tone.freq` — the root of the sound — and it is how a
+   * partial should be written, because a partial IS a ratio: move the root and
+   * it has to follow, or the timbre changes with the note. `freq` is an absolute
+   * hertz value and is right for a root, for a layer that is its own voice, and
+   * for everything in this file that predates the idea.
+   *
+   * Emitting only the one that was asked for is what keeps the panel honest —
+   * `audioDebug` builds its rows from the keys that are actually present, so a
+   * ratio layer gets ratio sliders and no phantom frequency to drag.
+   */
+  const pitched =
+    o.ratio != null
+      ? { ratio: o.ratio, ratioEnd: o.ratioEnd ?? o.ratio }
+      : { freq: o.freq ?? F.A4, freqEnd: o.freqEnd ?? o.freq ?? F.A4 };
   return {
     wave: o.wave ?? 'square',
-    freq: o.freq ?? F.A4,
-    freqEnd: o.freqEnd ?? o.freq ?? F.A4,
+    ...pitched,
     gain: o.gain ?? 0.4,
     attack: o.attack ?? 0.002,
     hold: o.hold ?? 0,
@@ -178,22 +201,216 @@ export const SOUNDS = {
   // mappings are wide open on them: a graze and a full-charge strike have to be
   // audibly different events, not the same event at two volumes.
 
-  /** Cap on cap. Metal on metal: a filtered noise crack with a short ring. */
+  /**
+   * Cap on cap. The most-heard sound in the game, and the recipe the other five
+   * collisions are derived from.
+   *
+   * ── it was a noise crack, and a noise crack cannot be hummed ────────────
+   * The version this replaces was a 4.2 kHz band-passed noise burst with a
+   * square thud under it. Measured, rendered through this exact graph: spectral
+   * flatness 0.30 over 200 Hz – 16 kHz on the transient, and a spectrum with no
+   * partial in it — the loudest peak at 361 Hz and then a smear at 1107, 1423
+   * and 1827 Hz, the first two of them 0.6 dB apart. That is a burst. It fires
+   * hundreds of times a match.
+   *
+   * The model is a struck bar instead — the Wii Sports contact this was rebuilt
+   * against — and it has four properties, each of which is a number here rather
+   * than a mood:
+   *
+   *   PITCH        a sine root you can hum, not filtered noise.
+   *   4:1 PARTIAL  a tuned marimba bar is undercut until its first partial is
+   *                exactly two octaves up, and two octaves is consonant, so the
+   *                bar reads as sweet rather than as clang.
+   *   FALLING      real objects lose tension as they ring, so the pitch sags.
+   *                Without it the sound is electronic.
+   *   QUIET BODY   noise well under the tone. It supplies mass; past a point it
+   *                stops being a hit and goes back to being a burst.
+   *
+   * ── the tuning procedure, in the order it was run ───────────────────────
+   * Every figure is from an offline render of this graph, measured rather than
+   * judged. Where a number here disagrees with the appendix that specified it,
+   * the disagreement is written down.
+   *
+   *   ROOT ALONE   partial and noise at zero. Spectral flatness 0.005, one peak
+   *                at 648 Hz and nothing else within 31 dB. Hummable by
+   *                construction — a sine has nothing to be inharmonic with.
+   *
+   *   THE RATIO    4.0 against its neighbours and against the 3.6 this sound
+   *                used to carry. Two columns, because they say different
+   *                things: how far the partial sits from the nearest HARMONIC
+   *                of the root, and what PITCH CLASS it introduces.
+   *
+   *                  3.6  2376 Hz  -182 c   +182 c   the old value
+   *                  3.9  2574 Hz   -44 c    +44 c
+   *                  4.0  2640 Hz     0 c      0 c   two octaves
+   *                  4.1  2706 Hz   +43 c    +43 c
+   *                  3.0  1980 Hz     0 c   +498 c   a twelfth
+   *                  5.0  3300 Hz     0 c   +386 c   a major third
+   *
+   *                3.9 and 4.1 are the pair that prove the interval is doing
+   *                the work: a quarter-tone either way and the partial beats
+   *                against the octave instead of fusing with it. 3.6 is that
+   *                same failure four times over, and the whole distance from
+   *                sweet to metal is in the one number.
+   *
+   *                3.0 and 5.0 are the more interesting rejections, because
+   *                both are exactly harmonic and neither is wrong on the first
+   *                column. They fail on the second: a twelfth and a major third
+   *                are NEW PITCH CLASSES, so the partial is a second note. On a
+   *                sound that is also being transposed along a scale, that
+   *                second note has to agree with the rung — and sometimes it
+   *                would not. 4.0 is the only ratio that adds no note at all.
+   *
+   *   THE NOISE    swept from zero. The appendix asks for `gain` 0.10-0.18 AND
+   *                for a level 12-18 dB under the tone, and through a Q=7
+   *                band-pass those are not the same instruction: the filter
+   *                throws away most of the broadband energy, so 0.13 arrives at
+   *                -32.5 dB. Measured (layers soloed, RMS over the first 20 ms,
+   *                dB under the root) against the transient flatness of the mix:
+   *
+   *                  0.13   -32.5 dB   0.027
+   *                  0.40   -25.3 dB   0.052
+   *                  0.60   -19.2 dB   0.061
+   *                  0.80   -16.5 dB   0.074   <-
+   *                  1.00   -14.6 dB   0.090
+   *
+   *                The LEVEL is the perceptual statement and the gain was an
+   *                estimate of it, so 0.8 — which lands mid-window. Two anchors
+   *                say that is still a hit and not a burst: `ui_click` measures
+   *                0.093 on the same instrument, and this file records that
+   *                click as the version which stopped sounding like a snare;
+   *                the old `cap_cap` measures 0.30.
+   *
+   *   THE FALL     instantaneous pitch at onset against 60 ms in: 653 -> 640 Hz
+   *                with the glide, 660 -> 660 without it. The written fall is
+   *                660 -> 624, which is 0.97 of a semitone, and it arrives over
+   *                the whole 170 ms decay rather than over the first 30 ms the
+   *                appendix describes — `_buildTone` ramps a glide across the
+   *                envelope and has no separate glide time. Left alone: a
+   *                parameter added for one layer of one sound is how a palette
+   *                stops being one, and the sag is audible as written.
+   *
+   *   THE SEND     0 / 0.16 / 0.30 / 0.60, as the energy after the 170 ms body
+   *                as a share of the whole, as what is still ringing 250 ms
+   *                after the hit relative to its own peak, and as the time to
+   *                -60 dB:
+   *
+   *                  0.00   -81.6 dB   (below the floor)   119 ms
+   *                  0.16   -53.1 dB   -71.9 dB            128 ms
+   *                  0.30   -47.6 dB   -67.9 dB            136 ms
+   *                  0.60   -41.6 dB   -61.5 dB            215 ms
+   *
+   *                0.16. At 0.30 the tail carries nearly three times the energy
+   *                and every hit in a chain lands inside the last one's wash —
+   *                and a chain is the case this sound exists for. Note that the
+   *                category default it overrides is 0.30, so collisions are now
+   *                half as wet as they shipped: the old burst had nothing to
+   *                expose, and a clean tone does.
+   *
+   *   VELBRIGHT    spectral centroid of the first 20 ms, at intensity 0.15
+   *                against 1.0:
+   *
+   *                  velBright 0     2141 -> 2214 Hz   x1.03
+   *                  velBright 0.7   1902 -> 2450 Hz   x1.29
+   *
+   *                At zero a soft hit is the same sound played quietly, which is
+   *                exactly what the appendix predicts. The partial moves with it
+   *                too: -7.2/-7.0 dB under the root at velBright 0, and
+   *                -8.7/-5.9 dB at 0.7.
+   *
+   *                Measure this on the TRANSIENT. Over a 341 ms window the same
+   *                comparison reads x1.10 against x1.21, because the root rings
+   *                for 170 ms and drowns the thing being measured.
+   *
+   *   THE CHAIN    ten hits, `ContactAudio` handing out rungs and holding at its
+   *                ceiling of 7. Measured fundamentals: 653, 733, 823, 978,
+   *                1098, 1306, 1466, 1646 Hz, then 1646 twice more — 0, 2, 4, 7,
+   *                9, 12, 14, 16 semitones. The pentatonic exactly, and the top
+   *                is a major third above the octave rather than somewhere
+   *                shrill.
+   */
   cap_cap: {
     category: CATEGORY.IMPACT,
     priority: 3,
-    gain: 0.5,
+    gain: 0.62,
     cooldown: 0.035,
     voices: 4,
+
+    /**
+     * The root. A SINE, and that is not a small choice.
+     *
+     * A square or a saw brings a full 1:2:3:4 harmonic series with it, which is
+     * an organ — the partials are already there and in the wrong proportions,
+     * and no amount of filtering turns that into a struck bar. A struck
+     * spectrum is built the other way round: a pure root, and then exactly the
+     * partials you want, at exactly the ratios you want.
+     *
+     * 660 Hz is E5. High enough to cut through a full board and low enough that
+     * seven rungs of the scale above it still land under 1.7 kHz.
+     */
+    tone: tone({
+      wave: 'sine',
+      freq: 660,
+      freqEnd: 624,
+      gain: 0.5,
+      attack: 0.002,
+      decay: 0.17,
+      curve: 'exp',
+    }),
+
+    /**
+     * The first partial, at exactly 4:1.
+     *
+     * Two octaves. A tuned marimba bar is undercut until its first partial
+     * lands there, and the reason is audible: 4:1 is the same pitch class as
+     * the root, so the ear fuses the two into one bright note instead of
+     * hearing an interval. 3.9 or 4.1 beat against harmonic 4; 3.6 — what this
+     * sound used to use, and what the appendix flags — sits 182 cents off it,
+     * and that miss is precisely what "pressed steel" was.
+     *
+     * It dies in a third of the root's time, which is the other half of what
+     * makes a bar a bar: the partials go first and the fundamental is left
+     * ringing. A partial that outlives the root is a bell.
+     */
+    tone2: tone({
+      wave: 'sine',
+      ratio: 4.0,
+      gain: 0.34,
+      attack: 0.0015,
+      decay: 0.055,
+      curve: 'exp',
+    }),
+
+    /**
+     * The body. A high-Q band-pass standing in for the third partial.
+     *
+     * Around 10:1, which is where a shallow dish puts its next strong mode. A
+     * resonant filter doing the job of a partial is still inside the three-part
+     * palette — it is a filter on the noise layer, not a fourth kind of node —
+     * and it buys a mode that would otherwise cost an oscillator.
+     *
+     * 0.8, not the 0.13 the appendix asks for, and the whole difference is that
+     * band-pass: at Q=7 it discards about 16 dB of broadband energy, so 0.13
+     * arrives 32 dB under the root instead of the 12-18 dB the same appendix
+     * asks for. See the noise table above.
+     */
+    noise: noise({
+      gain: 0.8,
+      attack: 0.001,
+      decay: 0.028,
+      filter: band(6600, 3200, 7, 0.03),
+    }),
+
+    /** The chain walks up this. `ContactAudio._chain` hands out the rung. */
+    scale: true,
     velGain: 0.85,
-    velPitch: 0.55,
-    velLength: 0.6,
-    noise: noise({ gain: 0.5, decay: 0.1, filter: band(4200, 900, 6, 0.07) }),
-    tone: tone({ wave: 'square', freq: 320, freqEnd: 180, gain: 0.3, decay: 0.07, filter: low(2600) }),
-    // The inharmonic partial. A cap is a shallow dish, not a string, so its
-    // second mode is nowhere near an octave — 3.6x is what makes it read as
-    // pressed steel rather than as a tuned bell.
-    tone2: tone({ wave: 'triangle', freq: 1180, freqEnd: 940, gain: 0.16, decay: 0.05 }),
+    /** Zero, and deliberately. The scale owns the pitch; see `Synth`'s header. */
+    velPitch: 0,
+    velBright: 0.7,
+    velLength: 0.35,
+    /** Only a wobble inside the rung — the rung is what makes two hits agree. */
+    jitter: 0.35,
+    send: 0.16,
   },
 
   /** Cap on wall or fence. Deliberately duller and lower than cap on cap. */

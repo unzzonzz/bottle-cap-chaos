@@ -156,6 +156,9 @@ export class Mixer {
     this.noiseBuffer = null;
 
     this._shaper = null;
+    /** The one convolver. Built with the context; see `_build`. */
+    this._space = null;
+    this._spaceIn = null;
     this._hold = null;
     this._limiter = null;
     this._sum = null;
@@ -310,8 +313,9 @@ export class Mixer {
      * 양자화 잡음이 아니라 **공간**이다 — 짧고 밝은 잔향. 유리잔 안에서 나는 소리는
      * 어디서 나든 같은 방에서 난다.
      *
-     * 보내기는 카테고리마다 다르다. UI 클릭에 잔향을 먹이면 화면이 헐거워지고,
-     * 충돌음에 안 먹이면 판이 진공에 있는 것으로 들린다. 표는 `config.audio.space`.
+     * 보내기는 **소리마다** 다르다. UI 클릭에 잔향을 먹이면 화면이 헐거워지고,
+     * 충돌음에 안 먹이면 판이 진공에 있는 것으로 들린다. 카테고리는 그 표의
+     * 기본값일 뿐이고, 실제 결정은 소리 단위에서 난다 — `sendFor` 참조.
      */
     this._space = ctx.createConvolver();
     this._space.normalize = true;
@@ -320,20 +324,11 @@ export class Mixer {
     this._spaceIn.gain.value = 1;
     this._spaceIn.connect(this._space);
 
-    /** @type {Record<string, GainNode>} 카테고리별 보내기 양. */
-    this.sends = {};
-
     for (const name of CATEGORIES) {
       const g = ctx.createGain();
       g.gain.value = 1;
       g.connect(this._sum);
       this.buses[name] = g;
-
-      const send = ctx.createGain();
-      send.gain.value = 0;
-      g.connect(send);
-      send.connect(this._spaceIn);
-      this.sends[name] = send;
     }
 
     // The chain, with the worklet's slot left empty until it loads. Reconnected
@@ -488,17 +483,8 @@ export class Mixer {
       if (bus) bus.gain.value = Math.max(0, c.category?.[name] ?? 1);
     }
 
-    /**
-     * 보내기. 카테고리 표에 없는 이름은 0 — 소리 없이 마른 채로 남는다.
-     *
-     * `mix` 는 전체 배수라, 패널에서 하나만 움직여 공간을 통째로 끄고 켤 수 있다.
-     */
-    const space = c.space ?? {};
-    const mix = Math.max(0, space.mix ?? 0);
-    for (const name of CATEGORIES) {
-      const send = this.sends[name];
-      if (send) send.gain.value = mix * Math.max(0, space.category?.[name] ?? 0);
-    }
+    // 보내기는 여기서 밀지 않는다. 보이스마다 붙고, `sendFor` 가 트리거 시점에
+    // 읽으므로 패널에서 슬라이더를 움직이면 다음 소리부터 반영된다.
 
     const bits = Math.max(1, Math.min(16, Math.round(c.crushBits ?? 16)));
     if (bits !== this._curveBits) {
@@ -551,6 +537,40 @@ export class Mixer {
     g.cancelScheduledValues(now);
     g.setValueAtTime(g.value, now);
     g.linearRampToValueAtTime(target, now + 0.02);
+  }
+
+  /**
+   * How much of this sound goes to the room.
+   *
+   * ── 소리 단위인 이유 ────────────────────────────────────────────────────
+   * 카테고리 하나로는 표현할 수 없는 결정들이 실재한다. `card_hover` 와
+   * `card_fx_smash` 는 같은 버스에 있지만 전자는 커서가 메뉴를 가로지르는 동안
+   * 마흔 번 울리고 후자는 한 판에 몇 번 울린다 — 같은 잔향을 주면 호버가 방을
+   * 계속 두드려서 화면이 젖은 채로 남는다. 그래서 카테고리 표는 **기본값**이고
+   * 소리의 `send` 가 그것을 덮는다.
+   *
+   * ── 루프는 무조건 0 이고, 그것은 표가 아니라 구조다 ────────────────────
+   * 지속음은 방에 끊임없이 에너지를 넣는다. 꼬리가 자기 위에 쌓여서 몇 초 뒤에는
+   * 베드가 아니라 웅웅거림이 된다. 표에 0 을 적어 두는 것으로는 부족한 이유는
+   * 다음에 추가될 루프가 그것을 적지 않을 것이기 때문이다.
+   *
+   * @param {object} def   a definition from `soundBank`
+   * @param {boolean} [loop]
+   * @returns {number} linear send gain, 0 for none
+   */
+  sendFor(def, loop = false) {
+    if (loop || !def) return 0;
+    const space = this.config.space ?? {};
+    const mix = Math.max(0, space.mix ?? 0);
+    if (mix <= 0) return 0;
+    const own = def.send;
+    const amount = own != null ? own : (space.category?.[def.category] ?? 0);
+    return mix * Math.max(0, amount);
+  }
+
+  /** The room's input. Voices tap themselves into it. @type {AudioNode|null} */
+  get spaceIn() {
+    return this._spaceIn ?? null;
   }
 
   /** @param {string} category @returns {AudioNode|null} */
@@ -619,6 +639,8 @@ export class Mixer {
     this.ctx = null;
     this.master = null;
     this.buses = {};
+    this._space = null;
+    this._spaceIn = null;
     this._hold = null;
     this.holdReady = false;
     this._playing = false;

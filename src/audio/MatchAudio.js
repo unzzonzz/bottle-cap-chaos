@@ -158,6 +158,9 @@ export class MatchAudio {
     this._fallen = new Set();
 
     this.contacts.reset();
+    // A rebuild is a turn boundary too — and the strongest one there is. See
+    // the note on `ContactAudio._chain` for why this is a second call.
+    this.contacts.resetChain();
     this.audio.stopLoops(0.04);
   }
 
@@ -320,6 +323,14 @@ export class MatchAudio {
     if (turn === this._lastTurn) return;
     this._lastTurn = turn;
     if (!turn?.shot) return;
+    /**
+     * The collision chain starts over here, and this is the only place that can
+     * say so — `ContactAudio.reset()` fires on kinematic transitions in the
+     * middle of a turn and would restart the scale mid-rally. A fresh
+     * `lastTurn` object is the one honest "a shot was fired" edge in the whole
+     * match state, which is why the shot sound already keys off it.
+     */
+    this.contacts.resetChain();
     const shot = turn.shot;
     // The 0..1 pull power, not `lastResolved.power` — that one is an impulse
     // magnitude in g·cm/s and would saturate the intensity mapping instantly.
@@ -694,7 +705,13 @@ export class MatchAudio {
     const live = PHYSICAL.has(match.state);
     if (live) {
       for (const hit of this._impacts) {
-        this.audio.play(hit.id, { intensity: hit.intensity, gain: hit.gain ?? 1 });
+        this.audio.play(hit.id, {
+          intensity: hit.intensity,
+          gain: hit.gain ?? 1,
+          // Which rung of the scale this collision lands on. Ignored by any
+          // sound that does not carry `scale: true`.
+          degree: hit.degree ?? 0,
+        });
         /**
          * 철벽's "it held", ON TOP OF the crack rather than instead of it.
          *

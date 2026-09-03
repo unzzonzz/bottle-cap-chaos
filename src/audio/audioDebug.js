@@ -226,13 +226,32 @@ export function addAudioFolder(gui, { audio, config, settings }) {
               // Full intensity, so a collision auditions as the hit it is
               // designed around rather than as whatever the last one happened
               // to be. Loops audition as a one-shot of their held shape.
-              audio?.play(id, { intensity: 1 });
+              //
+              // And it WALKS the scale on a sound that has one: pressing the
+              // same button eight times is the only way to hear the thing the
+              // quantiser actually does, and a fixed degree would make every
+              // press identical — which is exactly the failure it was added to
+              // fix. See `scale.js`.
+              audio?.play(id, { intensity: 1, degree: nextDegree(id) });
             },
           },
           'go',
         )
         .name(`▶ ${id}`);
     }
+  }
+
+  /**
+   * A walking degree per sound id, for the audition buttons.
+   *
+   * Panel-local and deliberately not `ContactAudio`'s counter: that one belongs
+   * to a shot, and pressing a button on the debug panel is not a shot.
+   */
+  const degrees = new Map();
+  function nextDegree(id) {
+    const d = degrees.get(id) ?? 0;
+    degrees.set(id, (d + 1) % 8);
+    return d;
   }
 
   // ── the live parameter editor ────────────────────────────────────────────
@@ -246,7 +265,7 @@ export function addAudioFolder(gui, { audio, config, settings }) {
     .name('사운드')
     .onChange(() => buildRows());
   editor
-    .add({ go: () => audio?.play(pick.id, { intensity: 1 }) }, 'go')
+    .add({ go: () => audio?.play(pick.id, { intensity: 1, degree: nextDegree(pick.id) }) }, 'go')
     .name('▶ 선택한 사운드 재생');
   editor
     .add(
@@ -274,8 +293,15 @@ export function addAudioFolder(gui, { audio, config, settings }) {
     addOptional(meta, def, 'voices', 1, 8, 1, '동시 재생 상한');
     addOptional(meta, def, 'jitter', 0, 3, 0.05, '피치 변조 배율');
     addOptional(meta, def, 'velGain', 0, 1, 0.02, '세기 → 볼륨');
-    addOptional(meta, def, 'velPitch', 0, 1, 0.02, '세기 → 피치');
+    addOptional(meta, def, 'velPitch', 0, 1, 0.02, '세기 → 피치 (충돌음은 0)');
     addOptional(meta, def, 'velLength', 0, 1, 0.02, '세기 → 길이');
+    addOptional(meta, def, 'velBright', 0, 1, 0.02, '세기 → 밝기');
+    /**
+     * 보내기는 0 일 수 있고 `addOptional` 은 `undefined` 만 거른다 — 0 을 적어 둔
+     * 소리(호버, 루프)에도 행이 서야 한다. `scale` 은 불리언이라 범위가 없다.
+     */
+    addOptional(meta, def, 'send', 0, 1, 0.01, '공간 보내기 (미지정 = 카테고리)');
+    if (def.scale !== undefined) meta.add(def, 'scale').name('음계 양자화');
     meta.open();
     rows.push(meta);
 
@@ -287,8 +313,17 @@ export function addAudioFolder(gui, { audio, config, settings }) {
       if (!layer) continue;
       const f = editor.addFolder(label);
       f.add(layer, 'wave', WAVES).name('파형');
-      f.add(layer, 'freq', 20, 6000, 1).name('주파수 (Hz)');
-      f.add(layer, 'freqEnd', 20, 6000, 1).name('도착 주파수 (Hz)');
+      /**
+       * 한 레이어는 헤르츠나 배음비 중 하나로만 음정을 말한다 — `soundBank` 의
+       * `tone()` 이 요청받은 쪽만 내보낸다. 그래서 행도 있는 쪽에만 선다.
+       *
+       * 무조건 `add` 하면 없는 키에 슬라이더가 걸려서 폴더 전체가 죽는다. 이
+       * 패널이 정확히 그렇게 한 번 죽었다.
+       */
+      addOptional(f, layer, 'freq', 20, 6000, 1, '주파수 (Hz)');
+      addOptional(f, layer, 'freqEnd', 20, 6000, 1, '도착 주파수 (Hz)');
+      addOptional(f, layer, 'ratio', 0.25, 12, 0.05, '기음 대비 배음비');
+      addOptional(f, layer, 'ratioEnd', 0.25, 12, 0.05, '도착 배음비');
       f.add(layer, 'gain', 0, 1, 0.01).name('레이어 볼륨');
       f.add(layer, 'attack', 0.0005, 0.4, 0.0005).name('어택 (s)');
       f.add(layer, 'hold', 0, 0.4, 0.005).name('홀드 (s)');

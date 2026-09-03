@@ -1,5 +1,6 @@
 import { SoundPlayer, Voice } from './SoundPlayer.js';
 import { audioFloat, jitter } from './audioRng.js';
+import { scaleRate } from './scale.js';
 
 /**
  * The procedural player: a sound definition in, a running voice graph out.
@@ -12,11 +13,27 @@ import { audioFloat, jitter } from './audioRng.js';
  * waveform, frequency, glide, envelope, filter sweep, and a step count that
  * turns one oscillator into an arpeggio — never from a new kind of node.
  *
- * There is deliberately no reverb, no delay, no chorus and no wavetable. The
- * brief rules the first three out for being the wrong era; the fourth is ruled
- * out by the same argument that keeps the render pipeline to five bits a
- * channel — a sound that could not have come out of a 1994 console does not
- * belong in a game that looks like one.
+ * ── the palette is a discipline, and the discipline outlived its reason ────
+ * This header used to rule out reverb, delay, chorus and wavetables on the
+ * ground that none of them could have come out of a 1994 console — the audio
+ * half of a render pipeline quantised to five bits a channel.
+ *
+ * That pipeline is gone. It was removed in PHASE 1, the screen is glass and
+ * water and light, and the target was never 1994 in the first place: it is the
+ * Wii, whose sounds are sampled and sit in a short bright room.
+ *
+ * The BAN was wrong. The DISCIPLINE it was protecting was not, and it is worth
+ * restating in its own words, because it is the reason this file is small:
+ *
+ *     sixty sounds built out of the same three parts cannot drift into sounding
+ *     like sixty different games.
+ *
+ * So the room came back — as ONE convolver shared by everything, living in
+ * `Mixer`, reached through a per-voice send scalar. That is a mix decision, not
+ * a new voice part. What stays banned is a per-sound effect: the day one
+ * definition carries its own delay and another its own chorus, the palette is
+ * over and no amount of tuning brings it back. If a sound seems to need one,
+ * the problem is the mix.
  *
  * ── one oscillator, N steps ────────────────────────────────────────────────
  * `steps` retriggers the SAME oscillator at a multiplying frequency rather than
@@ -31,6 +48,21 @@ import { audioFloat, jitter } from './audioRng.js';
  * position. Indistinguishable from fresh noise, and it means a chain of eight
  * collisions allocates eight cheap `BufferSource`s rather than filling eight
  * two-second buffers inside a single frame.
+ *
+ * ── pitch is quantised, and that is a design decision made here ──────────
+ * A definition may set `scale: true`, and then `opts.degree` moves it by whole
+ * rungs of a major pentatonic rather than by a continuous multiplier. The
+ * reasoning is in `scale.js`; what matters at this level is that the two paths
+ * are exclusive by construction — a sound without `scale` takes exactly the
+ * jitter path it always took, so nothing that predates the scale moved.
+ *
+ * ── loudness moves BRIGHTNESS, not pitch ────────────────────────────
+ * Hitting one object harder does not raise its pitch — it makes it louder and
+ * brighter, because more energy goes into the higher modes and they decay from
+ * a higher starting point. `velPitch` says otherwise and is the sound of a
+ * SMALLER object, which is why every collision in the bank now sets it to zero
+ * and carries `velBright` instead. The key survives for the sounds that want a
+ * pitch bend on purpose.
  *
  * ── nothing here knows what a cap is ───────────────────────────────────────
  * This file takes definitions and modifiers. It has never heard of a collision,
@@ -232,6 +264,7 @@ export class Synth extends SoundPlayer {
     const velGain = clamp01(def.velGain ?? 0);
     const velPitch = clamp01(def.velPitch ?? 0);
     const velLength = clamp01(def.velLength ?? 0);
+    const velBright = clamp01(def.velBright ?? 0);
 
     // Perceptual rather than linear: loudness is roughly the 0.6 power of
     // amplitude, so a linear map makes every collision below about half
@@ -240,9 +273,30 @@ export class Synth extends SoundPlayer {
     const velGainMul = 1 - velGain + velGain * shaped;
     const velPitchMul = 1 + velPitch * (shaped - 0.5);
     const lengthMul = 1 - velLength + velLength * (0.45 + 0.55 * shaped);
+    /**
+     * ── how hard it was hit, as BRIGHTNESS ─────────────────────────────────
+     * Multiplied into every filter corner and into `tone2`'s level, so a soft
+     * hit loses its partial and its top end while keeping its root. That is
+     * what actually happens to a struck object — less energy reaches the higher
+     * modes — and it is far easier to hear than the level difference alone: a
+     * weak collision becomes a DARKER sound rather than a quieter copy of the
+     * same one. 0.55..1.20 at the extremes, so a full-strength hit is also
+     * slightly brighter than the number written in the table.
+     */
+    const brightMul = 1 - velBright + velBright * (0.55 + 0.65 * shaped);
+
+    /**
+     * The scale rung, when the definition asks for one. See `scale.js`.
+     *
+     * Exclusive with nothing: a scaled sound still takes its jitter, because the
+     * jitter is now doing a different job — a few tens of cents of wander INSIDE
+     * a rung, so two hits on the same degree are not bit-identical. The rung is
+     * what makes them agree; the jitter is what keeps them from being a copy.
+     */
+    const degreeMul = def.scale ? scaleRate(opts.degree ?? 0) : 1;
 
     const spread = Math.max(0, (this.config.pitchJitter ?? 0) * (def.jitter ?? 1));
-    const rate = Math.max(0.05, (opts.rate ?? 1) * velPitchMul * jitter(spread));
+    const rate = Math.max(0.05, (opts.rate ?? 1) * velPitchMul * degreeMul * jitter(spread));
 
     const gain =
       Math.max(0, def.gain ?? 1) * Math.max(0, opts.gain ?? 1) * velGainMul;
@@ -261,14 +315,54 @@ export class Synth extends SoundPlayer {
     voice.out = out;
     voice.nodes.push(out);
 
+    /**
+     * ── the send, and why it is a tap off `out` rather than off the bus ────
+     * One gain node, in parallel with the dry path, feeding the ONE convolver
+     * the mixer owns. The alternative — a send per category bus, which is what
+     * this was — cannot express a per-sound amount, and per-sound is where the
+     * decisions actually are: a collision wants a room, the hover that fires
+     * forty times while a cursor crosses a menu wants almost none, and a held
+     * loop wants exactly zero or its own tail piles up on itself until the bed
+     * is a wash. See `Mixer.sendFor` for the table.
+     *
+     * It is still ONE convolver. This is a routing decision, not a new part of
+     * the palette — the distinction the file header draws.
+     */
+    const sendAmount = this.mixer.sendFor ? this.mixer.sendFor(def, loop) : 0;
+    if (sendAmount > 0 && this.mixer.spaceIn) {
+      const send = ctx.createGain();
+      send.gain.value = sendAmount;
+      out.connect(send);
+      send.connect(this.mixer.spaceIn);
+      voice.nodes.push(send);
+    }
+
     let end = t0;
+    // `tone` first, and it has to be: `tone2` may express itself as a RATIO of
+    // the root, and the root is `tone.freq`.
+    const rootHz = def.tone?.freq ?? 220;
     for (const key of ['tone', 'tone2']) {
       const layer = def[key];
       if (!layer) continue;
-      end = Math.max(end, this._buildTone(ctx, voice, layer, { t0, rate, loop, lengthMul }));
+      end = Math.max(
+        end,
+        this._buildTone(ctx, voice, layer, {
+          t0,
+          rate,
+          loop,
+          lengthMul,
+          brightMul,
+          rootHz,
+          // The partial is what a soft hit loses. The root is not.
+          gainMul: key === 'tone2' ? brightMul : 1,
+        }),
+      );
     }
     if (def.noise) {
-      end = Math.max(end, this._buildNoise(ctx, voice, def.noise, { t0, rate, loop, lengthMul }));
+      end = Math.max(
+        end,
+        this._buildNoise(ctx, voice, def.noise, { t0, rate, loop, lengthMul, brightMul }),
+      );
     }
 
     if (!voice.sources.length) {
@@ -293,8 +387,8 @@ export class Synth extends SoundPlayer {
    *
    * @returns {number} the audio time this layer finishes at
    */
-  _buildTone(ctx, voice, layer, { t0, rate, loop, lengthMul }) {
-    const g = Math.max(0, layer.gain ?? 1);
+  _buildTone(ctx, voice, layer, { t0, rate, loop, lengthMul, brightMul = 1, gainMul = 1, rootHz = 220 }) {
+    const g = Math.max(0, layer.gain ?? 1) * gainMul;
     if (g < MIN_GAIN) return t0;
 
     const osc = ctx.createOscillator();
@@ -305,7 +399,7 @@ export class Synth extends SoundPlayer {
 
     /** @type {BiquadFilterNode|null} */
     let filter = null;
-    if (layer.filter) filter = this._buildFilter(ctx, layer.filter, { t0, rate, loop });
+    if (layer.filter) filter = this._buildFilter(ctx, layer.filter, { t0, rate, loop, brightMul });
 
     if (filter) {
       osc.connect(filter);
@@ -322,8 +416,29 @@ export class Synth extends SoundPlayer {
     const stepRatio = layer.stepRatio ?? 1;
     const stepGain = layer.stepGain ?? 1;
 
-    const baseFreq = clampFreq((layer.freq ?? 220) * rate, this.nyquist);
-    const endFreq = clampFreq((layer.freqEnd ?? layer.freq ?? 220) * rate, this.nyquist);
+    /**
+     * ── a partial is a RATIO, and saying so is the whole point ─────────────
+     * `tone2` could only ever name an absolute frequency, which meant the
+     * relationship it was actually expressing — "this is the first partial of
+     * the root" — was not written down anywhere. Move the root and the partial
+     * stayed put; put the sound on a scale and every degree detuned it.
+     *
+     * With `ratio` the layer is expressed against `tone.freq`, so its END is
+     * too: `ratioEnd` if given, and otherwise no glide at all. A `freqEnd` in
+     * hertz sitting next to a `ratio` would be half a layer in one unit and
+     * half in another, and the first person to move the root would find out.
+     *
+     * A layer with no `ratio` takes the old path untouched — which is why
+     * nothing in the bank that predates this moved by a single hertz.
+     */
+    const baseHz = layer.ratio != null ? rootHz * layer.ratio : (layer.freq ?? 220);
+    const endHz =
+      layer.ratio != null
+        ? rootHz * (layer.ratioEnd ?? layer.ratio)
+        : (layer.freqEnd ?? layer.freq ?? 220);
+
+    const baseFreq = clampFreq(baseHz * rate, this.nyquist);
+    const endFreq = clampFreq(endHz * rate, this.nyquist);
 
     const attack = Math.max(0.0005, layer.attack ?? 0.002);
     const hold = Math.max(0, layer.hold ?? 0) * lengthMul;
@@ -400,14 +515,24 @@ export class Synth extends SoundPlayer {
        * un-multiplied for this reason; this one was not, and it is the same
        * quantity.
        */
-      baseFreq: layer.freq ?? 220,
-      baseFilterFreq: layer.filter?.freq ?? 0,
+      baseFreq: baseHz,
+      /**
+       * `brightMul` IS folded in here, and `rate` is not.
+       *
+       * The rule above is about a quantity `set` re-applies on every write.
+       * `rate` is one — hence the bug. Brightness is not: it is decided once
+       * from this trigger's intensity and never written again, so it belongs in
+       * the stored value exactly as the definition's own numbers do. Leaving it
+       * out would make the first `set({rate})` on a loop snap the filter back to
+       * the table's corner and undo the trigger's own shaping.
+       */
+      baseFilterFreq: (layer.filter?.freq ?? 0) * brightMul,
     });
     return finish;
   }
 
   /** One filtered-noise layer. @returns {number} finish time */
-  _buildNoise(ctx, voice, layer, { t0, rate, loop, lengthMul }) {
+  _buildNoise(ctx, voice, layer, { t0, rate, loop, lengthMul, brightMul = 1 }) {
     const g = Math.max(0, layer.gain ?? 1);
     if (g < MIN_GAIN || !this.mixer.noiseBuffer) return t0;
 
@@ -425,7 +550,7 @@ export class Synth extends SoundPlayer {
 
     /** @type {BiquadFilterNode|null} */
     let filter = null;
-    if (layer.filter) filter = this._buildFilter(ctx, layer.filter, { t0, rate, loop });
+    if (layer.filter) filter = this._buildFilter(ctx, layer.filter, { t0, rate, loop, brightMul });
 
     if (filter) {
       src.connect(filter);
@@ -463,7 +588,7 @@ export class Synth extends SoundPlayer {
       source: src,
       filter,
       baseRate,
-      baseFilterFreq: layer.filter?.freq ?? 0,
+      baseFilterFreq: (layer.filter?.freq ?? 0) * brightMul,
     });
     return finish;
   }
@@ -475,12 +600,14 @@ export class Synth extends SoundPlayer {
    * through a bandpass falling from 4 kHz to 700 Hz in 90 ms is a struck sheet,
    * and the same burst through a fixed filter is a puff of air.
    */
-  _buildFilter(ctx, spec, { t0, rate, loop }) {
+  _buildFilter(ctx, spec, { t0, rate, loop, brightMul = 1 }) {
     const f = ctx.createBiquadFilter();
     f.type = spec.type ?? 'lowpass';
     f.Q.value = Math.max(0.0001, spec.q ?? 1);
-    const from = clampFreq((spec.freq ?? 1000) * rate, this.nyquist);
-    const to = clampFreq((spec.freqEnd ?? spec.freq ?? 1000) * rate, this.nyquist);
+    // Both ends move together, so a soft hit is a darker version of the same
+    // sweep rather than a sweep with a different shape.
+    const from = clampFreq((spec.freq ?? 1000) * rate * brightMul, this.nyquist);
+    const to = clampFreq((spec.freqEnd ?? spec.freq ?? 1000) * rate * brightMul, this.nyquist);
     f.frequency.setValueAtTime(from, t0);
     if (!loop && Math.abs(to - from) > 1) {
       f.frequency.exponentialRampToValueAtTime(to, t0 + Math.max(0.005, spec.sweep ?? 0.09));

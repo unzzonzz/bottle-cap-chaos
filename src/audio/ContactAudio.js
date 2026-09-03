@@ -53,6 +53,23 @@ import { CATEGORY } from './categories.js';
 /** Which partner wins when a body is touching several things at once. */
 const ROLE_RANK = { cap: 6, ball: 5, frame: 4, net: 3, wall: 2, ground: 1 };
 
+/**
+ * The highest scale rung a chain may reach. See `_chain`.
+ *
+ * Seven, which on the major pentatonic is an octave and a fifth above the root
+ * — 660 Hz up to 1663. Measured rather than guessed: the rungs above it put the
+ * fundamental of `cap_cap` above 1.9 kHz, which is inside the ear's most
+ * sensitive band, and a chain that reaches there twice in a turn is shrill
+ * rather than exciting. Eight caps is the worst case the whole overload
+ * apparatus was built around, and a cap of 7 means even that one runs out of
+ * ladder before it runs out of patience.
+ *
+ * It is a module constant and not a `CONFIG` knob on purpose: this is a musical
+ * decision, and `config.audio` is a MIX. Nothing on the panel should be able to
+ * put a collision chain out of tune with the cards.
+ */
+const CHAIN_TOP = 7;
+
 export class ContactAudio {
   /** @param {typeof import('../game/config.js').CONFIG.audio} config live block */
   constructor(config) {
@@ -75,6 +92,42 @@ export class ContactAudio {
     this._candidates = [];
     this._partners = [];
     this._seen = new Set();
+
+    /**
+     * Which collision of this shot this is. Handed out as a scale degree.
+     *
+     * ── the chain walks UP, and that is free information ───────────────────
+     * Every impact of one shot lands a rung higher than the last, so a chain
+     * arrives as a rising phrase instead of as a pile. It reads as a rally, and
+     * it tells the player something they otherwise have to count: a shot that
+     * went five caps deep SOUNDS bigger than one that hit and stopped, before
+     * they have looked at anything.
+     *
+     * ── the rung is ORDER, never strength ──────────────────────────────────
+     * Assigning it from `dv` was the obvious alternative and it is wrong. Pitch
+     * would then jump around inside a chain — hard, soft, hard — and neither
+     * direction would mean anything, because the strength is already carried by
+     * the level and by the brightness (`velGain`, `velBright`). Order is the
+     * one thing nothing else in the sound is saying.
+     *
+     * ── it is NOT cleared by `reset()` ─────────────────────────────────────
+     * `reset()` fires on a world rebuild and on every entry to and exit from a
+     * kinematic state — a swap card, a ball respawn — which happen in the
+     * middle of a turn. A chain cleared there would restart mid-rally. The turn
+     * boundary is a different event and only `MatchAudio` can see it, so it
+     * calls `resetChain()` on the shot edge.
+     */
+    this._chain = 0;
+  }
+
+  /**
+   * A new shot. The next collision starts the scale again.
+   *
+   * Called from `MatchAudio` on the `lastTurn` identity edge and on its own
+   * `reset`. Deliberately separate from `reset()` — see the note on `_chain`.
+   */
+  resetChain() {
+    this._chain = 0;
   }
 
   /**
@@ -200,6 +253,8 @@ export class ContactAudio {
         id,
         intensity,
         gain,
+        /** Filled in below, once the frame's cut is known. See the note there. */
+        degree: 0,
         dv: c.dv,
         capA: c.rec.role === 'cap' ? c.rec.index : -1,
         capB: partner.role === 'cap' ? partner.index ?? -1 : -1,
@@ -208,7 +263,26 @@ export class ContactAudio {
 
     if (!events.length) return out;
     events.sort((a, b) => b.dv - a.dv);
-    for (let i = 0; i < events.length && i < perFrame; i++) out.push(events[i]);
+    /**
+     * The rung is assigned HERE, after the frame's impacts have been sorted and
+     * cut, rather than where the event was built.
+     *
+     * Two reasons and they pull the same way. A frame classifies about twice as
+     * many candidates as it will ever play — the fallback pairing needs to see
+     * the quiet half of a cap-on-cap hit — so counting at construction would
+     * advance the scale for collisions nobody hears, and a chain of three would
+     * arrive on rungs 0, 2, 5. And within one frame the loudest impact should
+     * be the lowest rung, because that is the order they are pushed in and
+     * therefore the order they are heard in.
+     */
+    for (let i = 0; i < events.length && i < perFrame; i++) {
+      events[i].degree = this._chain;
+      // Held at the ceiling rather than wrapped: a rally that runs long should
+      // stop climbing, not fall back to the bottom and start again — and left
+      // uncapped it eventually arrives somewhere nobody wants to be.
+      if (this._chain < CHAIN_TOP) this._chain++;
+      out.push(events[i]);
+    }
     return out;
   }
 

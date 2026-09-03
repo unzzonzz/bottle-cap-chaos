@@ -31,6 +31,9 @@
  * @property {number} [rate]      playback-rate / pitch multiplier
  * @property {number} [intensity] 0..1 physical strength, before the definition's
  *                                own velocity mapping is applied
+ * @property {number} [degree]    rung of the scale, for a definition carrying
+ *                                `scale: true`. Ignored by every other one, and
+ *                                by an implementation that has no pitch to move
  * @property {boolean} [loop]     hold at sustain until `stop` rather than decay
  */
 
