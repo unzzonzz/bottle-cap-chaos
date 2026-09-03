@@ -273,74 +273,72 @@ export function buildGlassGeometry(profile) {
 /**
  * The drink.
  *
- * A second lathe inside the first, stopping at the fill line with a visible
- * surface on top — the neck is empty, which is what makes the fill line read as
- * a fill line rather than as the glass simply being brown up to there.
+ * A second lathe inside the first, filling the bottle all the way to the base of
+ * the finish. Where the liquid actually STOPS is not in this geometry at all —
+ * a clip plane decides that, every frame, from gravity. See `Bottle._surface`.
  *
- * The surface ring is recorded on `userData` so the shake can push it about
- * without this file having to know what a shake is. That is one ring plus a
- * centre vertex: sixteen numbers to touch per frame, against a particle system
- * that the brief rules out and that would not look like liquid anyway.
+ * ── it used to stop at the fill line, and that was the bug ─────────────────
+ * The old mesh ended at `fillLevel` with a triangle fan across the top for the
+ * surface, and `Bottle._slosh` rewrote that fan's rim every frame to keep it
+ * horizontal as the bottle leaned. Two things were wrong with it, and both are
+ * structural rather than tuning:
+ *
+ *   1. The rim was ALSO the top row of the side wall, so there were two rings of
+ *      vertices at the same place that had to be moved in lockstep, and the row
+ *      under them never moved at all. Tilt the surface far enough and the wall's
+ *      last fixed row stood above its own surface — 13.5 mm at a 22 degree lean.
+ *   2. Clamping every vertex inside the glass does not keep the FACE between two
+ *      of them inside. Across the shoulder that chord cut the corner and the
+ *      drink came out through the glass.
+ *
+ * A plane cannot do either. It has no vertices to disagree and no faces to bulge:
+ * if the mesh is inside the glass, every plane section of it is inside the glass.
+ *
+ * ── which is only true because the rows are the GLASS's rows ───────────────
+ * Every row here is a profile row scaled by `liquidInset`, so at every height
+ * the drink is exactly 0.96 of the glass — including halfway along a chord,
+ * because both lathes interpolate linearly between the SAME two heights. Skip a
+ * row to save triangles and that stops being true across the shoulder, which is
+ * precisely the failure above. The one row that is not a profile row is the top
+ * one, and it sits on a straight run of the neck where a chord is the profile.
  */
 export function buildLiquidGeometry(profile) {
   const p = profile.params;
   /**
-   * 유리와 같은 분할 수. 예전엔 절반이었다.
+   * 유리와 같은 분할 수.
    *
-   * "유리를 통해 낮은 대비로 보이니 더 촘촘하게 해도 프레임버퍼까지 살아남지
-   * 않는다" 는 게 절반이었던 이유였는데, 두 전제가 다 사라졌다. 유리가 맑아져서
-   * 액체가 그대로 보이고, 액면에 1 을 넘는 밝은 링을 넣었기 때문에 — 그 링이
-   * 정확히 이 다각형의 윤곽을 그린다. 36 컬럼이면 한 변이 10도라 액면 테두리가
-   * 눈에 띄게 각져 보였다.
+   * 예전엔 액면의 밝은 링이 이 다각형의 윤곽을 그린다는 것이 이유였다. 그 링은
+   * 이제 없다 — 메니스커스는 프래그먼트에서 만든다. 그래도 같게 두는 이유는
+   * 위의 보장 때문이다: 액체가 모든 높이에서 유리의 정확히 0.96 이려면 세로
+   * 행뿐 아니라 가로 분할도 같아야 한다. 컬럼이 다르면 두 다각형의 변이 서로
+   * 어긋나서, 액체의 변 가운데가 유리의 변보다 바깥으로 나갈 수 있다.
    */
   const cols = Math.max(12, Math.round(p.columns));
-  const fill = Math.min(profile.height - 4, p.fillLevel);
-
-  const surfaceR = profile.envelopeAt(fill) * p.liquidInset;
 
   /**
-   * 유리와 같은 행에서 잘라 쓴다. 균등 분할이 아니다.
+   * 바닥부터 목 끝까지. 액면 높이는 여기 없다.
    *
-   * ── 균등 8행은 어깨를 통째로 건너뛴다 ────────────────────────────────────
-   * 예전엔 바닥에서 액면까지 `fill * i / 7` 로 여덟 행을 균등하게 놓았다. 몸통이
-   * 직선일 때는 그래도 되지만, 액면이 어깨 중간(150)에 있으면 마지막 두 행이
-   * y=128.6 과 y=150 이 되고 그 사이에서 반지름이 29.8 에서 16.1 로 떨어진다.
-   * 사이에 행이 하나도 없으니 어깨 곡선이 직선 원뿔대로 잘려서, 액체 윗부분이
-   * 눈에 띄게 각져 보였다.
-   *
-   * 프로파일은 같은 구간에 132·135·139·143·147 다섯 행을 더 갖고 있다. 그걸
-   * 그대로 빌려 쓰면 액체 표면이 유리 안쪽 벽을 정확히 따라간다 — 애초에 액체가
-   * 해야 할 일이고, 어깨 모양을 두 번 정의하지 않아도 된다.
+   * `fillLevel` 이 이 지오메트리에 전혀 나타나지 않는 것이 요점이다 — 수위는
+   * 이제 평면의 상태이지 메시의 모양이 아니고, 그래서 패널에서 수위를 움직여도
+   * 다시 만들 것이 없다. 위쪽 행들은 평면 위에 있는 동안 GPU 가 버린다.
    */
+  const top = profile.neckTop;
   const rows = profile.rows
-    .filter((row) => row.y < fill)
+    .filter((row) => row.y <= top + 1e-6)
     .map((row) => ({ r: row.r * p.liquidInset * MM, y: row.y * MM, rib: 0 }));
-  rows.push({ r: surfaceR * MM, y: fill * MM, rib: 0 });
 
   /**
-   * Vertex colours, so the meniscus is brighter than the drink under it.
+   * Vertex colours, so the drink is not one flat wash.
    *
-   * ── the fill line stopped reading when the drink went clear ─────────────
-   * It used to be an opaque brown, so its top surface was obvious and the slosh
-   * with it. A pale cider inside pale glass is nearly the same value as its
-   * container, and `Bottle._slosh` — which tilts that surface every frame — was
-   * computing something nobody could see.
-   *
-   * 실제 음료는 액면이 가장 잘 보인다 — 표면이 빛을 받고, 유리와 만나는 테두리는
-   * 더 받는다. 셰이더가 이미 곱해주는 값으로 그걸 표현한다.
-   *
-   * 테두리는 1 을 조금 넘긴다. 렌더 타겟이 half-float 이라 흰색을 넘는 값이
-   * 블룸까지 살아남고, 액면 테두리는 이 병에서 그게 물리적으로 맞는 유일한
-   * 자리다. 처음엔 1.9 였고 그건 과했다 — 액체 전체가 스스로 빛나는 것처럼
-   * 보여서, 유리에 담긴 음료가 아니라 발광하는 젤이 됐다.
-   *
-   * It costs nothing to animate: the slosh already rewrites these vertices'
-   * POSITIONS, so the bright ring tilts with the surface for free.
+   * ── 액면 색 두 개가 여기서 사라졌다 ──────────────────────────────────────
+   * `SURFACE_MID` 와 `SURFACE_RIM` 은 부채꼴의 색이었다. 부채꼴이 없으므로 색도
+   * 없다. 액면 테두리의 밝은 띠 — 1 을 넘겨서 블룸이 집어가던 그 값 — 는
+   * `Bottle` 이 프래그먼트 셰이더로 만든다: 클립 평면까지의 거리를 재서 그
+   * 근처를 밝히는 방식이라 정점이 필요 없고, 픽셀 단위로 부드럽고, 액면이
+   * 어떤 각도로 잘리든 정확히 잘린 자리에 온다.
    */
   const WALL = [0.9, 0.95, 1.0];
   const BASE = [0.7, 0.78, 0.85];
-  const SURFACE_MID = [1.0, 1.06, 1.1];
-  const SURFACE_RIM = [1.18, 1.24, 1.28];
 
   const mesh = revolve(rows, {
     cols,
@@ -368,49 +366,8 @@ export function buildLiquidGeometry(profile) {
   }
   for (let i = 0; i < cols; i++) index.push(baseCentre, baseRim + i, baseRim + ((i + 1) % cols));
 
-  // ── the surface ──────────────────────────────────────────────────────────
-  const surfaceCentre = pos.length / 3;
-  pos.push(0, fill * MM, 0);
-  nor.push(0, 1, 0);
-  uv.push(0.5, 0.5);
-  col.push(...SURFACE_MID);
-  const surfaceRim = pos.length / 3;
-  for (let i = 0; i < cols; i++) {
-    const th = (i / cols) * TAU;
-    pos.push(surfaceR * MM * Math.cos(th), fill * MM, surfaceR * MM * Math.sin(th));
-    nor.push(0, 1, 0);
-    uv.push(0.5, 0.5);
-    col.push(...SURFACE_RIM);
-  }
-  for (let i = 0; i < cols; i++) {
-    index.push(surfaceCentre, surfaceRim + ((i + 1) % cols), surfaceRim + i);
-  }
-
-  const g = assemble({ pos, nor, uv, col, index });
-  /**
-   * 액면을 쓰는 쪽이 알아야 하는 것들.
-   *
-   * ── 링이 **둘** 이라는 것이 요점이다 ──────────────────────────────────────
-   * 액면은 부채꼴이다: 가운데 점 하나(`surfaceCentre`)와 테두리 링 하나
-   * (`surfaceRim`). 그런데 옆벽의 맨 윗줄도 같은 자리에 같은 각도로 같은 반지름의
-   * 링을 하나 갖고 있다 — `revolve` 가 만든 것이고, 부채꼴과는 별개의 정점들이다.
-   *
-   * 살짝 출렁일 때는 그 사실이 드러나지 않았다. 진폭이 작고 유리가 가려서다.
-   * 기울어진 병에서 액면을 수평으로 만들면 진폭이 훨씬 커지고, 둘 중 하나만
-   * 움직이면 벽 끝이 액면 위로 삐져나오거나 그 사이가 벌어진다. 그래서 두 링의
-   * 위치를 함께 내보낸다.
-   *
-   * `wrap: false` 이므로 한 줄의 정점 수는 정확히 `cols` 다 — 이음매 중복이 없다.
-   */
-  g.userData.surfaceCentre = surfaceCentre;
-  g.userData.surfaceRim = surfaceRim;
-  g.userData.surfaceCols = cols;
-  g.userData.surfaceY = fill * MM;
-  /** 옆벽 맨 윗줄의 첫 정점. 부채꼴 링과 같은 각도, 같은 반지름. */
-  g.userData.wallTopRim = (rows.length - 1) * cols;
-  /** 그 링의 반지름, 월드 단위. 수평면 계산이 각 컬럼의 x/z 를 여기서 얻는다. */
-  g.userData.surfaceRadius = surfaceR * MM;
-  return g;
+  // 액면을 쓰는 쪽이 알아야 하는 것이 이제 없다. 평면이 전부 들고 있다.
+  return assemble({ pos, nor, uv, col, index });
 }
 
 /**

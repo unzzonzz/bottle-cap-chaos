@@ -316,7 +316,8 @@ function resample(points, count) {
 /**
  * @param {Partial<typeof BOTTLE_DEFAULTS>} [params]
  * @returns {{rows: {r: number, y: number, rib: number}[], height: number,
- *            waistRadius: number, mouthY: number, envelopeAt: (y: number) => number}}
+ *            waistRadius: number, mouthY: number, neckTop: number,
+ *            envelopeAt: (y: number) => number}}
  *   `rows` is bottom to top, which is the winding the lathe below depends on.
  */
 export function buildBottleProfile(params = {}) {
@@ -423,5 +424,18 @@ export function buildBottleProfile(params = {}) {
     return rows[rows.length - 1].r;
   };
 
-  return { rows, height, waistRadius, mouthY: height, envelopeAt, params: p };
+  /**
+   * `neckTop` is reported because the DRINK stops there.
+   *
+   * `buildLiquidGeometry` fills the bottle to this height and lets a clip plane
+   * decide where the liquid actually ends — so it needs to know where the glass
+   * stops being a vessel and starts being a finish. Above this the profile is
+   * the tooled crown: two beads, an undercut and a bore, none of which is a
+   * shape any liquid is ever inside of.
+   *
+   * It is also the last height below which `rows` is safe to lathe blindly: the
+   * finish's point list doubles back (14.0 -> 12.5 -> 13.6), so a lathe run
+   * through it has rows that step outward again.
+   */
+  return { rows, height, waistRadius, mouthY: height, neckTop, envelopeAt, params: p };
 }

@@ -55,8 +55,55 @@ export const MENU_CONFIG = {
     strokeFrequency: 4.2,
     /** Damping ratio. Water-like liquids sit around a tenth. */
     sloshDamping: 0.11,
-    /** Ceiling on the tilt, so a hard drive cannot push it through the glass. */
+    /**
+     * Ceiling on the tilt.
+     *
+     * It used to say "so a hard drive cannot push it through the glass". That
+     * is no longer what it is for — the surface is a clip plane and cannot
+     * leave the glass at any amplitude. What is left is the physical reason: a
+     * tilt mode that reaches the bottom of the bottle is not a slosh any more.
+     */
     sloshLimit: 0.7,
+
+    // ── the meniscus ───────────────────────────────────────────────────────
+    /**
+     * How much brighter the drink is right at its surface, as a MULTIPLE.
+     *
+     * A gain and not a colour, which is `PALETTE.liquid`'s rule — see the note
+     * on `MENISCUS_MAIN`.
+     *
+     * ── 0.30 was the arithmetic answer and it was too dark by half ─────────
+     * The old vertex pair was `SURFACE_RIM` 1.18 over `WALL` 0.9, a ratio of
+     * about 1.30, so 0.30 looked like the value that reproduces it. Measured on
+     * screen it did not: the surface peaked at 185 against the fan's 204.
+     *
+     * The ratio was never the whole of it. Those vertex colours were on a disc
+     * lying FLAT, facing the light — it collected far more of it than the wall
+     * does, and the wall is all a clip plane leaves to shade. Matching the
+     * ratio was matching the wrong quantity; the thing to match is the light
+     * that arrives at the screen.
+     *
+     * So this was fitted the same way `foamProduction` was — by measuring. At
+     * 0.8 with the width below, the brightest point of the surface reads 202
+     * against 151 in the drink under it, where the fan read 204 against 151.
+     * The same picture, arrived at from the other end.
+     */
+    meniscusGain: 0.8,
+    /**
+     * How deep the bright band reaches, in mm below the surface.
+     *
+     * A real meniscus is under a millimetre. This is wider because it is
+     * standing in for the whole lit top of the drink, not just the wetting
+     * curve — and because under 1 mm it is thinner than a pixel at the size the
+     * menu draws the bottle, which makes it alias as the bottle floats.
+     *
+     * Measured: the surface stops getting brighter past about 4 mm (202 at 4,
+     * 203 at 5, 204 at 6), because by then the band is wider than the part of
+     * the wall that faces the camera near the cut. Past that it only spreads
+     * the glow down into the drink, which reads as the drink being lit from
+     * inside rather than as a surface.
+     */
+    meniscusWidth: 4,
 
     // ── the carbonation ────────────────────────────────────────────────────
     /**

@@ -273,6 +273,19 @@ export function bootMenu(
   }
 
   // ── contents ─────────────────────────────────────────────────────────────
+  /**
+   * 재질별 클리핑을 켠다. `Bottle` 의 액면이 클립 평면이다.
+   *
+   * 전역 스위치이고 렌더러는 게임과 공유하는 물건이므로 어디서 켜는지가 중요하다.
+   * 여기가 맞는 자리인 이유: 문서는 메뉴이거나 게임이지 둘 다가 아니고
+   * (`main.js` 가 갈라 놓는다), 이 줄은 메뉴 문서에서만 실행된다.
+   *
+   * 켜도 클립 평면이 없는 재질은 값을 치르지 않는다 — three 는 재질마다
+   * 평면 수를 세고, 0 이면 `NUM_CLIPPING_PLANES` 가 0 이라 그 분기 전체가
+   * 전처리기에서 사라진다. 실측으로도 프레임 시간 차이가 측정 오차 안이었다.
+   */
+  viewport.renderer.localClippingEnabled = true;
+
   const bottle = new Bottle({ retro, tuning: cfg.bottle });
   const items = new MenuItems({ retro, tuning: cfg.items });
 

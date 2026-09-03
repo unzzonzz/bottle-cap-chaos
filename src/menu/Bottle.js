@@ -1,4 +1,4 @@
-import { Group, Mesh, PlaneGeometry, Quaternion, Vector3 } from 'three';
+import { DoubleSide, Group, Mesh, Plane, PlaneGeometry, Quaternion, Vector3 } from 'three';
 import { buildCapGeometry, CAP_DEFAULTS, MM } from '../cap/capGeometry.js';
 import { buildBottleProfile } from './bottleProfile.js';
 import {
@@ -71,6 +71,56 @@ import { onQualityChange, QUALITY } from '../core/quality.js';
  * pressure up rather than as the bottle bouncing on a floor.
  */
 
+/**
+ * The meniscus, as a fragment effect.
+ *
+ * ── it used to be two vertex colours, and it cannot be any more ────────────
+ * `buildLiquidGeometry` had a triangle fan across the fill line whose rim
+ * carried `SURFACE_RIM`. The fan is gone — the surface is a clip plane now —
+ * so there are no vertices at the surface to colour. This does the same job
+ * from the other end: every fragment of the drink knows how far it is from the
+ * plane that cut it, so the ones just under it can be brightened.
+ *
+ * ── it is a GAIN, not a colour, and that is deliberate ────────────────────
+ * `PALETTE.liquid` states the rule: the bright ring is a multiple of the
+ * drink's own colour, never a second colour, so that recolouring the drink
+ * brings the ring with it and the two cannot drift apart. The old pair kept it
+ * by construction — 1.18/0.9 is a ratio of about 1.30 — and multiplying here
+ * keeps exactly that ratio without naming a colour.
+ *
+ * Over 1 on purpose. The render target is half-float and the bloom picks up
+ * what goes past white, and the line where a drink meets its glass is the one
+ * place on this bottle where that is physically what happens.
+ *
+ * ── why this is better than the vertices were ─────────────────────────────
+ * The band is measured in world units from the actual cutting plane, so it is
+ * the same width at every angle, it is smooth per pixel rather than per column,
+ * and it lands exactly where the drink ends however the plane is tilted. The
+ * vertex version could only ever be as smooth as `columns` and drew the ring on
+ * the polygon the ring was made of.
+ *
+ * `vClipPosition` and `clippingPlanes` are three's own — declared by
+ * `<clipping_planes_pars_fragment>` whenever a material has a clip plane, in
+ * VIEW space, which is metric, so `uMeniscusWidth` is in world units. The guard
+ * matters: with no plane those names do not exist and the shader will not link.
+ */
+const MENISCUS_PARS = /* glsl */ `
+  uniform float uMeniscusGain;
+  uniform float uMeniscusWidth;
+`;
+const MENISCUS_MAIN = /* glsl */ `
+  #if NUM_CLIPPING_PLANES > 0
+  {
+    vec4 mPlane = clippingPlanes[0];
+    // three keeps the fragment where dot(vClipPosition, n) <= w, so this is the
+    // depth BELOW the surface: zero at the cut, growing down into the drink.
+    float below = mPlane.w - dot(vClipPosition, mPlane.xyz);
+    float m = 1.0 - smoothstep(0.0, uMeniscusWidth, below);
+    gl_FragColor.rgb *= 1.0 + uMeniscusGain * m;
+  }
+  #endif
+`;
+
 /** Bottle-cap red, the same one the viewer starts its picker at. */
 /**
  * The brand cap. See `PALETTE.menu.capBrand` for why this one value matters more
@@ -100,6 +150,12 @@ export class Bottle {
     this.retro = retro;
     this.tuning = tuning;
     this.params = {};
+
+    /**
+     * 액면. **정점이 아니라 평면이다.** 재질보다 먼저 만들어야 한다 —
+     * `liquidMaterial` 이 생성 시점에 이것을 참조한다.
+     */
+    this._surfacePlane = new Plane(new Vector3(0, 1, 0), 0);
 
     /** Moved by the float and the shake. Never rotated. */
     this.root = new Group();
@@ -160,6 +216,51 @@ export class Bottle {
      * 없었기 때문이다 — 이 파일의 유리 두 장은 자기 재질을 직접 만든다.
      */
     this.liquidMaterial.depthWrite = false;
+    /**
+     * ── 액면을 자르는 평면. 여기가 F2 의 전부다 ─────────────────────────────
+     * 액체 메시는 목 끝까지 차 있고(`buildLiquidGeometry`), 이 평면이 매 프레임
+     * 중력에서 다시 놓이면서 그 위를 버린다. 정점을 옮겨 액면을 만들던 것 —
+     * 고정점 반복, 링 두 개, 재클램프, 법선 다시 쓰기 — 이 전부 사라진 자리다.
+     *
+     * **`renderer.localClippingEnabled` 이 켜져 있어야 한다.** `bootMenu` 가
+     * 켠다. 안 켜면 조용히 아무 일도 일어나지 않는다 — 오류도 경고도 없이
+     * 액체가 목까지 가득 찬 병이 되고, 실제로 그렇게 한 번 나왔다. `Bottle` 을
+     * 다른 곳에서 만들 일이 생기면 그쪽도 켜야 한다.
+     *
+     * `clipShadows` 는 꺼 둔다. 액체는 그림자를 던지지 않고(`castShadow` 가
+     * 없다), 켜 두면 그림자 패스마다 클리핑 유니폼이 하나씩 더 붙는다.
+     *
+     * `DoubleSide` 여야 한다. 평면이 껍데기를 자르면 그 단면이 열리는데,
+     * `FrontSide` 면 안쪽을 향한 뒷면이 컬링되어 잘린 자리로 배경이 그대로
+     * 보인다 — 액체에 구멍이 뚫린다. 뒷면을 살리면 그 구멍이 반대편 벽의
+     * 안쪽으로 메워지고, 그것이 화면에서 액면으로 읽히는 면이다.
+     */
+    this.liquidMaterial.clippingPlanes = [this._surfacePlane];
+    this.liquidMaterial.clipShadows = false;
+    this.liquidMaterial.side = DoubleSide;
+    /**
+     * 메니스커스를 프래그먼트 셰이더에 얹는다. `MENISCUS_MAIN` 을 보라.
+     *
+     * `GlossMaterials.create` 가 이미 `onBeforeCompile` 에 림 항을 걸어 두었으
+     * 므로 **덮어쓰지 않고 이어 붙인다** — 덮어쓰면 이 병에서만 림이 사라진다.
+     *
+     * `customProgramCacheKey` 도 반드시 바꾼다. three 는 이 키로 컴파일된
+     * 프로그램을 재사용하는데, 림 재질 전부가 `'gloss-rim'` 하나를 쓰고 있다.
+     * 그대로 두면 액체가 남의 프로그램을 물려받아 메니스커스가 아예 컴파일되지
+     * 않거나, 반대로 다른 재질이 액체의 프로그램을 받아 `clippingPlanes` 가
+     * 없는 채로 `vClipPosition` 을 읽는다.
+     */
+    const rimCompile = this.liquidMaterial.onBeforeCompile;
+    this.liquidMaterial.onBeforeCompile = (shader, renderer) => {
+      rimCompile?.call(this.liquidMaterial, shader, renderer);
+      shader.uniforms.uMeniscusGain = { value: this.tuning.meniscusGain };
+      shader.uniforms.uMeniscusWidth = { value: this.tuning.meniscusWidth * MM };
+      shader.fragmentShader = shader.fragmentShader
+        .replace('void main() {', `${MENISCUS_PARS}\nvoid main() {`)
+        .replace('#include <opaque_fragment>', `#include <opaque_fragment>\n${MENISCUS_MAIN}`);
+      this._liquidShader = shader;
+    };
+    this.liquidMaterial.customProgramCacheKey = () => 'gloss-rim-meniscus';
     /**
      * The oval decal. `alphaTest`, never `transparent`.
      *
@@ -290,10 +391,16 @@ export class Bottle {
 
     this._clock = 0;
     this._shake = 0;
-    /** Baseline y of the liquid's surface ring, kept for the slosh to work off. */
-    this._surfaceBase = null;
-    /** Whether the surface ring currently holds anything but its rest shape. */
-    this._sloshed = false;
+    /**
+     * 액체 부피의 y(mm) 방향 누적표. `rebuild` 가 채운다.
+     *
+     * 기울어진 평면 아래의 부피를 매 프레임 풀기 위한 것이다 — `_levelFor`.
+     */
+    this._vol = null;
+    /** 보존해야 할 부피. 기울기 0 에서 `fillLevel` 아래의 부피다. */
+    this._vol0 = 0;
+    /** 이번 프레임 액면이 병 축을 지나는 높이, 로컬 mm. */
+    this._level = 0;
     /**
      * 액면의 수평을 푸는 데 쓰는 스크래치.
      *
@@ -302,6 +409,8 @@ export class Bottle {
      */
     this._surfQ = new Quaternion();
     this._surfUp = new Vector3();
+    this._surfN = new Vector3();
+    this._surfP = new Vector3();
     /** The head's front, in world units up the bottle. Integrated by continuity. */
     this._foamTop = 0;
     /** The same, normalised over its travel, for everything that wants 0..1. */
@@ -418,9 +527,7 @@ export class Bottle {
     this._mouthLocal.set(0, profile.height * MM + this._centreOffset, 0);
     this._baseLocal.set(0, this._centreOffset, 0);
 
-    const surface = liquid.userData;
-    const pos = liquid.getAttribute('position');
-    this._surfaceBase = { attr: pos, normal: liquid.getAttribute('normal'), ...surface };
+    this._buildVolumeTable();
 
     // A CIRCLE on the floor, not an ellipse. The ellipse the brief asks for is
     // what perspective makes of a circle seen from a camera a little above it —
@@ -434,6 +541,121 @@ export class Bottle {
       label: label.userData.triangles,
       cap: this.capGeometry.userData.triangles,
     };
+  }
+
+  /**
+   * The drink's volume against height, integrated once per rebuild.
+   *
+   * ── why a table and not a formula ────────────────────────────────────────
+   * The bottle is a lathe, so its volume to a height is `∫ π r(y)² dy` — but
+   * `r(y)` is a resampled Catmull-Rom through the body and a smoothstep S
+   * through the shoulder, and neither has an antiderivative worth writing down.
+   * Sampling it is exact enough at a quarter of a millimetre and costs one pass
+   * over 800 cells at rebuild, against a shape that only changes when the panel
+   * moves a slider.
+   *
+   * Midpoint rule, cell `i` covering `[i·dy, (i+1)·dy]` with its radius read at
+   * the centre. `cum[i]` is therefore the volume of everything BELOW cell `i`,
+   * which is the form `_volumeBelow` wants: it takes whole cells from the table
+   * and only integrates the band the tilted surface actually cuts through.
+   *
+   * Units are mm and mm³ throughout — the profile's own units. Nothing here
+   * reaches the screen, so converting to world units would only add a place to
+   * get the cube of `MM` wrong.
+   */
+  _buildVolumeTable() {
+    const p = this.profile.params;
+    const inset = p.liquidInset;
+    const dy = 0.25;
+    const n = Math.ceil(this.profile.height / dy);
+    const radius = new Float64Array(n);
+    const cum = new Float64Array(n + 1);
+    let rMax = 0;
+    for (let i = 0; i < n; i++) {
+      const r = Math.max(0, this.profile.envelopeAt((i + 0.5) * dy) * inset);
+      radius[i] = r;
+      if (r > rMax) rMax = r;
+      cum[i + 1] = cum[i] + Math.PI * r * r * dy;
+    }
+    this._vol = { dy, n, radius, cum, rMax };
+    this._vol0 = this._volumeBelow(p.fillLevel, 0);
+    this._level = p.fillLevel;
+  }
+
+  /**
+   * Volume of drink below the plane that passes through `(0, level, 0)` and
+   * rises by `K` per unit of horizontal distance.
+   *
+   * ── it is a stack of circular segments, and that part IS closed form ─────
+   * Slice at a height `y`. The drink there is a disc of radius `r(y)`; the
+   * plane crosses that disc along a straight chord, and the part of the disc
+   * under the plane is a circular segment. So the only thing being sampled is
+   * the profile — the geometry at each height is solved, not approximated:
+   *
+   *     s = (level - y) / K        signed distance from the axis to the chord
+   *     A = r² · acos(-s/r) + s · √(r² - s²)
+   *
+   * `s ≥ r` is the whole disc (the slice is entirely under the plane), `s ≤ -r`
+   * is none of it. Those two cases are most of the bottle, which is why the
+   * table above exists: only the band `|level - y| < K · rMax` needs the acos.
+   */
+  _volumeBelow(level, K) {
+    const { dy, n, radius, cum, rMax } = this._vol;
+    if (K < 1e-6) {
+      // Upright: every cell is all-in or all-out, so the table answers directly.
+      const f = level / dy - 0.5;
+      const i = Math.max(0, Math.min(n, Math.ceil(f)));
+      return cum[i];
+    }
+    const band = K * rMax;
+    const first = Math.max(0, Math.min(n, Math.ceil((level - band) / dy - 0.5)));
+    let v = cum[first];
+    for (let i = first; i < n; i++) {
+      const y = (i + 0.5) * dy;
+      if (y - level >= band) break;
+      const r = radius[i];
+      const s = (level - y) / K;
+      if (s >= r) v += Math.PI * r * r * dy;
+      else if (s > -r) v += (r * r * Math.acos(-s / r) + s * Math.sqrt(Math.max(0, r * r - s * s))) * dy;
+    }
+    return v;
+  }
+
+  /**
+   * The height at which a surface of slope `K` holds the drink it started with.
+   *
+   * ── tilting about the middle does NOT conserve volume ────────────────────
+   * The obvious thing — pivot the surface about the centre of the bottle — is
+   * only right where the bottle is a cylinder over the whole swing of the
+   * surface. It is not: at the shipped lean the high edge of the surface is up
+   * at y ≈ 140, inside the shoulder, where the bottle has already begun to
+   * close in. So the wedge added on the high side is NARROWER than the wedge
+   * taken from the low side, the drink loses volume, and the level has to rise
+   * to put it back.
+   *
+   * Measured on this profile at `fillLevel` 130: +0.21 mm at the 19 degree
+   * resting lean, +0.31 mm at the 22 degree aim, +1.20 mm at 35. That is a
+   * third of a pixel at the size the menu draws the bottle — it is not why the
+   * drink looks right. It is here because the alternative is a surface that
+   * silently gains and loses drink as the bottle moves, and because at a fill
+   * up in the shoulder (which the panel can still ask for) the same numbers are
+   * three times bigger.
+   *
+   * `_volumeBelow` is monotonic in `level`, so bisection cannot miss. Twelve
+   * passes over a 60 mm bracket lands inside 0.015 mm, well under the quarter
+   * millimetre the table itself is quantised to.
+   */
+  _levelFor(K) {
+    if (K < 1e-6) return this.profile.params.fillLevel;
+    const rest = this.profile.params.fillLevel;
+    let lo = Math.max(0, rest - 30);
+    let hi = Math.min(this.profile.height, rest + 30);
+    for (let i = 0; i < 12; i++) {
+      const mid = (lo + hi) * 0.5;
+      if (this._volumeBelow(mid, K) < this._vol0) lo = mid;
+      else hi = mid;
+    }
+    return (lo + hi) * 0.5;
   }
 
   _swap(mesh, geometry) {
@@ -546,7 +768,7 @@ export class Bottle {
     const r = this.profile.params.bodyRadius * MM * t.shadowScale * lift;
     this.shadow.scale.set(r, r, 1);
 
-    this._slosh(dt, shake);
+    this._surface(dt, shake);
     this._carbonate(dt, shake);
     this.fizz.update(dt, {
       intensity: Math.max(shake, this._foam),
@@ -648,10 +870,6 @@ export class Bottle {
      * 머리도 같은 평면으로 기운다. 목에서는 반지름이 작아 기울기가 덜 보이지만,
      * 밑은 기울고 위는 안 기울면 기둥이 비틀린 것으로 보인다.
      */
-    const base = this._surfaceBase;
-    const surfAttr = base?.attr;
-    const surfRim = base?.surfaceRim;
-    const surfCols = base?.surfaceCols ?? cols;
     const kx = this._surfKx ?? 0;
     const kz = this._surfKz ?? 0;
     const ceil = (this.profile.height - 2) * MM;
@@ -664,16 +882,18 @@ export class Bottle {
       const c = Math.cos(th);
       const sn = Math.sin(th);
 
-      // 이 컬럼에서 액면이 어디 있는가. 없으면(액면 링이 아직 없으면) 채움 높이.
-      let footY = fillY;
-      let footR = this.profile.envelopeAt(fillY / MM) * inset * MM;
-      if (surfAttr && surfRim !== undefined) {
-        const v = surfRim + (i % surfCols);
-        const sx = surfAttr.getX(v);
-        const sz = surfAttr.getZ(v);
-        footY = surfAttr.getY(v);
-        footR = Math.hypot(sx, sz);
-      }
+      /**
+       * 이 컬럼에서 액면이 어디 있는가.
+       *
+       * 예전에는 액면 링의 정점을 그대로 읽었다. 그 정점이 없어졌으므로 —
+       * 액면은 이제 평면이다 — 평면과 벽의 교점을 푼다. `_surfaceAt` 이 그
+       * 계산이고, 출렁임은 이미 평면의 법선에 들어가 있으므로 여기서 따로
+       * 더할 것이 없다. 예전 주석이 "다시 풀면 출렁임 항이 빠진다" 고 경고한
+       * 것은 출렁임이 정점에만 있던 시절의 이야기다.
+       */
+      const foot = this._surfaceAt(kx * c + kz * sn);
+      const footY = foot.y;
+      const footR = foot.r;
 
       // 머리도 같은 평면 위. 그 컬럼에서 액면보다 낮으면 거품이 없다는 뜻이다.
       const capY = Math.max(footY, clampY(topY + (kx * c + kz * sn) * headR));
@@ -697,7 +917,7 @@ export class Bottle {
   }
 
   /**
-   * The fill line, sloshing at its OWN frequency.
+   * The fill line, sloshing at its OWN frequency — as a PLANE.
    *
    * ── the liquid is an oscillator, not a follower ─────────────────────────
    * The first version drove the surface directly off the shake, at the shake's
@@ -711,7 +931,7 @@ export class Bottle {
    *     omega^2 = g (eps/R) tanh(eps h / R),     eps = 1.8412
    *
    * — eps being the first zero of J1', the derivative of the first-order Bessel
-   * function. For this bottle, R about 2.8 units and h about 14, that lands at
+   * function. For this bottle, R about 2.9 units and h about 13, that lands at
    * roughly 4 Hz, against a shake at seventeen. So the surface moves at a
    * quarter of the rate the bottle does, which is exactly the lag you see when
    * someone shakes a bottle in front of you, and it could not possibly have
@@ -721,11 +941,16 @@ export class Bottle {
    * cannot make it explode — omega * dt already reaches 1.3 at the loop's 50 ms
    * clamp, which is past where semi-implicit Euler stays well behaved.
    *
-   * ── the mode is a TILT, not a two-lobed wave ────────────────────────────
+   * ── the mode is a TILT, which is why a plane can carry all of it ─────────
    * m = 1 is the surface tipping like a saucer: high on one side, low on the
-   * other, still in the middle. The earlier `sin(2 theta)` was the m = 2 mode,
-   * which is a real mode but not the one that dominates, and it read as the
-   * drink rippling rather than swaying.
+   * other, still in the middle. That is a plane. The earlier `sin(2 theta)` was
+   * the m = 2 mode, which is a real mode but not the one that dominates, and it
+   * read as the drink rippling rather than swaying.
+   *
+   * So the whole of this function is now three numbers — a normal, a height and
+   * the slope that the foam reads — where it used to be a fixed-point solve, two
+   * rings of seventy-two vertices, a re-clamp and a normal rewrite. See the note
+   * on `_surfacePlane`, and `buildLiquidGeometry` for what went away.
    *
    * ── and the drive comes from the LEAN ───────────────────────────────────
    * A perfectly vertical shake excites no tilt at all — it is symmetric about
@@ -734,9 +959,16 @@ export class Bottle {
    * coupling falls out of the geometry rather than being asserted, and it means
    * standing the bottle upright would correctly calm the surface down.
    */
-  _slosh(dt, shake) {
-    const base = this._surfaceBase;
-    if (!base || !base.surfaceCols) return;
+  _surface(dt, shake) {
+    /**
+     * 이 프레임의 월드 행렬을 먼저 세운다.
+     *
+     * 평면의 통과점을 `localToWorld` 로 얻는데, three 는 월드 행렬을 렌더 직전에
+     * 갱신한다 — 그냥 두면 액면이 병보다 한 프레임 늦게 따라와서, 부유의 가장
+     * 빠른 지점에서 0.3 mm 어긋난다. 예전 코드는 쿼터니언만 읽었고 기울기는
+     * 상수라 티가 나지 않았다. 위치를 읽기 시작했으니 갱신도 시작해야 한다.
+     */
+    this.liquid.updateWorldMatrix(true, false);
 
     const t = this.tuning;
     const p = this.profile.params;
@@ -776,31 +1008,43 @@ export class Bottle {
       this._sloshV += accel * step;
       this._sloshX += this._sloshV * step;
     }
-
     const amp = Math.max(-t.sloshLimit, Math.min(t.sloshLimit, this._sloshX));
 
     /**
      * ── 액면은 병이 아니라 **중력**을 따른다 ─────────────────────────────────
-     * 여기서 출렁임만 쓰고 있었다. 출렁임은 평형면 **둘레의** 진동이라 그것만으로는
-     * 부족했다 — 평형면 자체가 병의 축에 수직이었기 때문이다. 병이 22도 기울면
-     * 액면도 22도 기울어 따라갔고, 그건 액체가 아니라 병 안에 굳어 있는 것이다.
+     * 평형면은 중력에 수직인 평면, 즉 월드에서 수평인 평면이다. 병이 22도 기울면
+     * 액면은 그대로 수평이어야 하고, 병을 따라 22도 기울면 그건 액체가 아니라
+     * 병 안에 굳어 있는 것이다.
      *
-     * 평형면은 중력에 수직인 평면, 즉 월드에서 수평인 평면이다. 병의 로컬 좌표계
-     * 에서 그 평면을 구하려면 월드의 위쪽 벡터를 로컬로 가져오면 된다:
+     * 그래서 평면의 법선을 **월드 위쪽**에서 시작한다. 예전에는 그 월드 수평면을
+     * 병의 로컬 좌표계로 끌어와서 정점마다 풀었는데, 이제 클립 평면 자체가 월드
+     * 공간이므로 끌어올 일이 없다 — 중력이 사는 곳에서 그대로 쓴다.
      *
-     *     up · (P - C) = 0,   C = 액면 중심 (0, y0, 0)
-     *     -> y = y0 - (up.x * x + up.z * z) / up.y
+     * ── 출렁임은 그 법선을 기울이는 것이다 ──────────────────────────────────
+     * 예전 코드는 컬럼마다 `y + cos(theta) * amp` 를 더했다. `cos(theta)` 는 병의
+     * 로컬 +x 축에 고정된 값이라, 기울기 방향(`kx`, `kz`)과 어긋나 있었다 —
+     * `leanX` 가 0 이 아니면 술이 기운 쪽이 아니라 옆쪽으로 몰렸다. 주석은
+     * "기울기와 같은 축을 돌므로" 라고 적고 있었지만 코드는 그렇지 않았다.
      *
-     * `up` 은 액체 메시의 **월드** 쿼터니언을 뒤집어 얻는다. 조상 전부가 계산에
-     * 들어가야 하기 때문이다 — 기울기(`lean`)만 쓰면 뜨는 동작이나 흔들림이 축을
-     * 돌릴 때 액면이 그만큼 어긋난다.
-     *
-     * `up.y` 가 0 에 가까우면 병이 눕는다는 뜻이고 그때는 수평면이 병을 가로지르지
-     * 않는다. 여기서는 일어나지 않지만(최대 기울기가 22도) 0 으로 나누는 자리를
-     * 남겨 둘 이유는 없다.
+     * 평면으로 하면 그 축을 말할 수밖에 없고, 말하면 맞출 수 있다: 병 축의 수평
+     * 성분이 술이 몰리는 방향이다. 진폭 `amp` 는 테두리에서의 높이였으므로
+     * 기울기는 `amp / R` 이다.
+     */
+    const hx = this._localUp.x;
+    const hz = this._localUp.z;
+    const hl = Math.hypot(hx, hz);
+    const slope = amp / R;
+    const dx = hl > 1e-6 ? hx / hl : 0;
+    const dz = hl > 1e-6 ? hz / hl : 0;
+    this._surfN.set(-slope * dx, 1, -slope * dz).normalize();
+
+    /**
+     * 그 법선을 병의 로컬 좌표계로 되가져온다. 두 곳이 필요로 한다: 부피 적분
+     * (기울기 K)과 거품 기둥의 밑면(`kx`, `kz`). 둘 다 프로파일을 읽으므로
+     * 프로파일과 같은 좌표계에 있어야 한다.
      */
     this.liquid.getWorldQuaternion(this._surfQ);
-    this._surfUp.set(0, 1, 0).applyQuaternion(this._surfQ.invert());
+    this._surfUp.copy(this._surfN).applyQuaternion(this._surfQ.invert());
     const upy = this._surfUp.y;
     const level = Math.abs(upy) > 1e-3;
     const kx = level ? -this._surfUp.x / upy : 0;
@@ -811,126 +1055,88 @@ export class Bottle {
      * 거품 기둥의 밑면은 액면 **위에** 앉아야 하는데, 액면은 월드에서 수평이고
      * 거품은 병 축에 수직인 링이었다. 병이 기울면 둘이 그 각도만큼 어긋나고,
      * 화면에서는 같은 높이에 서로 다른 각도의 면이 둘 보인다 — 한쪽은 액면 위에
-     * 떠 있고 다른 쪽은 액체에 잠긴다. 사용자가 "요소를 겹쳐서 이중으로" 라고
-     * 지적한 것이 그 상태다.
+     * 떠 있고 다른 쪽은 액체에 잠긴다.
      */
     this._surfKx = kx;
     this._surfKz = kz;
 
     /**
-     * 액면이 유리 밖으로 나가지 않게 묶는다.
+     * 축을 지나는 높이는 **부피가 정한다.** `_levelFor` 를 보라.
      *
-     * 기울어진 수평면의 높은 쪽은 `r * tan(기울기)` 만큼 올라간다. 22도에 반지름이
-     * 액면 높이에서 16 프로파일 단위면 6.5 단위이고 병 높이 안에 들어가지만,
-     * `fillLevel` 을 패널에서 올리면 목을 뚫고 나갈 수 있다. 위아래 모두 묶는다 —
-     * 아래로 뚫으면 옆벽이 액면 위로 삐져나온다.
+     * 로컬 mm 로 풀고 월드로 곱해 쓴다. 프로파일이 mm 이고 부피표도 mm 이므로
+     * 변환은 마지막 한 번뿐이다.
      */
+    this._level = this._levelFor(Math.hypot(kx, kz));
+
+    /**
+     * 평면을 월드에 놓는다.
+     *
+     * 통과점은 병 축 위의 그 높이다. `localToWorld` 로 옮기므로 조상 전부 —
+     * 부유, 흔들림, 기울기 — 가 자동으로 들어간다. `lean` 뿐 아니라 `root` 의
+     * 위아래 부유까지 따라가야 액면이 화면에서 가만히 있는다.
+     */
+    /**
+     * `_centreOffset` 은 **더하지 않는다.** `rebuild` 가 그것을 메시의
+     * `position.y` 에 넣어 두었고(`m.position.y = this._centreOffset`),
+     * `localToWorld` 가 그 행렬을 이미 적용한다. 여기서 또 더하면 병 높이의
+     * 절반만큼 아래에 평면이 놓여서 액체가 통째로 잘려 나가거나 — 실제로는
+     * 하나도 잘리지 않아 목까지 가득 찬다.
+     *
+     * `_mouthLocal` 과 `_baseLocal` 이 그것을 더하는 것은 저쪽이 메시가 아니라
+     * `lean` 의 좌표계에서 쓰이기 때문이다. 좌표계가 다르면 규칙도 다르다.
+     */
+    this._surfP.set(0, this._level * MM, 0);
+    this.liquid.localToWorld(this._surfP);
+    this._surfacePlane.setFromNormalAndCoplanarPoint(this._surfN, this._surfP);
+    /**
+     * 그리고 **뒤집는다.** three 는 법선이 가리키는 쪽을 남긴다.
+     *
+     * 셰이더의 판정은 `dot(vClipPosition, n) > w` 이면 버리는 것이고,
+     * `vClipPosition` 이 `-mvPosition` 이라 부호가 한 번 더 뒤집힌다 —
+     * 정리하면 법선 쪽이 살고 반대쪽이 잘린다. `_surfN` 은 위를 향하므로
+     * 그대로 쓰면 액체의 **윗부분만** 남고 몸통이 사라진다. 실제로 그렇게 나왔다:
+     * 목이 차 있고 몸통이 비었다.
+     *
+     * `_surfN` 자체를 아래로 만들지 않는 이유는 그 벡터를 부피와 거품이 위쪽
+     * 방향으로 읽기 때문이다. 평면만 뒤집는 편이 두 의미를 섞지 않는다.
+     */
+    this._surfacePlane.negate();
+  }
+
+  /**
+   * Where the surface meets the inside of the glass, at one azimuth.
+   *
+   * Only the FOAM needs this now. The drink itself is cut by the plane and has
+   * no idea where the wall is; the head of foam is a separate mesh that has to
+   * stand ON the drink, so it needs the actual point.
+   *
+   * Two conditions at once — on the surface plane, and against the glass:
+   *
+   *     y = level + (kx·cos + kz·sin) · r        on the plane
+   *     r = envelope(y) · liquidInset            on the inside of the wall
+   *
+   * Their intersection, by damped fixed-point iteration. The damping is not
+   * decoration: through the shoulder `dr/dy` is steep enough that an undamped
+   * step oscillates. The final `min` is the guarantee — whatever the iteration
+   * converged to, the foot cannot be wider than the wall at its own height.
+   *
+   * @returns {{r: number, y: number}} world units
+   */
+  _surfaceAt(dir) {
+    const p = this.profile.params;
+    const inset = p.liquidInset;
     const ceil = (this.profile.height - 2) * MM;
     const floorY = 2 * MM;
-
-    /**
-     * ── 링의 반지름은 **높이를 따라간다**. 이것이 빠져서 액면이 유리를 뚫었다 ──
-     * 처음에는 y 만 기울이고 반지름은 원래 액면 높이에서 잰 값 하나로 두었다. 병이
-     * 원통이면 그래도 맞지만 이 병에는 어깨가 있다 — `fillLevel` 150 근처에서
-     * 반지름이 프로파일 14 단위마다 눈에 띄게 줄어든다. 수평면이 한쪽을 올리고
-     * 다른 쪽을 내리면, 올라간 쪽은 병이 좁아진 자리에 넓은 원이 놓여 **유리를 뚫고
-     * 나오고** 내려간 쪽은 벽에서 떨어져 틈이 생긴다.
-     *
-     * 실측: 34도로 기울인 병에서 액면이 유리 오른쪽으로 검은 쐐기처럼 튀어나왔다.
-     *
-     * 그래서 컬럼마다 (r, y) 두 개를 함께 푼다:
-     *
-     *     y = y0 + (kx*cos + kz*sin) * r      수평면 위에 있을 것
-     *     r = envelope(y) * liquidInset       유리 안쪽 벽에 닿아 있을 것
-     *
-     * 두 식의 교점이고, 감쇠를 준 고정점 반복으로 푼다 — 어깨에서는 dr/dy 가 커서
-     * 감쇠 없이는 진동한다.
-     */
-    const inset = p.liquidInset;
-    const y0 = base.surfaceY;
     const clampY = (v) => Math.max(floorY, Math.min(ceil, v));
-    /**
-     * ── 반복은 수렴하지 않을 수 있다. 그래서 마지막에 **자른다** ─────────────
-     * 0.6 완화로 6번 돌렸다. 원통이면 넉넉하고 어깨에서는 아니다: 낮은 쪽
-     * (`dir < 0`)에서 r 이 커지면 y 가 내려가고, 내려가면 포락선이 **커진다**.
-     * 그 되먹임의 이득은 |envelope'| · inset 이고 어깨에서는 그것이 1 을 넘는다 —
-     * 반복이 발산한다.
-     *
-     * 실측: fill 150 · 기울기 22도에서 액면 테가 어깨 왼쪽에서 유리를 뚫고
-     * 나왔다. 사용자가 "액체가 살짝 삐져나온다" 고 한 것이 그것이다.
-     *
-     * 완화를 낮추고(0.35) 횟수를 늘려(12) 발산을 늦추지만, 그것만으로는 보장이
-     * 아니다. 보장은 마지막 줄이다: **자기 높이에서의 벽보다 넓을 수 없다.**
-     * 수렴하지 못하면 모자란 쪽으로 남고, 벽과 액체 사이의 가는 틈은 벽을 뚫고
-     * 나온 테보다 언제나 덜 보인다.
-     */
-    const solve = (dir) => {
-      let r = base.surfaceRadius ?? 0;
-      for (let n = 0; n < 12; n++) {
-        const yy = clampY(y0 + dir * r);
-        const want = this.profile.envelopeAt(yy / MM) * inset * MM;
-        r += (want - r) * 0.35;
-      }
-      const y = clampY(y0 + dir * r);
-      const wall = this.profile.envelopeAt(y / MM) * inset * MM;
-      return { r: Math.max(0, Math.min(r, wall)), y };
-    };
-
-    /**
-     * 링이 **둘**이다: 부채꼴의 테두리와 옆벽 맨 윗줄. 같은 각도, 같은 자리, 다른
-     * 정점. 하나만 움직이면 벽 끝이 액면 위로 삐져나오거나 사이가 벌어진다.
-     * `bottleGeometry` 의 `wallTopRim` 주석에 왜 둘인지 적혀 있다.
-     *
-     * y 만이 아니라 x·z 도 쓴다. 반지름이 컬럼마다 다르므로 링은 더 이상 원이
-     * 아니고, y 만 옮기면 반지름이 옛 값 그대로 남는다 — 그게 유리를 뚫던 원인이다.
-     */
-    const attr = base.attr;
-    const wall = base.wallTopRim;
-    for (let i = 0; i < base.surfaceCols; i++) {
-      const th = (i / base.surfaceCols) * Math.PI * 2;
-      const c = Math.cos(th);
-      const sn = Math.sin(th);
-      const { r, y } = solve(kx * c + kz * sn);
-      // 출렁임은 수평면 **위에** 얹힌다. 기울기와 같은 축을 돌므로, 기울어진 병에서
-      // 술이 낮은 쪽으로 몰리지 아무 상관 없는 쪽으로 몰리지 않는다.
-      const yy = clampY(y + c * amp);
-      /**
-       * 출렁임이 y 를 옮겼으면 반지름도 **다시** 자른다.
-       *
-       * `solve` 가 (r, y) 한 쌍을 풀고 벽에 맞춰 잘라 주지만, 그 뒤에 `amp` 가
-       * y 를 위아래로 밀면 그 짝이 깨진다. 위로 밀린 쪽은 병이 좁아진 자리에
-       * 넓은 원이 놓이고, 그게 유리를 뚫는다.
-       *
-       * 정지 상태에서는 `amp` 가 0 이라 아무 일도 없다. 그래서 앞선 수정으로도
-       * 멈춰 있는 병은 멀쩡했고, 흔들리는 동안에만 아주 살짝 삐져나왔다 —
-       * 사용자가 "자꾸 아주 살짝" 이라고 한 것이 그 상태다. 실측으로 최대
-       * 0.5 mm.
-       */
-      const rr = Math.min(r, this.profile.envelopeAt(yy / MM) * inset * MM);
-      attr.setXYZ(base.surfaceRim + i, rr * c, yy, rr * sn);
-      if (wall !== undefined) attr.setXYZ(wall + i, rr * c, yy, rr * sn);
+    const y0 = this._level * MM;
+    let r = this.profile.envelopeAt(this._level) * inset * MM;
+    for (let n = 0; n < 12; n++) {
+      const want = this.profile.envelopeAt(clampY(y0 + dir * r) / MM) * inset * MM;
+      r += (want - r) * 0.35;
     }
-    // 가운데는 기울기의 피벗이다. 수평면도 출렁임도 여기서는 0 이므로 움직이지
-    // 않고, 그것이 이것을 기울기로 만든다 — 액면 전체가 위아래로 까딱이는 것이 아니라.
-    attr.setY(base.surfaceCentre, base.surfaceY);
-    attr.needsUpdate = true;
-
-    /**
-     * 부채꼴의 법선도 수평면을 따라간다.
-     *
-     * 위치만 기울이면 법선은 여전히 로컬 +Y 를 가리키고, 그건 병의 축이지 위쪽이
-     * 아니다. 조명이 액면을 병의 기울기대로 비추게 되어, 기울일수록 액면이 어두워
-     * 지거나 밝아진다 — 표면은 그대로인데 빛만 도는 것으로 보인다.
-     */
-    const nor = base.normal;
-    if (nor) {
-      const nx = this._surfUp.x;
-      const ny = this._surfUp.y;
-      const nz = this._surfUp.z;
-      nor.setXYZ(base.surfaceCentre, nx, ny, nz);
-      for (let i = 0; i < base.surfaceCols; i++) nor.setXYZ(base.surfaceRim + i, nx, ny, nz);
-      nor.needsUpdate = true;
-    }
+    const y = clampY(y0 + dir * r);
+    const wall = this.profile.envelopeAt(y / MM) * inset * MM;
+    return { r: Math.max(0, Math.min(r, wall)), y };
   }
 
   // ── the burst at the mouth ─────────────────────────────────────────────────
