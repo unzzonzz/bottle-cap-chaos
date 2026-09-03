@@ -205,10 +205,46 @@ export class Fizz {
 
     this.bubbles.length = 0;
     for (let i = 0; i < this.count; i++) {
-      // Sites cluster low: the deeper the liquid, the more supersaturated it is
-      // and the longer a bubble has to grow on the way up. The exponent biases
-      // the draw toward the bottom without pinning anything there.
-      const y0 = Math.pow(hash(i, 2), 1.7) * surfaceY * 0.86;
+      /**
+       * Sites cluster low, but they start ABOVE THE HEEL.
+       *
+       * The bias is the point: the deeper the liquid the more supersaturated it
+       * is, and the longer a bubble has to grow on the way up. `pow(·, 1.7)`
+       * pushes the draw downward without pinning anything there.
+       *
+       * ── the bias had no floor, and it piled sites onto the base ──────────
+       * With a lower bound of 0 the same exponent that makes the streams read
+       * correctly also puts a handful of sites at the very bottom of the
+       * bottle. A billboard reaches `±r0` from its centre VERTICALLY as well as
+       * across, so a site at 0.2 mm carrying a 1 mm bubble hangs half of itself
+       * below the glass base — and because those sites all land at nearly the
+       * same height and differ only in `theta`, they form a ring: a horizontal
+       * line from the side, a ring from above. That is exactly how it was
+       * reported.
+       *
+       * 실측 (fillLevel 130, FIZZ_COUNT 156): 빌보드가 y=0 아래로 내려가는 거품이
+       * **156 개 중 8 개**, 가장 깊은 것이 바닥면보다 0.86 mm 아래. 여덟 개의
+       * y0 가 0.09~0.44 mm 안에 모여 있어서 고리로 보였다.
+       *
+       * 그것이 이제야 보인 이유는 세 가지가 겹쳐서다: 유리 정점 틴트의 바닥이
+       * 0.52 에서 0.86 으로 올라가 가려주던 어두운 밑동이 사라졌고, 블룸이
+       * 생겼는데 거품은 가산 블렌딩이고, `FIZZ_COUNT` 가 108 에서 156 이 됐다.
+       * 거품 재질은 깊이를 쓰지 않으므로 유리 바닥이 가려주지도 않는다.
+       *
+       * ── why the heel and not just `r0` ──────────────────────────────────
+       * Clearing the billboard would only need the largest `r0`, 1.22 mm. The
+       * floor is the heel plus two because that band is also where the profile
+       * flares from `baseRadius` to the body — `envelopeAt` moves fastest there,
+       * and it is the least stable place to be pinning a stream to the wall.
+       * At `heelHeight` 3 that is 5 mm, which leaves 3.79 mm under the largest
+       * bubble and puts zero of the 156 below the base.
+       *
+       * `Math.max(0, …)` because the debug panel can put `fillLevel` below the
+       * heel, and a negative span would flip the distribution upside down.
+       */
+      const floor = (p.heelHeight + 2) * MM;
+      const top = surfaceY * 0.86;
+      const y0 = floor + Math.pow(hash(i, 2), 1.7) * Math.max(0, top - floor);
       const r0 = t.bubbleRadius * (0.45 + hash(i, 4) * 0.9);
 
       // The cubic: how far it has to climb, in units of K r0^2.
@@ -224,18 +260,46 @@ export class Fizz {
         r0,
         phase: hash(i, 3),
         /**
-         * Just PROUD of the drink's surface, as a multiple of it.
+         * How far out across the drink the stream sits, as a fraction of the
+         * drink's own radius. **Under 1 — the bubbles are INSIDE the drink.**
          *
-         * Above 1, and that is the whole of it: the drink is opaque and writes
-         * depth, so a bubble at 0.95 of its radius is behind its near wall and
-         * the depth test throws it away — which is exactly what happened, and
-         * the first version rendered a hundred and eight invisible bubbles.
-         * They belong against the GLASS, where the nucleation pits are, and the
-         * glass is outside the drink. A little scatter so the streams are not
-         * all at one radius, and the whole range stays under the glass itself
-         * (0.9 * 1.06 is still inside 1.0).
+         * ── it used to be over 1, and the reason expired ─────────────────────
+         * The old value was `1.01 + hash * 0.05`, just PROUD of the drink, and
+         * the comment gave the reason: "the drink is opaque and writes depth, so
+         * a bubble at 0.95 of its radius is behind its near wall and the depth
+         * test throws it away". That was true and it is not any more. The drink
+         * went clear (`opacity` 0.68) and stopped writing depth, so nothing
+         * rejects a bubble inside it. Checked rather than assumed: with every
+         * `wall` forced to 0.70 the screen has 228664 lit bubble pixels against
+         * 228682 at 1.03 — the same bubbles, none lost.
+         *
+         * ── and being outside the drink had gone from odd to wrong ──────────
+         * The multiplier that actually places a bubble is `liquidInset * wall`.
+         * At `liquidInset` 0.9 the old range gave 0.909..0.954, safely inside
+         * the glass, and the comment said so: "0.9 * 1.06 is still inside 1.0".
+         * `liquidInset` has since gone to 0.96, which makes that product
+         * 0.9696..**1.0176** — and a bubble whose centre multiplier is over 1 is
+         * outside the bottle.
+         *
+         * 실측: 156 개 중 **58 개**의 중심이 유리 바깥, 최대 0.52 mm. 화면에서는
+         * 빌보드까지 얹혀서 실루엣 밖으로 최대 7 px (병 폭이 189 px 일 때) 나갔고,
+         * 코너 기준 8.5% 가 밖이었다. 정면의 거품은 옆으로 퍼져서 티가 안 나고
+         * 실루엣 가장자리의 거품만 정확히 바깥으로 퍼지므로, 눈이 가장 잘 보는
+         * 자리에서만 보였다.
+         *
+         * ── 0.88..0.93 ─────────────────────────────────────────────────────
+         * Bubbles still rise close to the wall, which is where the nucleation
+         * pits are and what makes them read as streams off the glass rather
+         * than as a haze in the middle. But the biggest billboard any bubble
+         * ever reaches is 3.05 mm across the half-diagonal, and at 0.93 the
+         * clearance from the centre to the glass in the body is 3.21 mm — so
+         * the quad has room even where it spreads straight outward. At 0.88 it
+         * is 4.65 mm.
+         *
+         * `hash(i, 5)` is kept: this is the same quantity re-scaled, not a new
+         * scatter, so it must not consume a fresh `k` — see the header.
          */
-        wall: 1.01 + hash(i, 5) * 0.05,
+        wall: 0.88 + hash(i, 5) * 0.05,
         growth,
         life,
         swirl: (hash(i, 6) - 0.5) * 2,
@@ -291,7 +355,24 @@ export class Fizz {
       // instability that causes it sets in with size.
       const spiral = (radius / b.r0 - 1) * t.bubbleWobble;
       const theta = b.theta + b.swirl * spiral;
-      const wall = this.profile.envelopeAt(y / MM) * p.liquidInset * b.wall * MM;
+      const glass = this.profile.envelopeAt(y / MM) * MM;
+      const wall = glass * p.liquidInset * b.wall;
+      /**
+       * How much room there is between this stream and the glass, radially.
+       *
+       * The billboard faces the CAMERA, so a bubble on the silhouette spreads
+       * straight out of the bottle — which is why the ones that escape are
+       * always the ones at the edge, and why they are the easiest to see.
+       * Clamping `s` to the clearance makes leaving impossible.
+       *
+       * At the shipped numbers this never binds: the clearance in the body is
+       * 3.21 to 4.65 mm and the largest billboard ever measured is 3.05 mm, so
+       * the growing, quickening column the header is built on is untouched. It
+       * exists for the panel — push `fillLevel` to 180 and the streams climb
+       * into the neck, where the bottle is 12 mm across and there is no room
+       * for a 3 mm sprite.
+       */
+      const room = glass - wall;
 
       const cx = wall * Math.cos(theta);
       const cz = wall * Math.sin(theta);
@@ -299,7 +380,26 @@ export class Fizz {
       // Bursting at the surface. The last tenth of the climb shrinks it away
       // rather than letting it wink out mid-frame.
       const tail = Math.min(1, (1 - age / b.life) / 0.1);
-      const s = radius * tail;
+      /**
+       * And GROWING OUT of the site, over the first few per cent of the climb.
+       *
+       * The header spends four paragraphs on the fact that a bubble does not
+       * appear in the liquid but forms on something — and then the code had it
+       * spring into existence at full `r0`. Real nucleation grows out of the
+       * pit until buoyancy pulls it off. This is that, and it is the same
+       * closed form as everything else here: a function of the age, no state.
+       *
+       * It also does most of the work on the ring at the base. A site low in
+       * the bottle now starts at nothing rather than at a millimetre, so even
+       * the deepest one has nothing to hang below the glass, and the pop-in at
+       * the bottom of every stream goes with it.
+       *
+       * 6% against the tail's 10%: a bubble should leave its site faster than
+       * it dies at the surface, and a slower ramp makes the bottom of each
+       * stream look like it is fading in rather than budding.
+       */
+      const birth = Math.min(1, age / b.life / 0.06);
+      const s = Math.min(radius * tail * birth, room);
 
       pos.setXYZ(v + 0, cx - this._right.x * s - this._up.x * s, y - this._right.y * s - this._up.y * s, cz - this._right.z * s - this._up.z * s);
       pos.setXYZ(v + 1, cx + this._right.x * s - this._up.x * s, y + this._right.y * s - this._up.y * s, cz + this._right.z * s - this._up.z * s);
