@@ -32,8 +32,7 @@ import { ModalLayer } from '../ui/ModalLayer.js';
 import { DEFAULT_MARK } from '../marks/MarkStorage.js';
 import { STAGE, Transition } from './Transition.js';
 import { MENU_CONFIG } from './menuConfig.js';
-import { capLogoTexture, floorPoolTexture } from './menuTextures.js';
-import { createSpriteMaterial } from './menuMaterials.js';
+import { capLogoTexture } from './menuTextures.js';
 import { destinationUrl, placeOf, prefetch } from './menuRoutes.js';
 // What counts as a mode, from the one place that decides it. See `swapTo`.
 import { MODES } from '../game/modes.js';
@@ -48,7 +47,7 @@ import { MenuAudio } from '../audio/MenuAudio.js';
  *
  * ── the render order, and why it is this one ────────────────────────────────
  *
- *     camera.layers.set(WORLD)         floor, bottle, liquid, fizz
+ *     camera.layers.set(WORLD)         sky, bottle, liquid, fizz
  *     composer.render()                MSAA target -> bloom -> canvas
  *     camera.layers.set(UI)            the plates, unbloomed
  *     clearDepth(); render(scene)
@@ -293,19 +292,22 @@ export function bootMenu(
   const bottle = new Bottle({ retro, tuning: cfg.bottle });
   const items = new MenuItems({ retro, tuning: cfg.items });
 
-  const floorMap = floorPoolTexture();
-  const floor = new Mesh(
-    new PlaneGeometry(1, 1),
-    createSpriteMaterial(retro, { map: floorMap, opacity: 1 }),
-  );
-  floor.rotation.x = -Math.PI / 2;
-  floor.scale.set(30, 30, 1);
-  floor.renderOrder = -2;
-
-  // The shadow and the burst are siblings of the bottle rather than children of
-  // it: one lies on the floor whatever the bottle above it is doing, and the
-  // other is placed by a world position every frame. Parenting either would add
-  // the float to it twice.
+  /**
+   * ── the floor is gone, and the pool of light with it ────────────────────
+   * There was a 30x30 quad lying flat under the bottle with a bright radial
+   * wash printed on it — "the one light in the room, and the bottle is what it
+   * is lighting". It read well and it was a FLOOR, which is exactly what §6.2
+   * takes away: the bottle hangs in space, there is nothing under it, and a
+   * pool of light on nothing is a hole in the picture. Measured on screen it
+   * was also the brightest thing in the menu by a distance, past the bloom
+   * threshold, so the bottom third of the frame was a white blur.
+   *
+   * What replaces it is the SEA — `core/sky.js` draws the world below the
+   * horizon now, so the lower half of the menu has somewhere to be without
+   * anything being placed there. `floorPoolTexture` is still exported and has
+   * no caller; it is left for the moment because the victory screen's own wash
+   * may want it, and PHASE 5 is where that is decided.
+   */
   const menuRoot = new Group();
   /**
    * 병은 그림자를 던지고 바닥은 받는다.
@@ -315,14 +317,22 @@ export function bootMenu(
    * 이 연출의 그림자는 "병이 떠 있다"를 말하려고 병 바로 아래에 있다. 둘은 다른
    * 일을 한다.
    */
+  /**
+   * 병은 여전히 그림자를 던진다 — **받을 것이 없을 뿐이다.**
+   *
+   * 태그를 남기는 이유는 티어 시스템이 이 목록으로 캐스터를 세기 때문이고
+   * (`core/quality.refreshShadowCasters`), 던지는 쪽이 목록에서 빠지면 게임
+   * 화면으로 넘어갔을 때 등급이 어긋난다. `bottle.shadow` 는 손으로 그린 타원
+   * 스프라이트이고 그것이 이 화면의 유일한 그림자다 — 실제 그림자는 광원 반대편에
+   * 생기지만, 이 연출의 그림자는 "병이 떠 있다" 를 말하려고 병 아래 멀리 있다.
+   */
   bottle.root.traverse((o) => {
-    // 병은 이 화면의 히어로다. 그림자가 있는 티어라면 언제나 던진다 —
-    // `SHADOW_RANK.HERO` 는 경기 화면에서 뚜껑과 공이 받는 것과 같은 등급이고,
-    // 그래야 캡 와이프 양쪽에서 뚜껑의 접지감이 같다.
     if (o.isMesh) tagShadow(o, SHADOW_RANK.HERO);
   });
-  floor.receiveShadow = true;
-  menuRoot.add(floor, bottle.root, bottle.shadow, bottle.burst, asUiLayer(items.root));
+  // The shadow and the burst are siblings of the bottle rather than children of
+  // it: one is placed by a world position every frame and the other hangs a
+  // fixed distance below. Parenting either would add the float to it twice.
+  menuRoot.add(bottle.root, bottle.shadow, bottle.burst, asUiLayer(items.root));
   scene.add(menuRoot);
 
   let settings = null;
@@ -519,13 +529,6 @@ export function bootMenu(
     for (const scene of [settings, opponent, online, marks, editor, confirm]) {
       scene?.layout?.(u);
     }
-    // The pool goes under the BOTTLE, not under the middle of the frame. It is
-    // the one light in the room and the bottle is what it is lighting.
-    // The pool is a fixed-size quad in world units. Pulling the camera back
-    // makes it a smaller fraction of the view, so it grows by the same factor
-    // and keeps lighting the same amount of floor around the bottle.
-    floor.scale.set(30 * camWiden, 30 * camWiden, 1);
-    floor.position.set(cfg.bottle.originX, cfg.bottle.shadowDrop, 0);
   }
   placeCamera();
   // A resolution change moves what one texel is worth, so the plates have to be
@@ -1460,7 +1463,7 @@ export function bootMenu(
   function render() {
     const r = viewport.renderer;
 
-    // 1. The world — bottle, liquid, fizz, floor — through the bloom chain.
+    // 1. The world — sky, bottle, liquid, fizz — through the bloom chain.
     //    This page is almost entirely the glossy surfaces that pass exists for.
     camera.layers.set(WORLD_LAYER);
     composer.render();

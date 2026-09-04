@@ -52,6 +52,29 @@ function shadowSizeNow() {
   return want > 0 ? Math.min(want, BUDGET.shadowMapSize) : 0;
 }
 
+/**
+ * ── §10 asked for a new light and got a measurement instead ─────────────────
+ * "부드러운 여름 햇빛. 시네마틱 아님" and "그림자 부드럽고 색을 유지. 검은 덩어리
+ * 금지" are the direction's two requirements for this file, and the rig already
+ * met both — so PHASE 3 checked it rather than re-tuned it, which is the right
+ * outcome for numbers that were fitted by measurement in the first place.
+ *
+ * What was checked, on a knockout board at the shipped tier:
+ *
+ *   frame average          linear 0.439, encoded 0.684
+ *   over the bloom threshold   0.8% of pixels
+ *   darkest pixel on the board `#1f3872`, chroma 0.325
+ *
+ * The last line is the one that matters here. A "검은 덩어리" is a dark NEUTRAL,
+ * and the darkest thing on the board is a saturated cobalt — the out-line, not a
+ * shadow, because no shadow on that board gets darker than the line does. The
+ * hemisphere light below is what buys that, and it is why it is not optional.
+ *
+ * The only value this phase moved is the key's COLOUR, and it moved in PHASE 0
+ * with the palette: `light.sun` was `#fff6e0`, a cream, and cream in the light
+ * is how cream gets back into a palette that banned it — every white surface in
+ * the game picks it up.
+ */
 export function createLightRig(scene, { shadows = true, shadowMapSize = null } = {}) {
   /**
    * 키 라이트. 그림자를 던지는 유일한 광원이다.

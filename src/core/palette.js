@@ -212,13 +212,40 @@ export const PALETTE = {
     skyMid: '#63aee8',
     skyLow: '#b6def4',
     below: '#9ed3ec',
-    /** The near water, toward the camera. Cobalt, per §10. */
-    seaNear: '#2f77c4',
-    /** The far water at the horizon. Where the sea gives up and becomes sky. */
-    seaFar: '#addcf2',
-    /** The clouds. Soft, white, and few — §10 says "a small amount". */
-    cloud: WHITE_PURE,
-    bokeh: WHITE_PURE,
+    /**
+     * The sea, as a band immediately under the horizon.
+     *
+     * §10 asks for "먼 배경. 코발트 → 옅은 파랑" — distant water running cobalt
+     * into pale blue — and the direction of that gradient is the opposite of the
+     * intuitive one, for a reason worth writing down.
+     *
+     * Physically, water at a grazing angle is a mirror and water underfoot is
+     * dark; so the horizon should be BRIGHT and straight-down should be DEEP.
+     * Doing that would darken the game to the point the `below` note above
+     * spent four measurements getting out of: the top-down cameras look at the
+     * bottom of the dome and that band is 55% of an in-game frame.
+     *
+     * So the sea is the DISTANT thing §10 calls it — a cobalt band right at the
+     * horizon, brightening downward into `below`, which is the measured value
+     * the frame's brightness depends on. That also happens to be what a summer
+     * sea looks like from a height: the far water is a deep blue line and the
+     * water nearer you is paler.
+     */
+    seaDeep: '#2f77c4',
+    /**
+     * The reflection hint, and the clouds. Both are capped by the bloom.
+     *
+     * The sky shader writes these straight to the linear target, so the
+     * bright-pass sees their linear luminance directly against a 0.72
+     * threshold. Measured: `#ffffff` is 1.000, `whiteCool` 0.948, and every
+     * step down to `#c8e0f4` at 0.721 is still over. `#b6def4` is 0.687, which
+     * is the first value that does not turn every cloud into an emitter — and
+     * a cloud that blooms is a cloud with a halo, which is the aero look this
+     * direction replaced.
+     */
+    cloud: '#b6def4',
+    /** A thin brighter line ON the horizon. §10's "반사 암시". */
+    glint: '#c2e6f8',
   },
 
   /**
