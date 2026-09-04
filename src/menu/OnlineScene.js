@@ -152,7 +152,7 @@ export class OnlineScene {
    *
    * 예전에는 y 가 168 / 74 / 8 / -50 / -108 / -174 로 고정이었고, 316 짜리
    * 프레임에서는 제목과 마지막 줄이 화면 밖이었다 — 대기열에 들어간 뒤 상태 줄과
-   * "◀ 뒤로" 를 동시에 볼 수 없다는 뜻이다.
+   * "뒤로" 를 동시에 볼 수 없다는 뜻이다.
    */
   layout(unitsPerPixel) {
     const u = unitsPerPixel ?? this._u;
@@ -286,7 +286,7 @@ export class OnlineScene {
       case 'random':
         return '랜덤 매칭';
       case 'back':
-        return this._waiting ? '취소' : '◀ 뒤로';
+        return this._waiting ? '취소' : '뒤로';
       default:
         return id;
     }

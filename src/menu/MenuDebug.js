@@ -25,12 +25,17 @@ import { addAudioFolder } from '../audio/audioDebug.js';
  * meet in the middle and coverage is a fact about the arithmetic rather than a
  * measurement.
  *
- * What is left is the visual half, and it is worth keeping because the vertex
- * SNAP is still free to move an edge: the checkerboard sits behind the bars in
- * their own overlay scene, and if any of it is ever visible while the readout
- * says the bars are shut, they are not covering the screen. The readout beside
- * it is the two scalars themselves — `bars` and `uiGate` — because with the
- * measurement gone they are the whole of the state.
+ * What is left is the visual half, and the cap wipe brings back the reason it
+ * was worth keeping. Two bars meeting in the middle cover the frame by
+ * arithmetic; a spinning tilted disc covers it by a computation with a cosine
+ * and a safety factor in it (`CapWipe.coverScale`), and a computation can be
+ * wrong. The checkerboard sits behind the cap in its own overlay scene, so if
+ * any of it is visible on a frame the readout calls covered, the cap is not
+ * covering the screen.
+ *
+ * The readout beside it is `margin()` — how many frame pixels of the panel
+ * stick out past the far corner. Negative is a gap, and it is the same
+ * arithmetic the cover scale is built from, reported rather than trusted.
  */
 
 const CHECKER_FRAG = /* glsl */ `
@@ -55,7 +60,7 @@ export function bootMenuDebug(ctx) {
     return { frame() {}, gui: null };
   }
 
-  const { config, bottle, cinematic, transition, retro, composer, viewport, overlay } = ctx;
+  const { config, bottle, wipe, transition, retro, composer, viewport, overlay } = ctx;
   /** Frame counter for the audio readouts' slow poll. See the return below. */
   let audioTick = 0;
   const gui = new GUI({ title: 'MENU / 병 + 전환' });
@@ -92,7 +97,7 @@ export function bootMenuDebug(ctx) {
       depthWrite: false,
     }),
   );
-  // Behind the bars in their overlay, and only ever on when the check is on.
+  // Behind the cap in its overlay, and only ever on when the check is on.
   checker.position.z = -5;
   checker.renderOrder = -1000;
   checker.visible = false;
@@ -319,9 +324,9 @@ export function bootMenuDebug(ctx) {
 
   /** Called once a frame from the loop. */
   function frame(state) {
-    // Only while the bars are doing something: at rest the overlay is empty and
-    // a checkerboard behind nothing is a checkerboard over the whole menu.
-    checker.visible = flags.checker && cinematic.bars > 0;
+    // Only while the cap is on screen: at rest the overlay is empty and a
+    // checkerboard behind nothing is a checkerboard over the whole menu.
+    checker.visible = flags.checker && wipe.root.visible;
 
     if (state.stage !== lastStage) {
       lastStage = state.stage;
@@ -329,11 +334,10 @@ export function bootMenuDebug(ctx) {
       stageRow.updateDisplay();
     }
 
-    const bars = cinematic.bars;
-    const px = Math.round((bars * FRAME.height) / 2);
-    stats.cover =
-      `bars ${bars.toFixed(2)} (${px}px)  ·  gate ${cinematic.uiGate.toFixed(2)}` +
-      (bars >= 1 ? '  차폐' : bars > 0 ? '  레터박스' : '');
+    const m = wipe.root.visible ? wipe.margin() : 0;
+    stats.cover = wipe.root.visible
+      ? `여백 ${m.toFixed(1)}px${m < 0 ? '  ⚠ 틈' : '  덮음'}`
+      : '뚜껑 없음';
     coverRow.updateDisplay();
   }
 

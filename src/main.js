@@ -54,6 +54,7 @@ import { hardenWebView } from './platform/webview.js';
 import { bootViewer } from './viewer/bootViewer.js';
 import { bootMenu } from './menu/bootMenu.js';
 import { Cinematic } from './core/Cinematic.js';
+import { CapWipe } from './core/CapWipe.js';
 import { MENU_CONFIG } from './menu/menuConfig.js';
 import { HANDOVER_FLAG, isHandover, isReturnFromGame } from './menu/menuRoutes.js';
 import { PALETTE } from './core/palette.js';
@@ -135,6 +136,23 @@ if (routed) {
 // before the letterbox, the page fade or either developer overlay is painted.
 // It is cheap — a dozen `setProperty` calls.
 applyCssPalette();
+
+/**
+ * The other half of the handover paint. See `bootMenu.navigateTo`.
+ *
+ * The menu painted its window cobalt on the way out; this paints ours the same
+ * before anything else runs, so the gap between the two documents and this
+ * page's first frames are one colour. Only on a handover: a cold `/survival`
+ * has no seam to close and should show the ordinary void.
+ *
+ * Assigned rather than left to the stylesheet because the stylesheet's value is
+ * the SKY's top (`--msa-void`), which is right for a match in progress and is
+ * not the colour the cap covered the screen with.
+ */
+if (isHandover()) {
+  document.documentElement.style.background = PALETTE.menu.capBrand;
+  document.body.style.background = PALETTE.menu.capBrand;
+}
 
 /**
  * Kick the webfont, and drop every baked text texture once it lands.
@@ -1157,27 +1175,50 @@ async function boot(canvas) {
    * this document plays afterwards.
    *
    * ── it opens SHUT, and that is the whole document seam ───────────────────
-   * The menu closed its bars, swapped the document behind them, and went away.
-   * This page has to come up in exactly that state or the join is a cut. So the
-   * bars are snapped closed here, before anything is drawn, and the opening
-   * sequence is what parts them — see `playOpening`.
+   * The menu covered the screen with the CAP, swapped the document behind it,
+   * and went away. This page has to come up in exactly that state or the join is
+   * a cut — so the cap is snapped to full cover here, before anything is drawn,
+   * and the opening sequence is what flies it out (`playOpening`).
+   *
+   * ── this used to be a shut letterbox, and §7.2 makes it an object ─────────
+   * The bars did the same job and the note here said so: the menu closed them,
+   * swapped behind them, and this page snapped them shut to match. What the cap
+   * adds is §9's chain — the thing covering the screen is the thing that came
+   * off the bottle, and it is about to become the thing you flick across a
+   * board. The letterbox is still here, for the match's own opening and ending,
+   * which is framing rather than transition.
    *
    * Unconditionally, not only on a handover. A cold `/survival` typed into an
    * address bar gets the same opening, which is right twice over: every match
-   * begins the same way, and the shut frame also covers the WASM boot that a
+   * begins the same way, and the covered frame also hides the WASM boot that a
    * cold load spends on a blank canvas. There is nothing left for `isHandover`
    * to change about how this page looks, and the flag survives only to be
    * stripped from the address bar below.
    *
    * ── it is presentation and nothing else ──────────────────────────────────
-   * It does not touch the match, the physics, the rules or the cards. It draws
-   * last, into the same bound target as every other overlay, so it goes through
-   * the identical dither and quantiser — and outside the bloom chain, because a
-   * bright pass over a hard bar edge blooms the edge.
+   * Neither object touches the match, the physics, the rules or the cards. Both
+   * draw last, into the same bound target as every other overlay, and outside
+   * the bloom chain — a bright pass over a hard bar edge blooms the edge, and
+   * over the cap's magnified artwork it smears it.
    */
   const cinematic = new Cinematic();
-  cinematic.snap(1);
+  cinematic.snap(0);
   viewport.onResize(({ resolution }) => cinematic.setResolution(resolution));
+
+  const wipe = new CapWipe({
+    retro,
+    tuning: MENU_CONFIG.wipe,
+    panelMap: capLogoTexture(),
+  });
+  wipe.snapToCover();
+  /**
+   * How far through the cap's exit we are, or `null` once it has gone.
+   *
+   * A plain number on the loop rather than a class, because this is the ONE
+   * sequence in this document with no branch in it: the cap covers, it leaves,
+   * it is never seen again. `playOpening` starts it and `tick` steps it.
+   */
+  let wipeExit = 0;
 
   /**
    * Who currently owns the bars, and where the ending's camera is going.
@@ -1933,9 +1974,24 @@ async function boot(canvas) {
     // The bars are this function's from here on. See the note in `tick`.
     victoryHeldBars = false;
 
+    /**
+     * ── the cap leaves first, and everything else waits for it ─────────────
+     * The screen arrives covered by the cap (`wipe.snapToCover` at boot), so
+     * the first thing that happens in this document is the cap flying past the
+     * camera. `wipeExit` runs 0..1 over `exitSeconds` and `tick` steps it.
+     *
+     * The letterbox's own part starts UNDER the cap rather than after it. The
+     * bars were shut here before and the ordering was the other way round; now
+     * the frame is already open and the cap is what is covering it, so the
+     * letterbox only has to close to the letterbox position — and doing that
+     * while the cap is still on screen means the board is already framed when
+     * the cap clears, rather than the frame reshaping itself afterwards.
+     */
+    wipeExit = 0;
+
     const introduce = !!introLayer && CONFIG.intro?.enabled !== false;
     if (introduce) {
-      // Stage 1. The bars part to the LETTERBOX and the gate stays shut, so the
+      // Stage 1. The bars close to the LETTERBOX and the gate stays shut, so the
       // board is on screen and none of the UI over it is. The introduction
       // starts when they arrive — `pendingIntro`, spent in `tick` — and what
       // opens them the rest of the way is that introduction reaching its last
@@ -1943,12 +1999,10 @@ async function boot(canvas) {
       cinematic.close(CONFIG.intro.barSeconds);
       pendingIntro = introNames();
     } else {
-      // Nobody to introduce, so there is nothing for a letterbox to hold: the
-      // bars go straight from shut to open and the UI comes up with them. Still
-      // the bars, though — "바를 통째로 건너뛰지 마라". Cutting from a covered
-      // frame to a live board is the hard cut they exist to replace, and it is
-      // also what a cold `/survival` would open on.
-      cinematic.open(CONFIG.intro.barSeconds);
+      // Nobody to introduce, so there is nothing for a letterbox to hold. The
+      // cap leaving IS the opening, which is what §9 asks for: the object hands
+      // the screen over rather than a frame being drawn back.
+      cinematic.snap(0, { gate: 1 });
     }
 
     /**
@@ -1977,9 +2031,13 @@ async function boot(canvas) {
       pendingIntro = null;
       if (introduce) introLayer.skip();
       // Straight to the frame the sequence would have reached: bars open, gate
-      // up. `snap` rather than a zero-length tween, which would still owe an
-      // `update` before it landed.
+      // up, cap gone. `snap` rather than a zero-length tween, which would still
+      // owe an `update` before it landed.
       cinematic.snap(0, { gate: 1 });
+      wipeExit = null;
+      wipe.end();
+      document.documentElement.style.background = '';
+      document.body.style.background = '';
     };
 
     return new Promise((resolve) => {
@@ -2727,6 +2785,34 @@ async function boot(canvas) {
     cinematic.update(dt);
 
     /**
+     * The cap leaving. The one sequence in this document with no branch in it.
+     *
+     * Stepped after the letterbox so both have this frame's state before
+     * anything draws, and `end()`ed exactly once — `wipeExit` becomes `null`,
+     * which is also what `cutToEnd` sets it to, so the two paths cannot both
+     * hide it and cannot both leave it up.
+     */
+    if (wipeExit !== null) {
+      wipeExit = Math.min(1, wipeExit + dt / Math.max(0.05, MENU_CONFIG.transition.exitSeconds));
+      wipe.exit(wipeExit, dt);
+      if (wipeExit >= 1) {
+        wipeExit = null;
+        wipe.end();
+        /**
+         * Give the window back to the stylesheet.
+         *
+         * The handover paint is cobalt and the surround for a match in progress
+         * is the sky's top — leaving the inline style on would keep a match
+         * inside the transition's colour for its whole length. Cleared here
+         * rather than on a timer because this is the frame the cap is gone,
+         * which is the frame the seam stops existing.
+         */
+        document.documentElement.style.background = '';
+        document.body.style.background = '';
+      }
+    }
+
+    /**
      * And the sound, last of all.
      *
      * Every layer above has written this frame's state, so a poll-and-diff
@@ -3023,8 +3109,11 @@ async function boot(canvas) {
      * The three after them are each modal over the last: the victory screen has
      * taken the screen, match-found is handing the screen over, and a modal
      * question is the last thing on it. The letterbox is over all of them,
-     * because it is the frame everything else is inside — and at a covered
-     * frame it is the only thing on screen.
+     * because it is the frame everything else is inside.
+     *
+     * The cap is over even that, and only for the second it takes to leave: it
+     * arrived covering the whole screen and is the last thing between this
+     * document and the one before it.
      */
     composer.setCamera(gameCamera.camera);
     composer.render();
@@ -3038,6 +3127,7 @@ async function boot(canvas) {
     introLayer?.render(r);
     modal.render(r);
     cinematic.render(r);
+    wipe.render(r);
     r.autoClear = true;
   }
 
@@ -3079,6 +3169,9 @@ async function boot(canvas) {
     composer,
     match, physics, view, colliderView, overlay, input, router, preview, CONFIG,
     gameCamera, camTracker, viewport, tick, rebuildAll, modeByKey, cards, cardFx,
+    // The cap that covered the screen on the way in, so its cover can be
+    // measured from the console rather than caught by eye in half a second.
+    wipe,
     // The seats, and the switch between them. `tick` can be driven by hand
     // alongside these, which is the only way to step through an AI turn's
     // phases — several of them are shorter than a frame at 0.2x.

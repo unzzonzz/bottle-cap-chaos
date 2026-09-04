@@ -1,13 +1,22 @@
 /**
- * The two stages, and the clock that walks them.
+ * The three stages, and the clock that walks them.
  *
  * It owns no three.js objects and draws nothing. It answers two questions per
  * frame — which stage, and how far into it — and fires two callbacks at the two
  * moments that are not just "some more time passed": the cap leaving the bottle
  * and the screen going opaque.
  *
- *   1  POP      the cap hops off the mouth; the frame closes over it
- *   2  COVER    the frame is one colour, and the scene is swapped underneath it
+ *   1  POP      the cap leaves the mouth and comes at the camera, growing
+ *   2  COVER    the cap fills the frame, and the scene is swapped underneath it
+ *   3  EXIT     it carries on past the camera and out
+ *
+ * ── stage 3 only runs on a swap that STAYS in this document ────────────────
+ * A navigation stops at the cover: `location.assign` does not tear this page
+ * down synchronously, so a menu that uncovered on the way out would show itself
+ * again for however long the next document takes to paint. The far side picks
+ * the cap up instead and plays the exit there — `main.js`, and §7.3's contract
+ * is that the covered frame is the seam. The clock still runs the stage; what
+ * changes is what `bootMenu` does with it.
  *
  * ── stage 1 used to be a SHAKE, and the interaction went with it ───────────
  * There were three stages, and the first was the bottle being worked up: it
@@ -62,6 +71,7 @@ export const STAGE = {
   IDLE: 'idle',
   POP: 'pop',
   COVER: 'cover',
+  EXIT: 'exit',
 };
 
 export class Transition {
@@ -90,7 +100,7 @@ export class Transition {
 
   get totalSeconds() {
     const t = this.tuning;
-    return t.barSeconds + t.coverSeconds;
+    return t.barSeconds + t.coverSeconds + t.exitSeconds;
   }
 
   /**
@@ -145,6 +155,7 @@ export class Transition {
 
     const popEnd = c.barSeconds;
     const coverEnd = popEnd + c.coverSeconds;
+    const exitEnd = coverEnd + c.exitSeconds;
     const at = this._clock;
 
     if (at < popEnd) {
@@ -160,6 +171,23 @@ export class Transition {
       // Fired on the first frame of the window rather than at its midpoint, so
       // the new scene has the whole window to have its first frame drawn in
       // instead of the tail of it.
+      if (!this._swapped) {
+        this._swapped = true;
+        this.onSwap?.(this.target);
+      }
+    } else if (at < exitEnd) {
+      this.stage = STAGE.EXIT;
+      this.t = (at - coverEnd) / Math.max(1e-4, c.exitSeconds);
+      /**
+       * The swap is latched here too, for a frame long enough to step over the
+       * whole cover window.
+       *
+       * It was only in the terminal branch before, which was correct while the
+       * cover was the last thing that happened. With an exit after it, a 100 ms
+       * frame lands here with the menu uncovering over a scene that was never
+       * swapped — and the guard has to be on the first branch past the window,
+       * not on the last branch of the run.
+       */
       if (!this._swapped) {
         this._swapped = true;
         this.onSwap?.(this.target);
@@ -180,13 +208,12 @@ export class Transition {
     }
 
     /**
-     * The cap's hop, 0..1, over the FRONT of stage 1 and not the whole of it.
+     * The bottle's own cap leaving the mouth, 0..1, over the FRONT of stage 1.
      *
-     * The stage is as long as the frame takes to close and the hop is much
-     * shorter — a cap that took the whole of the close to leave the bottle
-     * would still be rising when the frame went opaque, which reads as the
-     * animation being cut off rather than finished. Past `popSeconds` it stays
-     * at 1, which is the pose the cap is hidden on.
+     * Shorter than the stage. The crimp letting go is an event and the flight
+     * is what fills the rest of the window — and the two are different objects
+     * by then: the bottle hides its cap on the frame the overlay gains one.
+     * Past `popSeconds` it stays at 1.
      */
     const pop = this.stage === STAGE.POP ? Math.min(1, at / Math.max(1e-4, c.popSeconds)) : 0;
     return { stage: this.stage, t: this.t, pop };

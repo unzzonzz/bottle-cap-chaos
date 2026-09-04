@@ -312,8 +312,9 @@ export class Bottle {
 
     this.capBodyMaterial = retro.create({ color: CAP_COLOR });
     // WHITE, not the cap colour. The panel map used to be a greyscale
-    // placeholder that got its red by being multiplied by this; the logo brings
-    // its own, and multiplying red by red would come out nearly black.
+    // placeholder that got its colour by being multiplied by this; the logo
+    // brings its own cobalt, and multiplying cobalt by cobalt would come out
+    // nearly black.
     this.capPanelMaterial = retro.create({ map: this.capTopMap, color: PALETTE.untinted });
     this.capLinerMaterial = retro.create({ color: LINER_COLOR, gloss: 0.35 });
 

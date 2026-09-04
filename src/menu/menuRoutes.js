@@ -1,6 +1,35 @@
 import { isModePath, modePath } from '../game/modes.js';
 
 /**
+ * What each mode is a PLACE in, rather than what it is a game of.
+ *
+ * §10 of the brief names two of them — the knockout board is a small wooden
+ * board on a summer table, the pitch is the lawn beside the house — and the
+ * curling lane was named on the same principle: a long wooden floor is a porch,
+ * and "여름에 하는 컬링" only reads as a joke if the surface says summer.
+ *
+ * ── it is here rather than in `modes.js`, and that is not a filing choice ──
+ * `src/game/modes.js` is simulation territory and the direction freezes it. It
+ * already carries a `name` — 알까기, 알까기 축구, 알까기 컬링 — which is what the
+ * mode IS. This is where it HAPPENS, which is an art-direction fact about the
+ * world and changes with the direction rather than with the rules.
+ *
+ * Keyed on the mode key, so a mode with no entry here simply has no place name
+ * and every caller falls back to the mode's own — which is what a fourth mode
+ * would do on the day it was added and before anybody had decided where it was.
+ */
+export const MODE_PLACE = {
+  knockout: 'SUMMER TABLE',
+  football: 'SUMMER LAWN',
+  curling: 'SUMMER PORCH',
+};
+
+/** The place a mode happens in, or `''`. Never throws on an unknown key. */
+export function placeOf(modeKey) {
+  return MODE_PLACE[modeKey] ?? '';
+}
+
+/**
  * Where the menu's items go, and how the game gets back here.
  *
  * ── the menu is the ROOT ────────────────────────────────────────────────────

@@ -406,10 +406,23 @@ export function capLogoTexture(texels = 512) {
   const { canvas, ctx } = makeCanvas(size * scale, size * scale);
   ctx.scale(scale, scale);
 
-  // The corners are never sampled — the panel is the inscribed circle — but
-  // filling them costs nothing and means a rounding error at the rim cannot
-  // pick up a transparent texel.
-  ctx.fillStyle = PALETTE.menu.labelPaper;
+  /**
+   * ── the field is COBALT, and that is the document seam ──────────────────
+   * This texture is the covered frame. §7.3 puts the handover paint on cobalt —
+   * `--msa-void`, the `styles.css` fallback and `PALETTE.menu.capBrand` are all
+   * the same value — and the covered frame has to BE that value or the join
+   * between the two documents is a flash from one blue to another.
+   *
+   * It was the other way round for one revision, paper with cobalt letters, and
+   * the measured result was a pale grey-blue frame against a cobalt surround.
+   * Inverting it also makes the better poster: white letters on a saturated
+   * field is what a bottle cap actually looks like.
+   *
+   * The corners are never sampled — the panel is the inscribed circle — but
+   * filling them costs nothing and means a rounding error at the rim cannot
+   * pick up a transparent texel.
+   */
+  ctx.fillStyle = PALETTE.menu.labelInk;
   ctx.fillRect(0, 0, size, size);
 
   /**
@@ -448,8 +461,8 @@ export function capLogoTexture(texels = 512) {
   // Rim. Outside the box the lockup is confined to — see the header — so it is
   // the half of the design that only reads where the disc is drawn whole, which
   // today is the mark grid's tile.
-  ring(60, 3, PALETTE.menu.labelInk);
-  ring(52, 1.5, PALETTE.menu.labelRule);
+  ring(60, 3, PALETTE.menu.labelInkDeep);
+  ring(52, 1.5, PALETTE.menu.labelPaper);
 
   // The two rules, inside the crop so they frame the wordmark at full cover.
   arc(37, 1.5, 202, 338, PALETTE.menu.labelRule);
@@ -479,7 +492,7 @@ export function capLogoTexture(texels = 512) {
     x: c,
     y: 48,
     size: 15,
-    color: PALETTE.menu.labelInk,
+    color: PALETTE.menu.labelPaper,
     tracking: 1.2,
     align: 'center',
   });
@@ -487,7 +500,7 @@ export function capLogoTexture(texels = 512) {
     x: c,
     y: 68,
     size: 21,
-    color: PALETTE.menu.labelInk,
+    color: PALETTE.menu.labelPaper,
     tracking: 1.6,
     align: 'center',
   });

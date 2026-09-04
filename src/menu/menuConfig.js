@@ -358,6 +358,42 @@ export const MENU_CONFIG = {
   },
 
   /**
+   * The cap wipe. §7.2 — the object that carries the screen across.
+   */
+  wipe: {
+    /**
+     * Extra scale over the exact fit, at the covered frame.
+     *
+     * The exact fit is computed from the cap's own panel radius and the frame's
+     * half-diagonal, so 1.0 would already cover it. The margin was originally
+     * against the vertex snap, which moved every corner by up to half a low-res
+     * pixel and was free to move one INWARD; that snap went with the retro pass.
+     * What it covers now is the geometry's own faceting — the panel is a
+     * polygon, not a circle, so its true silhouette dips inside the radius
+     * `measurePanelRadius` reports between vertices.
+     */
+    coverSafety: 1.1,
+    /**
+     * Turns a second while it flies.
+     *
+     * §7.2 asks the spin to follow §21's material motion — the inertia of a
+     * metal disc. A disc flicked off a bottle carries a lot of angular momentum
+     * and sheds almost none of it in half a second, so this is a CONSTANT rate
+     * rather than an eased one, and the settle at the end (`_advance`) is what
+     * brings it to rest rather than a decay curve.
+     */
+    spinSpeed: 1.35,
+    /** How far the spin axis leans off the flight direction, in degrees. */
+    axisTilt: 15,
+    /** How much bigger it still gets on the way past, over the cover scale. */
+    exitGrowth: 1.22,
+    /** How far it travels on the way out, in frame pixels. */
+    exitTravel: 1180,
+    /** Where it starts, as a fraction of the cover scale. */
+    startScale: 0.05,
+  },
+
+  /**
    * The transition, stage by stage.
    *
    * Summed default is 0.39s — 0.34 closing, three frames covered. It was 0.77
@@ -412,6 +448,20 @@ export const MENU_CONFIG = {
      * part again.
      */
     coverSeconds: 0.05,
+    /**
+     * How long the cap takes to leave on the FAR side of the document swap.
+     *
+     * It is not part of `totalSeconds` and must not be: this is spent by the
+     * game document, after the menu has gone away, and the two clocks never run
+     * at the same time. §7.3's contract is that the covered frame is the seam —
+     * everything before it belongs to one document and everything after to the
+     * other.
+     *
+     * Longer than the close. Coming in, the cap is hiding a document swap and
+     * the player is waiting for the game; going out, it IS the game arriving and
+     * there is something behind it worth uncovering slowly.
+     */
+    exitSeconds: 0.42,
   },
 
   /**

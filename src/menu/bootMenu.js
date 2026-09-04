@@ -13,11 +13,11 @@ import {
 import { DISPLAY_ASPECT, Viewport } from '../core/Viewport.js';
 import { SceneComposer } from '../core/Composer.js';
 import { BOARD_ASPECT, FRAME, frameScale } from '../core/frame.js';
-import { Bottle } from './Bottle.js';
+import { aimedLaunchDirection, Bottle } from './Bottle.js';
 import { PALETTE, withAlpha } from '../core/palette.js';
 import { whenFontsReady } from '../ui/fonts.js';
 import { clearLegacyStorage } from '../core/legacyStorage.js';
-import { Cinematic } from '../core/Cinematic.js';
+import { CapWipe, WIPE_FRAME } from '../core/CapWipe.js';
 import { MenuItems } from './MenuItems.js';
 import { SettingsScene } from './SettingsScene.js';
 import { OpponentScene } from './OpponentScene.js';
@@ -34,7 +34,7 @@ import { STAGE, Transition } from './Transition.js';
 import { MENU_CONFIG } from './menuConfig.js';
 import { capLogoTexture, floorPoolTexture } from './menuTextures.js';
 import { createSpriteMaterial } from './menuMaterials.js';
-import { destinationUrl, prefetch } from './menuRoutes.js';
+import { destinationUrl, placeOf, prefetch } from './menuRoutes.js';
 // What counts as a mode, from the one place that decides it. See `swapTo`.
 import { MODES } from '../game/modes.js';
 // The audio mix lives with every other tunable, in the one CONFIG the panel
@@ -52,7 +52,7 @@ import { MenuAudio } from '../audio/MenuAudio.js';
  *     composer.render()                MSAA target -> bloom -> canvas
  *     camera.layers.set(UI)            the plates, unbloomed
  *     clearDepth(); render(scene)
- *     modal.render(); cinematic.render()   their own overlay scenes
+ *     modal.render(); wipe.render()        their own overlay scenes
  *
  * That is `main.js`'s arrangement with one addition: here the plates are WORLD
  * objects rather than a separate scene, so the split between what bloom touches
@@ -388,11 +388,38 @@ export function bootMenu(
   /** Which scene root is live. Swapped under the cap at the covered frame. */
   let current = 'menu';
 
-  /** The letterbox. Its own overlay scene and camera; see `core/Cinematic.js`. */
-  const cinematic = new Cinematic();
-  viewport.onResize(({ resolution }) => cinematic.setResolution(resolution));
+  /**
+   * The cap that covers the screen. Its own overlay scene and camera.
+   *
+   * ── it was a letterbox, and §7.1 retires that ────────────────────────────
+   * `Cinematic` closed two bars to a full screen of one colour, the swap
+   * happened behind it, and the game document opened on the same colour. It
+   * worked, and what it could not do is §9: the transition has to be an OBJECT
+   * the player recognises, because the chain the brief draws — bottle, cap,
+   * playing piece, board — is a claim about the world rather than about the
+   * transitions.
+   *
+   * The letterbox is still in the project. It frames the match's own opening
+   * and ending, which is a different job (`core/Cinematic.js`), and the menu no
+   * longer instantiates one.
+   */
+  const wipe = new CapWipe({
+    retro,
+    tuning: cfg.wipe,
+    panelMap: capLogoTexture(),
+  });
 
   const transition = new Transition({ tuning: cfg.transition });
+
+  /** World position -> the overlay's frame pixels. */
+  function toFrame(world) {
+    const p = world.clone().project(camera);
+    return { x: (p.x * WIPE_FRAME.width) / 2, y: (p.y * WIPE_FRAME.height) / 2 };
+  }
+  const mouth = new Vector3();
+  const mouthDir = new Vector3();
+  /** Whether THIS document plays the cap's exit. Written by `runTransition`. */
+  let uncoverRun = true;
 
   // ── layout ───────────────────────────────────────────────────────────────
   /**
@@ -773,6 +800,14 @@ export function bootMenu(
     if (transition.running) return false;
     items.setHover(null);
     items.enabled = false;
+    /**
+     * Read by `tick` on the exit stage, not branched on here.
+     *
+     * The clock runs the same three stages either way; what differs is whether
+     * this document is the one that plays the last of them. A navigation leaves
+     * the cap where the cover put it and the next document flies it out.
+     */
+    uncoverRun = uncover;
 
     transition.begin(
       null,
@@ -790,17 +825,58 @@ export function bootMenu(
          * the frame now, so a screen with no bottle simply gets the bars: there
          * is no longer a hole to fill.
          */
+        /**
+         * ── the cap only comes OFF THE BOTTLE when the bottle is there ───────
+         * On the menu this is the bottle being opened: the crimp lets go, the
+         * cap leaves the mouth along the axis the bottle has turned toward the
+         * camera, and the eruption goes off underneath it.
+         *
+         * Every other screen has no bottle on it. This used to run regardless,
+         * so pressing 시작 on the opponent screen fired a cap out of thin air —
+         * out of the point the bottle WOULD have occupied, off to one side of a
+         * screen it was not on, and it was reported exactly that way. With
+         * nothing to leave, the cap simply comes at the camera from dead
+         * centre, which is also how the game page plays it coming back.
+         *
+         * Two caps for one frame, or none for one frame, are both visible at
+         * 60 Hz — so the bottle loses its cap on the frame the overlay gains
+         * one, not a frame either side.
+         */
         onPop: () => {
-          if (current !== 'menu') return;
+          if (current !== 'menu') {
+            wipe.begin({ x: 0, y: 0 }, aimedLaunchDirection(cfg.bottle));
+            return;
+          }
+          bottle.setCapVisible(false);
           bottle.popBurst();
+          bottle.mouthWorld(mouth);
+          bottle.mouthDirection(mouthDir);
+          const from = toFrame(mouth);
+          // The heading is the bottle's own axis, projected — and by now the
+          // bottle has turned to point that axis at the camera. A cap that came
+          // off a leaning bottle and then flew straight up the screen would read
+          // as two unrelated events.
+          const ahead = toFrame(mouth.clone().addScaledVector(mouthDir, 4));
+          wipe.begin(from, { x: ahead.x - from.x, y: ahead.y - from.y });
         },
         onSwap,
         onDone: () => {
-          bottle.popCap(0);
           items.enabled = true;
           refreshHover();
+          /**
+           * `uncover` false leaves the cap where the cover put it.
+           *
+           * That is the navigation case: `location.assign` does not tear this
+           * document down synchronously, so a document that uncovered on the way
+           * out would show the menu again for however long the next one takes to
+           * paint. The far side picks the cap up and flies it out — §7.3's
+           * contract, and the only thing that crosses the boundary is which
+           * frame the cap is on.
+           */
           if (!uncover) return;
-          cinematic.open(cfg.transition.barSeconds);
+          wipe.end();
+          bottle.setCapVisible(true);
+          bottle.popCap(0);
         },
       },
     );
@@ -890,17 +966,28 @@ export function bootMenu(
     /**
      * The page is about to be replaced, and the gap between this document going
      * away and the next one's first frame is not under anyone's control. What
-     * fills it is the document's own background, which is `--msa-void` — and
-     * that is the SAME colour the bars have just closed to. So the covered
-     * frame, the gap, and the game page's first frame are one flat colour with
-     * nothing assigned anywhere.
+     * fills it is the document's own background.
      *
-     * There were two lines here painting the window the cap's red, because the
-     * covered frame used to be a red cap. They are gone rather than recoloured:
-     * an inline style that has to agree with `Cinematic` and `cssPalette` is two
-     * more ways for the seam to come back, and the stylesheet already says the
-     * right thing.
+     * ── the handover paint is back, in cobalt, on instruction ─────────────
+     * Two lines here used to paint the window the cap's own red, because the
+     * covered frame was a red cap. They went when the letterbox took over,
+     * because a letterbox closes to `--msa-void` and the gap was then the same
+     * flat colour with nothing assigned anywhere — which was genuinely better
+     * while the cover was a colour.
+     *
+     * §7.2 makes the cover an OBJECT again, and an object is lit. The panel
+     * measures around `#8a9aaf` at full cover against a `#2a6fc0` surround, so
+     * "nothing assigned" is a visible step at the seam. §7.3 says what to do
+     * about it: paint the handover cobalt. It is one value, it is
+     * `PALETTE.menu.capBrand`, and it is the same value `styles.css` carries as
+     * its `--msa-void` fallback for the frames before a module script runs.
+     *
+     * It does not perfectly match the lit panel and cannot — the panel takes
+     * light and the document does not. What it does is make the step small and
+     * in the same hue, instead of a step to the sky's own blue.
      */
+    document.documentElement.style.background = PALETTE.menu.capBrand;
+    document.body.style.background = PALETTE.menu.capBrand;
     // The document — and the AudioContext with it — is gone within a frame or
     // two. Ramped on the audio clock so the last voice fades rather than being
     // cut off, which is a click on the one frame that is supposed to be seamless.
@@ -1038,7 +1125,16 @@ export function bootMenu(
         retro,
         unitsPerPixel: unitsPerPixel(),
         mode: pendingMode,
-        modeName: MODES[pendingMode]?.name ?? '',
+        /**
+         * The PLACE, not the mode's own name.
+         *
+         * §7.4 gives each mode a name in the world — SUMMER TABLE, SUMMER LAWN,
+         * SUMMER PORCH — and the opponent screen is where a player last sees
+         * the mode named before they are in it, so it is where the world's name
+         * belongs. The rules' own name (알까기 컬링) is what the mode IS and stays
+         * in `modes.js`; this is where it happens.
+         */
+        modeName: placeOf(pendingMode) || (MODES[pendingMode]?.name ?? ''),
         profile,
         config: CONFIG,
         modal,
@@ -1075,7 +1171,16 @@ export function bootMenu(
         book: markBook,
         defaultMark: capLogoTexture().image,
         marks: cfg.marks,
-        modeName: MODES[pendingMode]?.name ?? '',
+        /**
+         * The PLACE, not the mode's own name.
+         *
+         * §7.4 gives each mode a name in the world — SUMMER TABLE, SUMMER LAWN,
+         * SUMMER PORCH — and the opponent screen is where a player last sees
+         * the mode named before they are in it, so it is where the world's name
+         * belongs. The rules' own name (알까기 컬링) is what the mode IS and stays
+         * in `modes.js`; this is where it happens.
+         */
+        modeName: placeOf(pendingMode) || (MODES[pendingMode]?.name ?? ''),
         // The mode's own answer. See `MODES.knockout.ai`.
         aiAvailable: !!MODES[pendingMode]?.ai,
       });
@@ -1157,13 +1262,13 @@ export function bootMenu(
   const debug = bootMenuDebug({
     config: cfg,
     bottle,
-    cinematic,
+    wipe,
     items,
     transition,
     retro,
     composer,
     viewport,
-    overlay: cinematic.scene,
+    overlay: wipe.scene,
     onRebuild: () => bottle.rebuild(),
     onLean: () => bottle.applyLean(),
     onLayout: () => placeCamera(),
@@ -1315,30 +1420,29 @@ export function bootMenu(
     camera.position.set(0, cfg.camera.height * camWiden, cfg.camera.distance * camWiden);
 
     /**
-     * The bars and the cap, off the one clock.
+     * The cap, off the transition's clock.
      *
-     * ── the bars are asked for a TARGET, not stepped ────────────────────────
-     * `Cinematic.to` is idempotent, so calling it every frame of the stage is
-     * the same as calling it once on the edge — and unlike an edge it cannot be
-     * missed by a frame long enough to step over the stage entirely. The bars
-     * then close on their own clock, which is what lets the same object be
-     * driven by four different sequences without any of them owning it.
+     * Stepped rather than given a target, unlike the letterbox it replaced: the
+     * wipe has no clock of its own and is a pure function of `state.t`, which is
+     * what makes it impossible for the cover to arrive at a different moment
+     * from the swap. `Cinematic` owned its own tween because four different
+     * sequences drove it; this one has exactly one driver.
      */
     switch (state.stage) {
       case STAGE.POP:
-        cinematic.shut(cfg.transition.barSeconds);
-        bottle.popCap(state.pop);
+        wipe.launch(state.t, dt);
         break;
       case STAGE.COVER:
-        // Hidden rather than left at the top of its hop: the frame is opaque,
-        // so this is free, and the next thing that happens to this bottle is a
-        // scene swap that may leave it on screen with its cap off.
-        bottle.setCapVisible(false);
+        wipe.cover(dt);
+        break;
+      case STAGE.EXIT:
+        // Held at the cover on a navigation. See `uncoverRun`.
+        if (uncoverRun) wipe.exit(state.t, dt);
+        else wipe.cover(dt);
         break;
       default:
         break;
     }
-    cinematic.update(dt);
 
     // The sound, after everything else has written this frame's state.
     menuAudio?.update(dt, { state });
@@ -1378,13 +1482,14 @@ export function bootMenu(
     r.render(scene, camera);
     scene.background = sky;
 
-    // 3. The modal and the letterbox, which own their own scenes. Both are
-    //    outside the bloom: the modal is nothing but type, and a bright pass
-    //    over a hard bar edge blooms the edge.
+    // 3. The modal and the cap wipe, which own their own scenes. Both are
+    //    outside the bloom: the modal is nothing but type, and the cap carries
+    //    the game's name at six times its texel size, which a bright pass would
+    //    smear.
     modal.render(r);
-    // Last of all, over the modal included: it is the frame everything else is
-    // inside, and at the covered frame it is the only thing on screen.
-    cinematic.render(r);
+    // Last of all, over the modal included: at the covered frame it is the only
+    // thing on screen.
+    wipe.render(r);
     r.autoClear = true;
 
     // Back to the world layer, so anything that reads the camera between frames
@@ -1423,7 +1528,7 @@ export function bootMenu(
   // verifying — the covered frame is three frames long and is not something you
   // can catch by looking.
   window.__menu = {
-    config: cfg, bottle, cinematic, items, transition, camera, viewport, retro, tick,
+    config: cfg, bottle, wipe, items, transition, camera, viewport, retro, tick,
     run, scene,
     // The screens, for the same reason `tick` is here: a sub-screen sits behind
     // a covered frame and a fade, and neither is something you can step through
