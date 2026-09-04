@@ -18,9 +18,11 @@ import { scaleRate } from './scale.js';
  * ground that none of them could have come out of a 1994 console — the audio
  * half of a render pipeline quantised to five bits a channel.
  *
- * That pipeline is gone. It was removed in PHASE 1, the screen is glass and
- * water and light, and the target was never 1994 in the first place: it is the
- * Wii, whose sounds are sampled and sit in a short bright room.
+ * That pipeline is gone. It was removed in PHASE 1, and 1994 was never the
+ * target. Neither is any console. 지시서 v3 puts this game in a summer house
+ * remembered — cobalt and cool white, printed paper, water — and the sound of
+ * that place is small wooden and glass objects struck in a room with hard
+ * floors and the windows open. Short, pitched, bright, and never dry.
  *
  * The BAN was wrong. The DISCIPLINE it was protecting was not, and it is worth
  * restating in its own words, because it is the reason this file is small:

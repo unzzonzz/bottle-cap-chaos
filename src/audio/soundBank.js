@@ -271,7 +271,7 @@ function low(from, to = from, sweep = 0.09) {
  *
  * 크러셔가 유니티가 됐다(`config.audio.crushBits`). 접힘도 양자화 잡음도 없으므로
  * 2.6 kHz 천장이 막고 있던 것은 이제 아무것도 아니고, 남은 것은 부작용뿐이다 —
- * 기본파와 3배음만 남은 블립은 유리가 아니라 나무 소리다. 유리와 물이 유리와 물로
+ * 기본파와 3배음만 남은 블립은 두껍고 둔한 나무 소리다. 종이와 물과 유리가 각자로
  * 들리는 것은 그 위의 배음들이다.
  *
  * 7200 은 그 배음이 살아나면서도 여전히 상한이 있는 자리다. 완전히 열지 않는
@@ -374,9 +374,9 @@ export const SOUNDS = {
    * and 1827 Hz, the first two of them 0.6 dB apart. That is a burst. It fires
    * hundreds of times a match.
    *
-   * The model is a struck bar instead — the Wii Sports contact this was rebuilt
-   * against — and it has four properties, each of which is a number here rather
-   * than a mood:
+   * The model is a struck bar instead — a tuned marimba key, which is where
+   * 부록 H's ratio comes from — and it has four properties, each of which is a
+   * number here rather than a mood:
    *
    *   PITCH        a sine root you can hum, not filtered noise.
    *   4:1 PARTIAL  a bar left alone puts its first partial at 2.756 times the
@@ -464,12 +464,16 @@ export const SOUNDS = {
    *                  0.30   -47.6 dB   -67.9 dB            136 ms
    *                  0.60   -41.6 dB   -61.5 dB            215 ms
    *
-   *                0.16. At 0.30 the tail carries nearly three times the energy
-   *                and every hit in a chain lands inside the last one's wash —
-   *                and a chain is the case this sound exists for. Note that the
-   *                category default it overrides is 0.30, so collisions are now
-   *                half as wet as they shipped: the old burst had nothing to
-   *                expose, and a clean tone does.
+   *                0.16 was chosen here. At 0.30 the tail carries nearly three
+   *                times the energy and every hit in a chain lands inside the
+   *                last one's wash — and a chain is the case this sound exists
+   *                for. The category default it overrides is 0.30, so the
+   *                collisions sat well under the room every other sound is in:
+   *                the old burst had nothing to expose, and a clean tone does.
+   *
+   *                **PHASE 9 moved it to 0.24.** The section below has the
+   *                numbers and the reason; the rejection of 0.30 above still
+   *                stands, and 0.24 is under it.
    *
    *   VELBRIGHT    spectral centroid of the first 20 ms, at intensity 0.15
    *                against 1.0:
@@ -493,6 +497,68 @@ export const SOUNDS = {
    *                shared scale: E G A C D E G A. The top is a sixth above the
    *                octave rather than somewhere shrill, and it is the same A
    *                that `deg(14)` gives every other sound in the file.
+   *
+   * ── PHASE 9: 꼬리를 조금 더, 고역을 조금 덜 ────────────────────────────
+   * §13 keeps the bar and changes what it is a bar being struck BY: a small
+   * object hitting water rather than a weapon landing. Two numbers, and the
+   * word in the brief is "조금" for both — this is not a new sound, it is the
+   * same sound sitting slightly further back in a slightly wetter room.
+   *
+   *   body band  6600 -> 5000 Hz (sweep end 3200 -> 2600)
+   *   send       0.16 -> 0.24
+   *
+   * Measured on this graph, four renders each, mean. **These windows are not
+   * the windows the tables above use** — a window length changes the answer,
+   * so every figure below is quoted with the half-spread four runs actually
+   * showed, and a difference smaller than that spread is not a difference.
+   * (The spread is real and unavoidable: the noise layer reads the shared
+   * buffer from a random offset and the jitter moves the pitch, so no two
+   * renders are the same file.)
+   *
+   *                          centroid 0-20ms    after 170ms      at 250ms
+   *   before                   3255 ±112 Hz   -40.2 ±0.2 dB   -49.1 ±0.5 dB
+   *   band only (5000/2600)    2796 ±144 Hz   -40.2 ±0.2 dB   -48.9 ±0.2 dB
+   *   send only (0.24)         3224 ± 76 Hz   -36.6 ±0.1 dB   -45.3 ±0.2 dB
+   *   both                     2796 ±144 Hz   -36.6 ±0.1 dB   -45.9 ±0.3 dB
+   *
+   * The two levers are independent, which is the useful part of that table:
+   * the band moves brightness and nothing else, the send moves the tail and
+   * nothing else, and neither undoes the other.
+   *
+   * ── the chain, measured separately and over ten runs ────────────────────
+   * The second hit's onset against what the first is still doing 120 ms later
+   * — the masking the 0.30 rejection above was about, and the one number that
+   * had to be defended. Four runs was not enough to say anything about it:
+   *
+   *   before   mean 36.7 dB   range 35.1 .. 39.7
+   *   now      mean 35.1 dB   range 33.4 .. 39.4
+   *
+   * The mean costs 1.6 dB and the ranges overlap almost completely, so the
+   * honest statement is that the change is at the edge of what this
+   * measurement can see. What it CAN say is the floor: the separation never
+   * fell below 33.4 dB in twenty renders. Peak level is unmoved (0.166 ->
+   * 0.169), so nothing downstream is re-levelled.
+   *
+   * Two things were measured and REJECTED, and they are worth keeping because
+   * each looked like the obvious lever:
+   *
+   *   a steeper sweep (6600 -> 2400) changed the transient centroid by 44 Hz,
+   *     inside the spread. The body decays in 28 ms and the sweep is written
+   *     over 30, so the sound is over before the sweep arrives anywhere.
+   *   velBright 0.7 -> 0.5 changed nothing at intensity 1, which is where it
+   *     was measured — it is the SOFT end of the mapping, so it moves quiet
+   *     hits and leaves the loud ones alone. §13 is about all of them.
+   *
+   * Only this sound got the band move. The other five collisions were measured
+   * first and none of them has a top end to take off: `goal_post` 3043 Hz,
+   * `ball_cap` 1536, `cap_wall` 1322, `ball_net` 1204, `ball_wall` 795. The
+   * brightest collision in the game is this one by 200 Hz over a metal post,
+   * and the post is allowed to be metal.
+   *
+   * Four of the six took the send: this one, `cap_wall`, `ball_cap`,
+   * `ball_wall`. `ball_net` did not, because a net absorbs and 0.06 is that
+   * fact; `goal_post` did not, because at 0.34 it already has the biggest room
+   * of any collision and that is what a post ringing across a pitch is.
    */
   cap_cap: {
     category: CATEGORY.IMPACT,
@@ -547,12 +613,20 @@ export const SOUNDS = {
     }),
 
     /**
-     * The body. A high-Q band-pass standing in for the third partial.
+     * The body. A high-Q band-pass standing in for a mode above the partial.
      *
-     * Around 10:1, which is where a shallow dish puts its next strong mode. A
-     * resonant filter doing the job of a partial is still inside the three-part
-     * palette — it is a filter on the noise layer, not a fourth kind of node —
-     * and it buys a mode that would otherwise cost an oscillator.
+     * It was 6600 Hz, which is 10:1 on the root — where a shallow dish puts
+     * its next strong mode, and the reason it was written there. PHASE 9 moved
+     * it to 5000 (7.6:1) and that trade is deliberate: 10:1 was the truthful
+     * number for a struck dish, and §13 does not want a struck dish. It wants
+     * the top end off the most-heard sound in the game. What survives the move
+     * is what the layer is FOR — a resonant filter doing the job of a partial
+     * is still inside the three-part palette, it is a filter on the noise
+     * layer rather than a fourth kind of node, and it buys a mode that would
+     * otherwise cost an oscillator.
+     *
+     * 5000 is still nearly an octave clear of the 4:1 partial at 2640, so the
+     * body does not smear into the thing that makes the bar sweet.
      *
      * 0.8, not the 0.13 the appendix asks for, and the whole difference is that
      * band-pass: at Q=7 it discards about 16 dB of broadband energy, so 0.13
@@ -563,7 +637,7 @@ export const SOUNDS = {
       gain: 0.8,
       attack: 0.001,
       decay: 0.028,
-      filter: band(6600, 3200, 7, 0.03),
+      filter: band(5000, 2600, 7, 0.03),
     }),
 
     /**
@@ -578,7 +652,8 @@ export const SOUNDS = {
     velLength: 0.35,
     /** Only a wobble inside the rung — the rung is what makes two hits agree. */
     jitter: 0.35,
-    send: 0.16,
+    /** 0.16 until PHASE 9. The table in the header has the numbers. */
+    send: 0.24,
   },
 
   /**
@@ -610,8 +685,12 @@ export const SOUNDS = {
     velBright: 0.7,
     velLength: 0.5,
     jitter: 0.35,
-    /** A fence is right there. Less room than a cap-on-cap, not more. */
-    send: 0.14,
+    /**
+     * A fence is right there. Less room than a cap-on-cap, not more — the two
+     * moved together in PHASE 9 (0.14 -> 0.20) so the ORDER is preserved.
+     * Measured: after-170ms -41.4 -> -38.1 dB, at-250ms -51.8 -> -48.6.
+     */
+    send: 0.20,
   },
 
   /**
@@ -1414,7 +1493,14 @@ export const SOUNDS = {
     velBright: 0.6,
     velLength: 0.4,
     jitter: 0.35,
-    send: 0.16,
+    /**
+     * 0.16 until PHASE 9. A ball is bigger than a cap and sits in more room,
+     * but it is also the sound that overlaps a chain of cap hits, so it moves
+     * with them rather than past them. Measured: at-250ms -51.6 -> -48.8 dB.
+     * The after-170ms figure barely moves (-37.0 -> -36.9) and that is not a
+     * failure — this root rings for 260 ms, so that window is mostly the note.
+     */
+    send: 0.22,
   },
 
   /** `cap_wall`, lower and duller again. The ball against the woodwork's fence. */
@@ -1433,7 +1519,8 @@ export const SOUNDS = {
     velBright: 0.6,
     velLength: 0.4,
     jitter: 0.35,
-    send: 0.12,
+    /** 0.12 until PHASE 9. Measured: at-250ms -58.8 -> -56.3 dB. */
+    send: 0.16,
   },
 
   /**

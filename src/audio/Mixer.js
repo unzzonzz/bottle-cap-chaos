@@ -327,9 +327,10 @@ export class Mixer {
      * 오디오 등가물을 요구하고, 그건 옳다 — 따로 설계된 예순 개의 소리를 한 기계의
      * 것으로 만드는 유일한 장치다."
      *
-     * 그 화면이 없다. 지금 화면은 유리와 물과 빛이고, 그것들의 오디오 등가물은
-     * 양자화 잡음이 아니라 **공간**이다 — 짧고 밝은 잔향. 유리잔 안에서 나는 소리는
-     * 어디서 나든 같은 방에서 난다.
+     * 그 화면이 없다. 지시서 v3 의 화면은 코발트와 차가운 흰색, 인쇄된 종이,
+     * 그리고 물이다. 그것들의 오디오 등가물은 양자화 잡음이 아니라 **공간**이다 —
+     * 짧고 밝은 잔향. 여름 별장의 딱딱한 바닥과 열린 창이 그 방이고, 소리가 어디서
+     * 나든 같은 방에서 난다.
      *
      * 보내기는 **소리마다** 다르다. UI 클릭에 잔향을 먹이면 화면이 헐거워지고,
      * 충돌음에 안 먹이면 판이 진공에 있는 것으로 들린다. 카테고리는 그 표의
@@ -393,17 +394,25 @@ export class Mixer {
    * would turn that net 3 dB an octave into 9 and fix the whole class in one
    * place. It is the better fix and it has not been taken, because it moves all
    * thirty-nine noise layers at once, including the six collisions tuned by
-   * measurement against the buffer as it is. If the top end still needs coming
-   * down, this is the lever, and `cap_cap`'s body gain is what has to be
-   * re-measured after pulling it.
+   * measurement against the buffer as it is.
+   *
+   * ── PHASE 9 asked for exactly that and still did not pull it ────────────
+   * §13 wants less top end on the collisions, which is the case this note was
+   * written for. The six were measured first, and only ONE of them had a top
+   * end to take off — `cap_cap` at a 3255 Hz transient centroid against 1536,
+   * 1322, 1204 and 795 for the others. A global tilt to fix one sound would
+   * have quietly moved thirty-eight it was not asked about, so the fix went
+   * where the problem was: that sound's own body band, 6600 -> 5000 Hz. The
+   * lever is still here and still the better one for a WHOLE-GAME brightness
+   * complaint; `cap_cap`'s body gain is what has to be re-measured after.
    */
   /**
    * 잔향의 임펄스 응답. 절차적으로 만든다 — 이 프로젝트에 오디오 파일은 없다.
    *
    * ── 지수 감쇠 잡음이지만, 그냥 잡음은 아니다 ────────────────────────────
-   * 기본형은 지수적으로 잦아드는 백색 잡음이다. 그것만으로도 방은 되지만 **유리
-   * 방**은 안 된다 — 유리와 물의 잔향은 저역이 빨리 죽고 고역이 오래 남는다.
-   * 벽이 딱딱해서 고역을 덜 먹기 때문이다. 그래서 대역별로 감쇠율을 다르게 준다:
+   * 기본형은 지수적으로 잦아드는 백색 잡음이다. 그것만으로도 방은 되지만 **딱딱한
+   * 방**은 안 된다 — 타일 바닥과 유리창이 있는 방의 잔향은 저역이 빨리 죽고 고역이
+   * 오래 남는다. 벽이 고역을 덜 먹기 때문이다. 그래서 대역별로 감쇠율을 다르게 준다:
    * 저역은 `decay` 의 두 배 속도로, 고역은 절반 속도로 사라진다.
    *
    * 초기 반사도 없다. 방의 크기를 말하는 것은 꼬리가 아니라 첫 몇 밀리초의 성긴

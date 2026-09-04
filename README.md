@@ -186,7 +186,16 @@ docs/           측정 절차, 팔레트, 토큰
 |---|---|
 | [docs/metrics.md](docs/metrics.md) | 프레임을 재는 법. `?debug=1` 이 프레임을 부풀린다는 경고 포함 |
 | [docs/palette.md](docs/palette.md) | 색과 셰이프 토큰을 어디서 고치나 |
-| `docs/tokens-preview.html` | 스펙 시트. 개발 서버에서 `/docs/tokens-preview.html` |
+
+개발 서버를 띄우고 여는 페이지들. 전부 목업이 아니라 `src/` 를 그대로 import 한다.
+
+| | |
+|---|---|
+| `/docs/tokens-preview.html` | 색 · 셰이프 · 타입 · 컨트롤의 스펙 시트 |
+| `/docs/roles-preview.html` | 역할별 컨트롤이 실제로 어떻게 그려지는가 |
+| `/docs/bottle-preview.html` | 메뉴의 병. 기울기별 액체 넘침 실측 |
+| `/docs/fx-preview.html` | 카드 이펙트 스프라이트를 세 필드 바닥색 위에 |
+| `/docs/audio-preview.html` | 충돌음 여섯을 오프라인 렌더해서 밝기와 꼬리를 잰다 |
 
 ---
 
