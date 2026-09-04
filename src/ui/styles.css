@@ -13,16 +13,16 @@
    handles that — it waits for both weights and then drops every registered
    texture cache. */
 @font-face {
-  font-family: 'BCC Sans';
-  src: url('./fonts/bcc-sans-400.woff2') format('woff2');
+  font-family: 'MSA Sans';
+  src: url('./fonts/msa-sans-400.woff2') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 
 @font-face {
-  font-family: 'BCC Sans';
-  src: url('./fonts/bcc-sans-700.woff2') format('woff2');
+  font-family: 'MSA Sans';
+  src: url('./fonts/msa-sans-700.woff2') format('woff2');
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -46,7 +46,7 @@ body {
 
      ── the fallback is load-bearing, and the letterbox is why ────────────────
      `cssPalette.js` runs from a module script, so for the frame or two before it
-     executes `var(--bcc-void)` resolves to its initial value — transparent, i.e.
+     executes `var(--msa-void)` resolves to its initial value — transparent, i.e.
      the browser's own white. That was survivable while both sides of the gap
      were near-white and that file says so at length.
 
@@ -58,11 +58,11 @@ body {
 
      So the value is written twice, here and in `cssPalette.js`, and this file
      joins the list in `docs/palette.md` of places a palette change has to be
-     carried by hand. `--bcc-fade-ms` below has a fallback for the same kind of
+     carried by hand. `--msa-fade-ms` below has a fallback for the same kind of
      reason and states it the same way. */
-  background: var(--bcc-void, #1a76c4);
-  color: var(--bcc-text);
-  font-family: 'BCC Sans', Pretendard, -apple-system, 'Segoe UI', system-ui, sans-serif;
+  background: var(--msa-void, #1a76c4);
+  color: var(--msa-text);
+  font-family: 'MSA Sans', Pretendard, -apple-system, 'Segoe UI', system-ui, sans-serif;
   overscroll-behavior: none;
 
   /* ── the web view's own gestures, all of them, off ────────────────────────
@@ -114,7 +114,7 @@ textarea {
 
    플레이스홀더가 여기 있는 이유는 인라인으로 쓸 수 없기 때문이다. 의사 요소다. */
 input::placeholder {
-  color: var(--bcc-text-muted);
+  color: var(--msa-text-muted);
   opacity: 1; /* Firefox 는 기본으로 0.54 를 곱한다. 팔레트가 이미 흐린 색이다. */
 }
 
@@ -250,14 +250,14 @@ input::placeholder {
   position: fixed;
   inset: 0;
   z-index: 40;
-  background: var(--bcc-fade);
+  background: var(--msa-fade);
   opacity: 0;
   pointer-events: none;
-  /* `--bcc-fade-ms` 는 `cssPalette.js` 가 `MOTION.screen` 의 절반으로 채운다.
+  /* `--msa-fade-ms` 는 `cssPalette.js` 가 `MOTION.screen` 의 절반으로 채운다.
      폴백이 있는 유일한 `var()` 인 이유는, 이 규칙이 그 스크립트가 도는 것보다
      먼저 필요할 수 있기 때문이다 — 페이지에 도착한 문서가 첫 프레임에 페이드인을
      시작한다. 폴백 값과 토큰이 어긋나면 그 한 번만 어긋나고 이후로는 맞는다. */
-  transition: opacity var(--bcc-fade-ms, 180ms) linear;
+  transition: opacity var(--msa-fade-ms, 180ms) linear;
 }
 
 .page-fade.is-on {
@@ -297,10 +297,10 @@ input::placeholder {
   min-height: 44px;
   padding: 0 8px;
   margin: 0;
-  border: 1px solid var(--bcc-debug-edge);
+  border: 1px solid var(--msa-debug-edge);
   border-radius: 8px;
-  background: var(--bcc-debug-bg);
-  color: var(--bcc-debug-accent);
+  background: var(--msa-debug-bg);
+  color: var(--msa-debug-accent);
   font: 600 15px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
   touch-action: none;
   -webkit-tap-highlight-color: transparent;
@@ -309,17 +309,17 @@ input::placeholder {
 /* Dropped frames or a saturated step drain. The one bit worth seeing from
    across the room, and the only state the badge shows when the body is down. */
 .metrics-hud__badge[data-warn='1'] {
-  color: var(--bcc-debug-warn-ink);
-  border-color: var(--bcc-debug-warn-edge);
+  color: var(--msa-debug-warn-ink);
+  border-color: var(--msa-debug-warn-edge);
 }
 
 .metrics-hud__body {
   margin: 0;
   padding: 5px 7px;
-  background: var(--bcc-debug-bg);
-  border: 1px solid var(--bcc-debug-edge);
+  background: var(--msa-debug-bg);
+  border: 1px solid var(--msa-debug-edge);
   border-radius: 8px;
-  color: var(--bcc-debug-ink);
+  color: var(--msa-debug-ink);
   font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
   white-space: pre;
 }
@@ -336,10 +336,10 @@ input::placeholder {
   margin: 0;
   padding: 18px;
   overflow: auto;
-  background: var(--bcc-error-bg);
-  border: 1px solid var(--bcc-error-edge);
+  background: var(--msa-error-bg);
+  border: 1px solid var(--msa-error-edge);
   border-radius: 10px;
-  color: var(--bcc-error-ink);
+  color: var(--msa-error-ink);
   font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
   white-space: pre-wrap;
 }

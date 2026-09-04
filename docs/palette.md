@@ -62,20 +62,20 @@ grep -rInE "#[0-9a-fA-F]{6}" src/ | grep -v "^src/core/palette.js"
 
 `src/ui/fonts.js` 의 파이프라인은 완성되어 있다:
 
-- 스택은 `"BCC Sans" → Pretendard → SUIT → -apple-system → …`
+- 스택은 `"MSA Sans" → Pretendard → SUIT → -apple-system → …`
 - `whenFontsReady()` 가 각 웨이트를 한글 샘플(`가힣AZ09`)로 명시적으로 요청한 뒤
   `document.fonts.ready` 를 기다리고, 등록된 텍스처 캐시를 전부 비운다
 - 캐시는 `registerTextureCache()` 로 자기 자신을 등록한다 (현재 4곳:
   `hudTextures` `cardTexture` `fxTextures` `markIcons`)
 - 실패해도 절대 throw 하지 않는다. 폴백 폰트로 읽히는 UI가 원하는 실패 모드다
 
-**남은 것: `BCC Sans` 로 등록할 woff2 파일이 없다.** 지금은 개발 머신에 설치된
+**남은 것: `MSA Sans` 로 등록할 woff2 파일이 없다.** 지금은 개발 머신에 설치된
 Pretendard 로 해결되지만 그게 없는 기계에서는 폴백으로 떨어진다. 필요한 것:
 
 1. Pretendard woff2 (OFL) 를 `src/ui/fonts/` 에 넣고 라이선스 파일 동봉
 2. 서브셋: UI 문자 + **완성형 한글 전체(11172자)**. 닉네임이 사용자 입력이고
    `NICKNAME_RE` 가 `가-힣` 전체를 허용한다 — 서브셋을 좁히면 닉네임이 두부가 된다
-3. `@font-face { font-family: 'BCC Sans'; … }` 를 `styles.css` 에 추가
+3. `@font-face { font-family: 'MSA Sans'; … }` 를 `styles.css` 에 추가
 
 이 머신에는 `fonttools` / `brotli` / `woff2_compress` 가 없다.
 
@@ -88,9 +88,9 @@ Pretendard 로 해결되지만 그게 없는 기계에서는 폴백으로 떨어
 |---|---|---|
 | `index.html` | `<meta name="color-scheme">` | `light`. 스타일시트가 적용되기 전 브라우저가 칠하는 초기 캔버스와, 폼 컨트롤·스크롤바의 기본 색을 정한다 |
 
-`src/ui/styles.css` 는 닿는다 — `src/ui/cssPalette.js` 가 `--bcc-*` 커스텀
+`src/ui/styles.css` 는 닿는다 — `src/ui/cssPalette.js` 가 `--msa-*` 커스텀
 프로퍼티로 밀어 넣는다. 스타일시트에 hex 리터럴을 쓰지 마라. **예외 하나**:
-`html, body` 의 `background` 는 `var(--bcc-void, #1a76c4)` 로 폴백을 갖는다.
+`html, body` 의 `background` 는 `var(--msa-void, #1a76c4)` 로 폴백을 갖는다.
 모듈 스크립트가 돌기 전 한두 프레임 동안 이 값이 필요하고, 그 프레임이 메뉴와
 경기 문서 사이의 이음매이기 때문이다 — 이유는 그 규칙 옆에 적혀 있다. 팔레트의
 `bg.skyTop` 을 바꾸면 여기도 손으로 맞춰라.

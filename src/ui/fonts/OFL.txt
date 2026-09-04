@@ -1,9 +1,9 @@
 Copyright (c) 2023, Kil Hyung-jin (https://github.com/orioncactus/pretendard),
 with Reserved Font Name "Pretendard".
 
-The files in this directory — bcc-sans-400.woff2 and bcc-sans-700.woff2 — are
+The files in this directory — msa-sans-400.woff2 and msa-sans-700.woff2 — are
 SUBSETS of Pretendard, reduced to the codepoint ranges this game draws, and
-renamed to "BCC Sans" as OFL 1.1 section 3 requires of a Modified Version. They
+renamed to "MSA Sans" as OFL 1.1 section 3 requires of a Modified Version. They
 are not Pretendard and must not be described as Pretendard.
 
 See NOTICE at the repository root for what was kept and what was dropped.

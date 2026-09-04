@@ -32,7 +32,7 @@ import { cubicBezier, MOTION } from './tokens.js';
  * That colour is `PALETTE.bg.skyTop` and not a black of its own, for two
  * reasons that happen to agree. The palette forbids pure black outright (rule
  * 1 in `core/palette.js`). And skyTop is ALREADY the colour of everything
- * outside the canvas — `--bcc-void` in `cssPalette.js`, which is what the
+ * outside the canvas — `--msa-void` in `cssPalette.js`, which is what the
  * browser paints around a 4:3 canvas in a window of any other shape. Picking
  * any other colour for the bars would mean
  * closing them produced a rectangle of one colour inside a window of another,

@@ -5,7 +5,7 @@
  * That is a deliberate choice made elsewhere — `main.js` fades the screen out
  * and then loads the next page, and the game and the menu are genuinely
  * different documents. It means a mode's address is a real HTTP request, and on
- * GitHub Pages a request for `/bottle-cap-chaos/football` with no such file is a
+ * GitHub Pages a request for `/midsummer-alkkagi/football` with no such file is a
  * 404. Not on a deep link or a refresh: on the FIRST navigation out of the menu,
  * which is the only way anybody reaches a mode.
  *

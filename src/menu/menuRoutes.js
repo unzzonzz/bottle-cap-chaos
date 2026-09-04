@@ -24,8 +24,8 @@ import { isModePath, modePath } from '../game/modes.js';
  * `/football` hard-coded would be wrong the moment this is deployed anywhere
  * but a domain root. So the base is the menu's own path with any mode segment
  * and any `menu` segment stripped off the end, and the destinations hang off
- * that. Under `/bottle-cap-chaos/` the football item goes to
- * `/bottle-cap-chaos/football`, which is the same reasoning `modeKeyFromPath`
+ * that. Under `/midsummer-alkkagi/` the football item goes to
+ * `/midsummer-alkkagi/football`, which is the same reasoning `modeKeyFromPath`
  * gives for searching the path backwards.
  *
  * ── `from=menu` is the handover flag ────────────────────────────────────────

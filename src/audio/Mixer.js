@@ -153,7 +153,7 @@ class HoldProcessor extends AudioWorkletProcessor {
     return true;
   }
 }
-registerProcessor('bcc-hold', HoldProcessor);
+registerProcessor('msa-hold', HoldProcessor);
 `;
 
 /** How many points the bit-crush curve is sampled at. */
@@ -481,7 +481,7 @@ export class Mixer {
       await ctx.audioWorklet.addModule(url);
       // The context may have been torn down while we waited.
       if (!this.ctx || this.ctx !== ctx) return;
-      this._insertHold(new AudioWorkletNode(ctx, 'bcc-hold'));
+      this._insertHold(new AudioWorkletNode(ctx, 'msa-hold'));
     } catch (err) {
       this.holdError = String(err?.message ?? err);
     } finally {

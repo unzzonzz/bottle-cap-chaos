@@ -1,4 +1,4 @@
-# Bottle Cap Chaos
+# 한여름 알까기 / Midsummer Alkkagi
 
 병뚜껑 알까기. Three.js + Rapier, 데스크톱 브라우저.
 

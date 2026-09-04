@@ -23,7 +23,7 @@ import { validateNickname } from '../net/protocol.js';
  * named in exactly two places in the project.
  */
 
-export const KEY = 'bcc.profile.v1';
+export const KEY = 'msa.profile.v1';
 export const VERSION = 1;
 
 /**

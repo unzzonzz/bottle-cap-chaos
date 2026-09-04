@@ -21,7 +21,7 @@
 
 /** 저장 스키마 버전. 저장하는 모양이 바뀌면 올린다. */
 const VERSION = 1;
-const KEY = 'bcc.view.v1';
+const KEY = 'msa.view.v1';
 
 /**
  * @typedef {object} ViewSettingsData

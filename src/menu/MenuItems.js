@@ -87,7 +87,7 @@ export class MenuItems {
     this.title = new Mesh(
       new PlaneGeometry(1, 1),
       createSpriteMaterial(retro, {
-        map: titleTexture('BOTTLE CAP CHAOS', '메인 메뉴', {
+        map: titleTexture('한여름 알까기', '메인 메뉴', {
           width: Math.round(tuning.plateWidth),
           height: Math.round(tuning.plateWidth * 0.5),
           scale: PLATE_TEXEL_SCALE,
@@ -232,7 +232,7 @@ export class MenuItems {
 
     const title = this.title.material.uniforms.uMap.value;
     const titleW = Math.round(t.plateWidth);
-    this.title.material.uniforms.uMap.value = titleTexture('BOTTLE CAP CHAOS', '메인 메뉴', {
+    this.title.material.uniforms.uMap.value = titleTexture('한여름 알까기', '메인 메뉴', {
       width: titleW,
       height: Math.round(titleW * 0.5),
       scale: PLATE_TEXEL_SCALE,

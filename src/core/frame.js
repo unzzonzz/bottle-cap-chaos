@@ -31,7 +31,7 @@
  *
  * There is no phone any more. A desktop window that is taller than 4:3 gets the
  * same treatment every window that is WIDER than 4:3 already got — the canvas is
- * the largest 4:3 box that fits, centred, with `--bcc-void` around it. That is
+ * the largest 4:3 box that fits, centred, with `--msa-void` around it. That is
  * `Viewport._fit`, it is one code path now instead of two, and it is why every
  * band number below this line is gone rather than merely unused:
  *

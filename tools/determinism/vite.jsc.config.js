@@ -29,7 +29,7 @@ export default defineConfig({
     lib: {
       entry: resolve(HERE, 'jsc-entry.js'),
       formats: ['iife'],
-      name: 'BccDeterminism',
+      name: 'MsaDeterminism',
       fileName: () => 'jsc-bundle.js',
     },
     rollupOptions: {

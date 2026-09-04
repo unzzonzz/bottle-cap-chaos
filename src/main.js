@@ -59,6 +59,7 @@ import { HANDOVER_FLAG, isHandover, isReturnFromGame } from './menu/menuRoutes.j
 import { PALETTE } from './core/palette.js';
 import { applyCssPalette } from './ui/cssPalette.js';
 import { whenFontsReady } from './ui/fonts.js';
+import { clearLegacyStorage } from './core/legacyStorage.js';
 import { capLogoTexture } from './menu/menuTextures.js';
 import { AudioSystem } from './audio/AudioSystem.js';
 import { AudioSettingsBook, LocalStorageAudioSettings } from './audio/AudioSettings.js';
@@ -124,13 +125,13 @@ if (routed) {
  * that same red or it was a flash.
  *
  * The frame the menu leaves on is now a shut letterbox, and `Cinematic` closes
- * it to `PALETTE.bg.skyTop` precisely because that is already `--bcc-void` —
+ * it to `PALETTE.bg.skyTop` precisely because that is already `--msa-void` —
  * what the line below paints the document, and what the browser paints around a
  * letterboxed canvas. So the menu's last frame, the gap, and this page's first
  * frame are one colour with nothing assigned anywhere, and there is no longer an
  * inline style that has to be kept in agreement with other files.
  */
-// The stylesheet names `var(--bcc-*)` and nothing else, so this has to run
+// The stylesheet names `var(--msa-*)` and nothing else, so this has to run
 // before the letterbox, the page fade or either developer overlay is painted.
 // It is cheap — a dozen `setProperty` calls.
 applyCssPalette();
@@ -144,6 +145,10 @@ applyCssPalette();
  * request that may never succeed either resolves or times out.
  */
 whenFontsReady();
+
+// 개명 전 `bcc.*` 키를 치운다. 메뉴와 게임 양쪽 document 에서 불려야 한다 —
+// 게임 URL 로 바로 들어오면 `bootMenu.js` 쪽은 지나지 않는다.
+clearLegacyStorage();
 
 
 /**
@@ -2018,7 +2023,7 @@ async function boot(canvas) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `bcc-${log.mode}-${online?.match?.roomId ?? 'log'}.json`;
+    a.download = `msa-${log.mode}-${online?.match?.roomId ?? 'log'}.json`;
     a.click();
     // Revoked on the next tick: revoking synchronously can beat the download
     // starting, and the object is a few kilobytes held for one frame.

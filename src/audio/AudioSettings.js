@@ -30,7 +30,7 @@
 
 /** Storage schema version. Bumped when the saved shape changes. */
 const VERSION = 1;
-const KEY = 'bcc.audio.v1';
+const KEY = 'msa.audio.v1';
 
 /**
  * @typedef {object} AudioSettingsData

@@ -46,7 +46,7 @@ export const DEFAULT_MARK = 'default';
 
 /** Storage schema version. Bumped when the saved shape changes. */
 const VERSION = 1;
-const KEY = 'bcc.marks.v1';
+const KEY = 'msa.marks.v1';
 
 /**
  * What a player has chosen: a slot index, the built-in logo, or nothing.

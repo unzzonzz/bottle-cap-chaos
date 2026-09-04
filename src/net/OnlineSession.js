@@ -34,7 +34,7 @@ import { Transport } from './Transport.js';
  */
 
 /** Survives a navigation, dies with the tab. Exactly the right lifetime. */
-const STASH_KEY = 'bcc.online.handoff';
+const STASH_KEY = 'msa.online.handoff';
 
 export const SESSION_PHASE = {
   IDLE: 'idle',

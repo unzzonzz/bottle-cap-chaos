@@ -2,7 +2,7 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "bcc-dev",
+      "name": "msa-dev",
       "runtimeExecutable": "npm",
       "runtimeArgs": [
         "run",
@@ -12,7 +12,7 @@
       "autoPort": true
     },
     {
-      "name": "bcc-pages",
+      "name": "msa-pages",
       "runtimeExecutable": "npm",
       "runtimeArgs": [
         "run",

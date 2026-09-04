@@ -15,7 +15,7 @@
 튜닝 패널도 함께 연다 (그쪽은 오른쪽 위, `z-index` 가 겹쳐서 배지가 왼쪽에 있다).
 
 **배지를 클릭하면** 접힘 → 요약 → 전체 → 꺼짐 순으로 돈다. 선택은
-`bcc.metrics.v1` 로 저장돼서 다시 켜도 유지된다.
+`msa.metrics.v1` 로 저장돼서 다시 켜도 유지된다.
 
 배지가 **주황색**이면 프레임을 흘리고 있다는 뜻이다.
 
@@ -126,7 +126,7 @@ ws://172.30.6.33:8787
 `ws://` 또는 `wss://` 로 시작해야 통과한다. 빈칸으로 두면 `location.hostname` 에서
 호스트를 따오는 자동 유도로 돌아간다 — 같은 기계에서 여는 동안은 그게 맞다.
 
-주소는 `bcc.profile.v1` 키로 localStorage 에 저장되므로 한 번만 넣으면 된다.
+주소는 `msa.profile.v1` 키로 localStorage 에 저장되므로 한 번만 넣으면 된다.
 `?debug=1` 패널의 "서버 주소" 필드도 같은 값을 쓴다.
 
 ---
@@ -137,11 +137,11 @@ ws://172.30.6.33:8787
 
 | 키 | 소유자 |
 |---|---|
-| `bcc.marks.v1` | `MarkStorage` — 마크 |
-| `bcc.profile.v1` | `NicknameStorage` — 닉네임 + 서버 주소 |
-| `bcc.audio.v1` | `AudioSettings` — 볼륨/음소거 |
-| `bcc.metrics.v1` | `MetricsOverlay` — 오버레이 표시 상태 |
-| `bcc.online.handoff` (sessionStorage) | `OnlineSession` — 문서 간 핸드오프 |
+| `msa.marks.v1` | `MarkStorage` — 마크 |
+| `msa.profile.v1` | `NicknameStorage` — 닉네임 + 서버 주소 |
+| `msa.audio.v1` | `AudioSettings` — 볼륨/음소거 |
+| `msa.metrics.v1` | `MetricsOverlay` — 오버레이 표시 상태 |
+| `msa.online.handoff` (sessionStorage) | `OnlineSession` — 문서 간 핸드오프 |
 
 측정 중에 이것들이 끼어들 수 있다는 점만 기억하면 된다: 마크가 많으면 부팅에
 텍스처 생성이 붙는다. `boot` 이 기계마다 다른 이유 중 하나다.

@@ -160,7 +160,7 @@ export function makeCanvasTexture(size, draw, options = {}) {
    * 티어를 바꿀 때 어느 캔버스가 문제인지 알아내려면 캔버스 자신이 답할 수
    * 있어야 하고, 그게 없어서 한 번 헤맸다.
    */
-  canvas.dataset.bcc = `world:${size}`;
+  canvas.dataset.msa = `world:${size}`;
   const texture = new CanvasTexture(canvas);
 
   /**

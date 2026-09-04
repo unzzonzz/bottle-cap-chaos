@@ -82,7 +82,7 @@ const http = createServer((req, res) => {
     return;
   }
   res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
-  res.end('bottle-cap-chaos relay\n');
+  res.end('midsummer-alkkagi relay\n');
 });
 
 const wss = new WebSocketServer({ server: http });
@@ -133,7 +133,7 @@ wss.on('connection', (socket, req) => {
 const beat = setInterval(() => hub.heartbeat(), timing.heartbeatMs);
 
 http.listen(PORT, HOST, () => {
-  log(`bottle-cap-chaos relay listening on ${HOST}:${PORT}`);
+  log(`midsummer-alkkagi relay listening on ${HOST}:${PORT}`);
   log(
     `  turn ${timing.turnMs}ms · heartbeat ${timing.heartbeatMs}ms x${timing.heartbeatMisses} ` +
       `(hard ${timing.heartbeatTimeoutMs}ms) · hash ${timing.hashTimeoutMs}ms · ` +

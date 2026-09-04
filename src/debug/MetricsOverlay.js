@@ -41,7 +41,7 @@
  * accumulator.
  */
 
-const KEY = 'bcc.metrics.v1';
+const KEY = 'msa.metrics.v1';
 
 /** off -> compact -> full -> off. The tap cycle. */
 const MODES = ['off', 'compact', 'full'];
@@ -335,7 +335,7 @@ export class MetricsOverlay {
       : 'n/a (WebKit)';
 
     const lines = [
-      `${s.label || 'bottle-cap-chaos'}`,
+      `${s.label || 'midsummer-alkkagi'}`,
       `boot  ${s.bootMs ? `${s.bootMs.toFixed(0)} ms` : '—'}`,
       '',
       `fps   ${pad(s.fps.toFixed(1), 6)}  low ${s.fpsLow.toFixed(1)}`,

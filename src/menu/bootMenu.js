@@ -16,6 +16,7 @@ import { BOARD_ASPECT, FRAME, frameScale } from '../core/frame.js';
 import { Bottle } from './Bottle.js';
 import { PALETTE, withAlpha } from '../core/palette.js';
 import { whenFontsReady } from '../ui/fonts.js';
+import { clearLegacyStorage } from '../core/legacyStorage.js';
 import { Cinematic } from '../core/Cinematic.js';
 import { MenuItems } from './MenuItems.js';
 import { SettingsScene } from './SettingsScene.js';
@@ -70,7 +71,7 @@ import { MenuAudio } from '../audio/MenuAudio.js';
  *
  * Nothing repaints the page for that hand-over any more, and its absence is the
  * fix rather than an omission. The bars close to `PALETTE.bg.skyTop`, which is
- * already `--bcc-void` — the colour the stylesheet paints the document and the
+ * already `--msa-void` — the colour the stylesheet paints the document and the
  * browser paints around a letterboxed canvas. So the covered frame, the gap
  * between the two documents and the game page's first frame are all the same
  * colour without anybody assigning it. See `core/Cinematic.js`.
@@ -162,6 +163,9 @@ export function bootMenu(
   // canvas textures too, and this is what stops them being baked in the
   // fallback face and kept.
   whenFontsReady();
+
+  // `main.js` 와 같은 이유로 여기서도 부른다. 지우는 연산이라 두 번 해도 같다.
+  clearLegacyStorage();
 
   const scene = new Scene();
   /**
@@ -891,7 +895,7 @@ export function bootMenu(
     /**
      * The page is about to be replaced, and the gap between this document going
      * away and the next one's first frame is not under anyone's control. What
-     * fills it is the document's own background, which is `--bcc-void` — and
+     * fills it is the document's own background, which is `--msa-void` — and
      * that is the SAME colour the bars have just closed to. So the covered
      * frame, the gap, and the game page's first frame are one flat colour with
      * nothing assigned anywhere.

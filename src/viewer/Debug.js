@@ -18,7 +18,7 @@ import { CAP_COLOR } from './Cap.js';
 const TRI_BUDGET = 1500;
 
 export function bootDebug({ cap, orbit, retro, composer }) {
-  const gui = new GUI({ title: 'BOTTLE CAP CHAOS' });
+  const gui = new GUI({ title: '한여름 알까기' });
 
   const stats = { tris: '' };
   // Pushed rather than `.listen()`ed: listen polls on its own rAF for a value

@@ -32,7 +32,7 @@ import { FONT_WEIGHTS } from '../core/tokens.js';
  * Hangul in it. Frutiger, Myriad and Segoe UI — the faces the aero look is
  * usually described with — have no Hangul at all, and this UI is Korean.
  *
- * `BCC Sans` leads it and is the name the BUNDLED file will register under, so
+ * `MSA Sans` leads it and is the name the BUNDLED file will register under, so
  * that the packaged app and a dev machine that happens to have Pretendard
  * installed resolve to the same metrics under the same name. Until that file
  * exists the stack falls through to a system Pretendard, then to the platform
@@ -40,7 +40,7 @@ import { FONT_WEIGHTS } from '../core/tokens.js';
  * to, and is a humanist sans with good Hangul on both.
  */
 export const FONT_FAMILY =
-  '"BCC Sans", "Pretendard", "SUIT", -apple-system, "Segoe UI", system-ui, sans-serif';
+  '"MSA Sans", "Pretendard", "SUIT", -apple-system, "Segoe UI", system-ui, sans-serif';
 
 /**
  * The numerals.

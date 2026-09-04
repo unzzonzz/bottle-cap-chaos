@@ -37,8 +37,8 @@ function isTextField(target) {
  * it before `initRapier()` resolves, which is when the first presses arrive.
  */
 export function hardenWebView(doc = globalThis.document) {
-  if (!doc || doc.__bccHardened) return;
-  doc.__bccHardened = true;
+  if (!doc || doc.__msaHardened) return;
+  doc.__msaHardened = true;
 
   const block = (e) => {
     if (isTextField(e.target)) return;

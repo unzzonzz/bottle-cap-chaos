@@ -519,7 +519,7 @@ export class Synth extends SoundPlayer {
     if (!loop) osc.stop(finish + 0.02);
     // A node does not report the time it was told to stop at, and `play` has to
     // know which source outlives the others so the teardown hangs off that one.
-    osc.__bccEnd = finish;
+    osc.__msaEnd = finish;
     voice.sources.push(osc);
     voice.layers.push({
       osc,
@@ -602,7 +602,7 @@ export class Synth extends SoundPlayer {
     const offset = audioFloat() * Math.max(0, this.mixer.noiseBuffer.duration - 0.5);
     src.start(t0, offset);
     if (!loop) src.stop(finish + 0.02);
-    src.__bccEnd = finish;
+    src.__msaEnd = finish;
     voice.sources.push(src);
     voice.layers.push({
       source: src,
@@ -668,5 +668,5 @@ function clampFreq(hz, nyquist) {
 
 /** Nodes do not report their own stop time; this is only used to pick the last. */
 function nodeEnd(node) {
-  return node.__bccEnd ?? 0;
+  return node.__msaEnd ?? 0;
 }

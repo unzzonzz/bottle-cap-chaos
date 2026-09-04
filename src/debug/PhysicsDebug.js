@@ -77,7 +77,7 @@ export function bootPhysicsDebug({
   onDumpLog,
   onExportLog,
 }) {
-  const gui = new GUI({ title: 'BOTTLE CAP CHAOS — 물리 코어' });
+  const gui = new GUI({ title: '한여름 알까기 — 물리 코어' });
 
   // ── mode ─────────────────────────────────────────────────────────────────
   // First, because it decides which half of this panel is meaningful. A mode

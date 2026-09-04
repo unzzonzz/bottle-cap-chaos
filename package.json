@@ -1,9 +1,9 @@
 {
-  "name": "bottle-cap-chaos",
+  "name": "midsummer-alkkagi",
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "Bottle Cap Chaos — desktop bottle-cap physics game, three modes",
+  "description": "Midsummer Alkkagi — desktop bottle-cap physics game, three modes",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

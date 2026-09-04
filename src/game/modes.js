@@ -543,7 +543,7 @@ export function modePath(key) {
  * ── it searches the path backwards ──────────────────────────────────────────
  * Rather than looking at one fixed segment, because the segment a mode name
  * lands in depends on how the site is served and this should not care. Under a
- * sub-path it is `/bottle-cap-chaos/football`; on a static host that implements
+ * sub-path it is `/midsummer-alkkagi/football`; on a static host that implements
  * the route by putting a copy of the page in a directory it is
  * `/football/index.html`. Both name football, and both would miss on any single
  * fixed position. Backwards so that the nearest match wins, which is the one the
