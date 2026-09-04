@@ -12,8 +12,11 @@ import { FONT_WEIGHTS } from '../core/tokens.js';
  * from the cache's point of view nothing changed.
  *
  * It was survivable while the alpha threshold was flattening every glyph to hard
- * 0/255 — the two faces looked more alike after thresholding than before. PHASE 4
- * removes that, so the difference becomes obvious and this becomes load-bearing.
+ * 0/255 — the bundled face and the fallback looked more alike after thresholding
+ * than before. That threshold is gone, so the difference is obvious and this is
+ * load-bearing. It became more so with the face change: Gowun Dodum's strokes
+ * are noticeably lighter than any system fallback, so a texture baked early is
+ * not merely the wrong shape, it is the wrong WEIGHT next to one baked late.
  *
  * ── the registry, rather than importing the four caches ─────────────────────
  * This module could import `clearHudTextureCache` and its three siblings
@@ -27,28 +30,40 @@ import { FONT_WEIGHTS } from '../core/tokens.js';
 /**
  * The stack.
  *
- * `Pretendard` is the target: a Korean-first humanist sans with a full weight
- * range, which is the closest thing to Frutiger's own voice that actually has
- * Hangul in it. Frutiger, Myriad and Segoe UI — the faces the aero look is
- * usually described with — have no Hangul at all, and this UI is Korean.
+ * `MSA Sans` is the bundled subset of **Gowun Dodum** — see `NOTICE`. It leads
+ * because it is the only entry guaranteed to be there; everything after it is
+ * what a machine falls back to while the woff2 is still in flight, and every one
+ * of them has Hangul.
  *
- * `MSA Sans` leads it and is the name the BUNDLED file will register under, so
- * that the packaged app and a dev machine that happens to have Pretendard
- * installed resolve to the same metrics under the same name. Until that file
- * exists the stack falls through to a system Pretendard, then to the platform
- * UI face — which is `-apple-system` on the two platforms this actually ships
- * to, and is a humanist sans with good Hangul on both.
+ * ── it was Pretendard, and the swap is the direction, not a preference ─────
+ * Pretendard is a Korean-first humanist sans with a full weight range, and the
+ * note here used to argue for it on exactly that basis: the aero look is usually
+ * described with Frutiger, Myriad and Segoe UI, none of which has any Hangul, so
+ * a humanist sans with a wide weight axis was the closest available voice.
+ *
+ * The new direction wants the opposite of a wide axis. §5 asks for a display
+ * voice and a utility voice far apart, and it settles the display half by
+ * DRAWING it (`ui/lettering.js`); what is left for the face is the utility half,
+ * where "quiet, small, precise" is the whole brief. Gowun Dodum is a single
+ * weight with slightly modulated strokes and open counters — a text face with no
+ * ambition to be a headline — which is what that half wants, and having only one
+ * weight is now a feature rather than the compromise it would have been.
  */
 export const FONT_FAMILY =
-  '"MSA Sans", "Pretendard", "SUIT", -apple-system, "Segoe UI", system-ui, sans-serif';
+  '"MSA Sans", "Gowun Dodum", "Pretendard", -apple-system, "Segoe UI", system-ui, sans-serif';
 
 /**
  * The numerals.
  *
- * Kept separate because the score plate is the largest type in the game and aero
- * numerals are heavier and rounder than its body text. Today it is the same
- * stack; the seam exists so changing it later is one line rather than a hunt
- * through every `display`-sized call site.
+ * ── nothing sets numbers in this stack any more ────────────────────────────
+ * The score is the largest thing on a screen and it is drawn, not typed —
+ * `lettering.drawNumber`. This seam existed so the score could be given a
+ * heavier face later without hunting through every `display`-sized call site,
+ * and the answer it was reserving space for turned out not to be a face at all.
+ *
+ * Kept because small numbers inside sentences ("3 / 5", a clock) are still set
+ * in type, and pointing them at their own name means a future decision to give
+ * THOSE a different treatment is one line here.
  */
 export const NUMERAL_FAMILY = FONT_FAMILY;
 
@@ -77,9 +92,14 @@ export function fontsAreReady() {
  * ── `document.fonts.ready` alone is not enough ──────────────────────────────
  * It resolves when the document has finished loading the fonts it KNOWS it
  * needs, and a font used only inside a canvas is not one of those: nothing in
- * the DOM references it, so the browser has no reason to fetch it. So each
- * weight is explicitly requested first, with a Hangul sample, because a face can
- * report loaded for Latin and still be fetching its Korean range.
+ * the DOM references it, so the browser has no reason to fetch it. So the face
+ * is explicitly requested first, with a Hangul sample, because a face can report
+ * loaded for Latin and still be fetching its Korean range.
+ *
+ * `FONT_WEIGHTS` has one entry now. The loop is kept over the list rather than
+ * unrolled to the single value, because the list is the thing `tokens.js`
+ * validates `TYPE` against — if a second weight is ever bundled it has to be
+ * fetched here too, and a loop cannot forget.
  *
  * Never rejects. A font that fails to arrive leaves the fallback in place, which
  * is a legible UI in the wrong face — the failure mode the brief asks for. A

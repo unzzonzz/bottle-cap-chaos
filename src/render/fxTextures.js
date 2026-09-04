@@ -30,9 +30,13 @@ import { drawIcon } from '../ui/icons.js';
  * 네 개의 각진 사각형으로 보였다.
  *
  * ── 지금의 규칙 ─────────────────────────────────────────────────────────────
- * 그라디언트가 **기본**이다. Frutiger Aero 의 빛은 가장자리가 없다 — 유리에 맺힌
- * 반사도, 물속의 광선도, 거품의 하이라이트도 전부 부드럽게 사라진다. 하드 스텝은
- * 이제 그 반대의 신호이므로, 하나 남은 곳(대시 패턴)에만 이유를 적어 두었다.
+ * 그라디언트가 **기본**이다. §13 이 충돌의 은유를 "물에 떨어지는 작은 물체" 로
+ * 놓았고, 물이 만드는 빛에는 가장자리가 없다 — 물결도, 튀김도, 수면의 반짝임도
+ * 전부 부드럽게 사라진다. 하드 스텝은 이제 그 반대의 신호이므로, 하나 남은
+ * 곳(대시 패턴)에만 이유를 적어 두었다.
+ *
+ * 어휘 자체를 물결·입자·빛 왜곡으로 바꾸는 것은 PHASE 8 이다. 여기 적힌 것은
+ * 가장자리를 어떻게 다루는가이고, 그 답은 두 방향에서 같다.
  *
  * 크기는 화면에서 차지할 크기를 따라간다. 링이 300 픽셀에 걸쳐 그려지면 256 텍셀로
  * 굽는다. 밉맵도 켜져 있으므로 작게 나올 때도 손해가 없다 — `core/textures.js` 의
@@ -321,12 +325,12 @@ export function braceTexture(sides = 8, size = 192) {
   ctx.miterLimit = 8;
 
   // 바깥 후광 먼저, 그 위에 획. 축소될 때 획이 사라져도 형태가 남는다.
-  ctx.strokeStyle = withAlpha('#ffffff', 0.16);
+  ctx.strokeStyle = withAlpha(PALETTE.fx.white, 0.16);
   ctx.lineWidth = s * 0.075;
   path(r);
   ctx.stroke();
 
-  ctx.strokeStyle = withAlpha('#ffffff', 0.95);
+  ctx.strokeStyle = withAlpha(PALETTE.fx.white, 0.95);
   ctx.lineWidth = s * 0.032;
   path(r);
   ctx.stroke();
@@ -334,7 +338,7 @@ export function braceTexture(sides = 8, size = 192) {
   // 꼭짓점마다 짧은 안쪽 턱. 팔각형만으로는 "링"이고, 턱이 있으면 "받치는 것"이다.
   ctx.lineCap = 'butt';
   ctx.lineWidth = s * 0.028;
-  ctx.strokeStyle = withAlpha('#ffffff', 0.55);
+  ctx.strokeStyle = withAlpha(PALETTE.fx.white, 0.55);
   for (let i = 0; i < n; i++) {
     const a = (i / n) * Math.PI * 2;
     ctx.beginPath();
@@ -433,10 +437,10 @@ export function lockTexture(size = 96) {
   ctx.shadowColor = OUTLINE;
   ctx.shadowBlur = s * 0.07;
   for (let i = 0; i < 3; i++) {
-    drawIcon(ctx, 'silence', { x: pad, y: pad, size: inner, color: OUTLINE, gloss: false });
+    drawIcon(ctx, 'silence', { x: pad, y: pad, size: inner, color: OUTLINE });
   }
   ctx.restore();
-  drawIcon(ctx, 'silence', { x: pad, y: pad, size: inner, color: BODY, gloss: false });
+  drawIcon(ctx, 'silence', { x: pad, y: pad, size: inner, color: BODY });
 
   return finish(key, cv);
 }

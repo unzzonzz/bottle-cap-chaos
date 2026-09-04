@@ -2,7 +2,7 @@ import { CanvasTexture, ClampToEdgeWrapping, LinearFilter, SRGBColorSpace } from
 import { PALETTE } from '../core/palette.js';
 import { RADIUS, SPACE, TYPE } from '../core/tokens.js';
 import { PLAYER_COLORS } from '../render/playerColors.js';
-import { applyTracking, fitText, fontSpec, gelButton, glassPanel } from '../ui/glass.js';
+import { applyTracking, fitText, fontSpec, plate, panel } from '../ui/paper.js';
 import { drawIcon } from '../ui/icons.js';
 
 import { registerTextureCache } from '../ui/fonts.js';
@@ -48,8 +48,8 @@ const TOOL_STATE = { idle: 'idle', hover: 'hover', active: 'selected', disabled:
  */
 const SKINS = {
   idle: skin('idle', PALETTE.ui.textMuted),
-  hover: skin('hover', PALETTE.accent.cyanDeep),
-  active: skin('active', PALETTE.accent.cyanDeep),
+  hover: skin('hover', PALETTE.cobaltInk),
+  active: skin('active', PALETTE.cobaltInk),
   disabled: skin('disabled', PALETTE.ui.disabledText),
 };
 
@@ -101,14 +101,14 @@ export function iconTexture(name, state = 'idle', { size = 28, scale = 1, plate 
   ctx.scale(scale, scale);
 
   if (plate) {
-    gelButton(ctx, {
+    plate(ctx, {
       x: 0,
       y: 0,
       w: size,
       h: size,
       radius: RADIUS.chip,
       state: TOOL_STATE[state] ?? 'idle',
-      accent: PALETTE.accent.cyan,
+      accent: PALETTE.cobalt,
     });
   }
 
@@ -118,9 +118,6 @@ export function iconTexture(name, state = 'idle', { size = 28, scale = 1, plate 
     y: (size - inner) / 2,
     size: inner,
     color: skin.ink,
-    // 판 위의 아이콘에는 광택을 얹지 않는다. 판이 이미 젤이라 광택이 두 겹이 되고,
-    // 두 겹이면 아이콘의 형태가 아니라 반사가 먼저 읽힌다.
-    gloss: !plate,
   });
 
   return finishIcon(key, canvas, size);
@@ -151,21 +148,26 @@ export function tileTexture(state = 'idle', { size = 76, accent = false } = {}) 
   ctx.imageSmoothingEnabled = true;
 
   /**
-   * 눌린 유리 홈이다. 젤 버튼이 아니라.
+   * 액자다. 누를 수 있는 것이 아니라 **그림이 들어가는 자리**다.
    *
-   * 그림이 **들어가는** 자리이므로 튀어나와 보이면 안 된다. `pressed` 스킨은
-   * 그라디언트가 반대로 흘러 표면이 눌린 것으로 읽히고, 그게 액자가 하는 일이다.
+   * 예전에는 그 구분을 그라디언트로 만들었다 — "`pressed` 스킨은 그라디언트가
+   * 반대로 흘러 표면이 눌린 것으로 읽히고, 그게 액자가 하는 일이다". 뒤집을
+   * 그라디언트가 없어졌으므로 지금 그 일을 하는 것은 **채우기가 한 단 가라앉은
+   * 것**(`surfaceSunken`)과 테두리가 헤어라인이라는 사실이다. 컨트롤은 밑줄을
+   * 갖고 이것은 갖지 않는다.
+   *
    * 기본 로고 칸만 `selected` 로 강조색 테두리를 받는다 — 지시서가 "구분되게
    * 표시" 를 요구했고, 이 칸만 휴지통도 편집도 없기 때문이다.
    */
-  gelButton(ctx, {
+  plate(ctx, {
     x: 0,
     y: 0,
     w: size,
     h: size,
     radius: RADIUS.chip,
     state: accent ? 'selected' : (TOOL_STATE[state] ?? 'idle'),
-    accent: accent ? PALETTE.accent.yellow : PALETTE.accent.cyan,
+    accent: accent ? PALETTE.accent.amber : PALETTE.cobalt,
+    fill: PALETTE.ui.surfaceSunken,
   });
 
   return finishIcon(key, canvas, size);
@@ -196,12 +198,12 @@ export function badgeTexture(player, on, { width = 30, height = 20 } = {}) {
    * 글자 "1P" / "2P" 만 말했다. 배지가 말하려는 것이 "이 마크를 누가 쓰고 있나"
    * 이므로, 그 답이 색으로 먼저 와야 한다.
    */
-  gelButton(ctx, {
+  plate(ctx, {
     x: 0,
     y: 0,
     w: width,
     h: height,
-    radius: RADIUS.pill,
+    radius: RADIUS.chip,
     state: on ? 'selected' : 'idle',
     accent: on ? PLAYER_COLORS[player] : PALETTE.ui.edgeStrong,
   });
@@ -243,13 +245,13 @@ export function messageTexture(text, { width = 300, height = 44, tone = 'idle', 
    * 수 없는 것이 누를 수 있다고 말하게 된다.
    */
   if (plate) {
-    glassPanel(ctx, {
+    panel(ctx, {
       x: 0,
       y: 0,
       w: width,
       h: height,
       radius: RADIUS.panel,
-      accent: tone === 'disabled' ? PALETTE.ui.danger : PALETTE.accent.cyan,
+      accent: tone === 'disabled' ? PALETTE.ui.danger : PALETTE.cobalt,
       alpha: 1,
     });
   }
@@ -289,12 +291,12 @@ export function saveButtonTexture(state = 'idle', { width = 108, height = 34 } =
   const ctx = canvas.getContext('2d');
   ctx.imageSmoothingEnabled = true;
 
-  gelButton(ctx, {
+  plate(ctx, {
     x: 0,
     y: 0,
     w: width,
     h: height,
-    radius: RADIUS.pill,
+    radius: RADIUS.chip,
     state: TOOL_STATE[state] ?? 'idle',
     accent: PALETTE.accent.green,
   });
@@ -311,7 +313,6 @@ export function saveButtonTexture(state = 'idle', { width = 108, height = 34 } =
     y: (height - disk) / 2,
     size: disk,
     color: skin.ink,
-    gloss: false,
   });
 
   applyTracking(ctx, TYPE.label.tracking);

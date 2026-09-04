@@ -96,7 +96,7 @@ export function solvePanel({ title = false, caption = false, rows = [], footer =
    * 접기는 이 값이 정해진 뒤의 총 높이를 보고 정해진다. 순서가 반대면 순환이다.
    */
   const rowHeight = Math.max(
-    Math.round(TYPE.title.size * 1.7),
+    Math.round(TYPE.body.size * 1.7),
     Math.min(SIZE.buttonChoice.h, Math.round(plateWidth * 0.25)),
   );
   const raw = rows.map((r) => ({ id: r.id, h: r.h ?? rowHeight }));

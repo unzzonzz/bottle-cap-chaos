@@ -7,7 +7,7 @@ import {
 } from 'three';
 import { PALETTE, withAlpha } from '../core/palette.js';
 import { RADIUS, SIZE, SPACE, TYPE } from '../core/tokens.js';
-import { applyTracking, fontSpec, glassPanel, roundRectPath } from '../ui/glass.js';
+import { applyTracking, fontSpec, panel, roundRectPath } from '../ui/paper.js';
 import { drawIcon, iconForCard } from '../ui/icons.js';
 
 /** 카드의 세로:가로. `tokens.js` 가 정한다. */
@@ -276,18 +276,11 @@ function drawArtMotif(ctx, id, { x, y, w, h, accent }) {
   }
 
   /**
-   * 위쪽의 아주 옅은 흰 광택. 여섯 장 전부에 같은 것이 걸린다.
-   *
-   * 에어로다 — 이건 인쇄물이 아니라 **코팅된** 카드고, 아트 패널은 유리 아래에
-   * 있는 것으로 보여야 한다. 무늬 위에 얹는 것은 그래야 무늬가 코팅 아래로
-   * 들어가기 때문이다.
+   * ── 위쪽에 아주 옅은 흰 광택이 있었다 ──────────────────────────────────
+   * 근거는 "이건 인쇄물이 아니라 **코팅된** 카드고, 아트 패널은 유리 아래에
+   * 있는 것으로 보여야 한다" 였다. 그 전제가 뒤집혔다 — §8.2 는 카드 면을
+   * **종이**로 정의한다. 코팅이 없으므로 코팅의 반사도 없다.
    */
-  const gloss = ctx.createLinearGradient(0, y, 0, y + h * 0.55);
-  gloss.addColorStop(0, withAlpha(PALETTE.ui.glossHi, 0.4));
-  gloss.addColorStop(1, withAlpha(PALETTE.ui.glossLo, 0));
-  ctx.fillStyle = gloss;
-  ctx.fillRect(x, y, w, h * 0.55);
-
   ctx.restore();
 }
 
@@ -400,7 +393,7 @@ export function cardFaceTexture(card, width) {
    * 지금은 정반대다 — UI 전체가 pill 과 라운드 패널이고, 각진 카드가 남으면
    * 그것만 다른 프로그램에서 온 것으로 보인다.
    */
-  glassPanel(ctx, { x: 0, y: 0, w: fw, h: fh, radius: RADIUS.card, accent, alpha: 1 });
+  panel(ctx, { x: 0, y: 0, w: fw, h: fh, radius: RADIUS.card, accent, alpha: 1 });
 
   /**
    * ── 이름 위의 색 띠는 없앴다 ────────────────────────────────────────────────
@@ -492,13 +485,13 @@ export function cardBackTexture(width) {
   ctx.scale(w / fw, h / fh);
 
   // 앞면과 같은 유리 패널. 뒷면만 각지면 부채꼴에서 그것만 튀어 보인다.
-  glassPanel(ctx, {
+  panel(ctx, {
     x: 0,
     y: 0,
     w: fw,
     h: fh,
     radius: RADIUS.card,
-    accent: PALETTE.accent.sky,
+    accent: PALETTE.blueClear,
     alpha: 1,
   });
 
@@ -515,7 +508,7 @@ export function cardBackTexture(width) {
   ctx.save();
   roundRectPath(ctx, 0, 0, fw, fh, RADIUS.card);
   ctx.clip();
-  ctx.fillStyle = withAlpha(PALETTE.accent.sky, 0.14);
+  ctx.fillStyle = withAlpha(PALETTE.blueClear, 0.14);
   const band = 9;
   for (let i = -fh; i < fw + fh; i += band * 2) {
     ctx.beginPath();
@@ -534,7 +527,7 @@ export function cardBackTexture(width) {
     x: (fw - size) / 2,
     y: (fh - size) / 2,
     size,
-    color: withAlpha(PALETTE.accent.skyDeep, 0.32),
+    color: withAlpha(PALETTE.cobaltInk, 0.32),
   });
 
   const tex = toTexture(canvas);
@@ -673,15 +666,15 @@ export function useGuideTexture(width, height) {
 
   // 4. 안쪽 필. 유리다 — 슬롯 안쪽이 주변보다 아주 조금 밝아야 "빈 자리"로 읽힌다.
   roundRectPath(ctx, bleed + core * 0.5, bleed + core * 0.5, sw - core, sh - core, rect.radius);
-  ctx.fillStyle = withAlpha(PALETTE.ui.glossHi, 0.12);
+  ctx.fillStyle = withAlpha(PALETTE.whiteCool, 0.12);
   ctx.fill();
 
   // 2. 흰 글로우. 주로 안쪽으로 — 바깥으로 나가면 1 을 씻어낸다.
-  ringFalloff(ctx, rect, -core * 0.6, -glow, 0.42, (k) => k * k, PALETTE.ui.glossHi);
-  ringFalloff(ctx, rect, core * 0.4, core * 1.6, 0.3, (k) => k, PALETTE.ui.glossHi);
+  ringFalloff(ctx, rect, -core * 0.6, -glow, 0.42, (k) => k * k, PALETTE.whiteCool);
+  ringFalloff(ctx, rect, core * 0.4, core * 1.6, 0.3, (k) => k, PALETTE.whiteCool);
 
   // 3. 흰 코어. 형태를 지키는 하나.
-  roundRing(ctx, rect, 0, core, withAlpha(PALETTE.ui.glossHi, 0.92));
+  roundRing(ctx, rect, 0, core, withAlpha(PALETTE.whiteCool, 0.92));
 
   /**
    * 밉은 여전히 없다.
@@ -728,9 +721,9 @@ export function cardGlowTexture(width, height) {
   ctx.lineJoin = 'round';
 
   roundRectPath(ctx, bleed, bleed, sw, sh, rect.radius);
-  ctx.fillStyle = withAlpha(PALETTE.ui.glossHi, 0.55);
+  ctx.fillStyle = withAlpha(PALETTE.whiteCool, 0.55);
   ctx.fill();
-  ringFalloff(ctx, rect, 0, glow, 0.55, (k) => k * k, PALETTE.ui.glossHi);
+  ringFalloff(ctx, rect, 0, glow, 0.55, (k) => k * k, PALETTE.whiteCool);
 
   const tex = toTexture(canvas, { mips: false });
   tex.userData = { width: w, height: h };
@@ -768,10 +761,10 @@ export function noticeTexture(text) {
    * 거절 사유는 알약 모양 판이다.
    *
    * 색은 `danger` 계열을 유지한다 — 이건 "못 낸다"는 말이고, 유리의 중립색으로
-   * 칠하면 다른 안내와 구별되지 않는다. `gelButton` 을 쓰지 않는 것도 같은 이유로,
+   * 칠하면 다른 안내와 구별되지 않는다. `plate` 을 쓰지 않는 것도 같은 이유로,
    * 저건 누를 수 있는 것의 모양이고 이건 읽는 것이다.
    */
-  glassPanel(ctx, {
+  panel(ctx, {
     x: 0,
     y: 0,
     w,

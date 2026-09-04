@@ -14,7 +14,7 @@ import {
 } from './markTextures.js';
 import { DEFAULT_MARK } from './MarkBook.js';
 import { frameScale } from '../core/frame.js';
-import { focusRing, roundRectPath } from '../ui/glass.js';
+import { focusRing, roundRectPath } from '../ui/paper.js';
 
 /**
  * The drawing screen: a cap you paint on, and the tools to paint it with.
@@ -1096,7 +1096,7 @@ function swatchTexture(colour, selected, size = L.swatch) {
 
   const r = edge * 0.22;
   roundRectPath(ctx, 0, 0, edge, edge, r);
-  ctx.fillStyle = selected ? PALETTE.accent.cyan : PALETTE.ui.edge;
+  ctx.fillStyle = selected ? PALETTE.cobalt : PALETTE.ui.edge;
   ctx.fill();
   roundRectPath(ctx, edge * 0.12, edge * 0.12, edge * 0.76, edge * 0.76, r * 0.7);
   ctx.fillStyle = colour;
@@ -1108,7 +1108,7 @@ function swatchTexture(colour, selected, size = L.swatch) {
       w: edge - 1,
       h: edge - 1,
       radius: r,
-      accent: PALETTE.accent.cyan,
+      accent: PALETTE.cobalt,
     });
   }
 
@@ -1163,7 +1163,7 @@ function ringTexture(boundary) {
   ctx.setLineDash([size * 0.035, size * 0.028]);
   ctx.lineCap = 'round';
   ctx.lineWidth = size * 0.018;
-  ctx.strokeStyle = PALETTE.accent.cyanPale;
+  ctx.strokeStyle = PALETTE.bluePale;
   ctx.beginPath();
   ctx.arc(half, half, r, 0, Math.PI * 2);
   ctx.stroke();

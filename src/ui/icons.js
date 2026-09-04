@@ -1,4 +1,4 @@
-import { PALETTE, withAlpha } from '../core/palette.js';
+import { PALETTE } from '../core/palette.js';
 
 /**
  * Every icon in the game, drawn as vector paths.
@@ -19,7 +19,7 @@ import { PALETTE, withAlpha } from '../core/palette.js';
  * ── the signature is `(ctx, size, color)` ───────────────────────────────────
  * Each entry draws inside a `size` x `size` box with its origin at 0,0 and
  * leaves the context as it found it. `drawIcon` below is what callers use — it
- * handles placement and the aero gloss pass.
+ * handles placement.
  *
  * ── `glyph` is now a KEY ────────────────────────────────────────────────────
  * `cardCatalog.js` still has a `glyph` field. It is no longer rendered; it is
@@ -835,28 +835,28 @@ export function iconForCard(card) {
 }
 
 /**
- * Draw an icon, with the aero gloss pass.
+ * Draw an icon.
  *
- * ── the gloss goes through an offscreen canvas, and it has to ───────────────
- * The highlight is "white over the top 45% of the icon's own pixels", which is
- * `globalCompositeOperation = 'source-atop'`. Run against the destination canvas
- * that would composite onto everything already drawn there — the plate, its
- * gradient, its border. So the icon is rendered to its own surface, glossed
- * there where it is the only content, and blitted.
+ * ── the gloss pass is gone ─────────────────────────────────────────────────
+ * There was a `gloss` option and it did the aero highlight: white over the top
+ * 45% of the icon's own pixels, through `globalCompositeOperation` and an
+ * offscreen canvas so the composite could not reach the plate underneath. §19
+ * and §24 of the direction ban glossy controls outright, and exactly one call
+ * site ever turned it on. The offscreen canvas stays — see below.
  */
-export function drawIcon(ctx, name, { x, y, size, color, gloss = true }) {
+export function drawIcon(ctx, name, { x, y, size, color }) {
   const fn = ICON[name];
   if (!fn) return;
 
   /**
-   * 광택이 없어도 **오프스크린을 거친다.**
+   * **오프스크린을 거친다.** 광택이 사라진 뒤에도 그렇다.
    *
-   * 예전에는 무광택이면 대상 컨텍스트에 바로 그렸다. 한 줄 짧고, 아이콘이 획과
-   * 채우기만 쓰는 한 맞다.
+   * 예전에는 대상 컨텍스트에 바로 그렸다. 한 줄 짧고, 아이콘이 획과 채우기만
+   * 쓰는 한 맞다.
    *
    * 맞지 않게 된 것은 겹친 뚜껑 두 개(`iconMarks`)를 그리면서다. 앞의 것이 뒤의
    * 것을 가리려면 `destination-out` 으로 지워야 하는데, 대상에 바로 그리면 그
-   * 지우기가 **아이콘 아래의 판까지 뚫는다** — 실제로 버튼 한가운데에 구멍이
+   * 지우기가 **아이콘 아래의 것까지 뚫는다** — 실제로 버튼 한가운데에 구멍이
    * 뚫렸다.
    *
    * 오프스크린은 그 합성을 아이콘 안에 가둔다. 비용은 캔버스 하나이고, 아이콘은
@@ -868,18 +868,5 @@ export function drawIcon(ctx, name, { x, y, size, color, gloss = true }) {
   off.height = edge;
   const octx = off.getContext('2d');
   fn(octx, edge, color);
-
-  if (!gloss) {
-    ctx.drawImage(off, x, y, size, size);
-    return;
-  }
-
-  octx.globalCompositeOperation = 'source-atop';
-  const g = octx.createLinearGradient(0, 0, 0, edge * 0.55);
-  g.addColorStop(0, withAlpha(PALETTE.ui.glossHi, 0.55));
-  g.addColorStop(1, withAlpha(PALETTE.ui.glossLo, 0));
-  octx.fillStyle = g;
-  octx.fillRect(0, 0, edge, edge);
-
   ctx.drawImage(off, x, y, size, size);
 }

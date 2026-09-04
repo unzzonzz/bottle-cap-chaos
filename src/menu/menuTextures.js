@@ -1,17 +1,17 @@
 import { CanvasTexture, ClampToEdgeWrapping, LinearFilter, LinearMipmapLinearFilter, RepeatWrapping, SRGBColorSpace } from 'three';
 import { PALETTE, withAlpha } from '../core/palette.js';
-import { ELEVATION, RADIUS, ROLE, SPACE, TYPE } from '../core/tokens.js';
+import { RADIUS, ROLE, RULE, SPACE, TYPE } from '../core/tokens.js';
 import { drawIcon } from '../ui/icons.js';
 import {
   applyTracking,
   dialogPanel,
   fitText,
   fontSpec,
-  gelButton,
-  glassPanel,
+  plate,
+  panel,
   roleButton,
   roleSkin,
-} from '../ui/glass.js';
+} from '../ui/paper.js';
 
 /**
  * Every pixel the menu needs, drawn at runtime. No image files, same as
@@ -341,7 +341,7 @@ export function capLogoTexture(texels = 512) {
   // The corners are never sampled — the panel is the inscribed circle — but
   // filling them costs nothing and means a rounding error at the rim cannot
   // pick up a transparent texel.
-  ctx.fillStyle = PALETTE.menu.labelRed;
+  ctx.fillStyle = PALETTE.menu.labelInk;
   ctx.fillRect(0, 0, size, size);
 
   /**
@@ -380,19 +380,19 @@ export function capLogoTexture(texels = 512) {
   // Rim. Outside the box the lockup is confined to — see the header — so it is
   // the half of the design that only reads where the disc is drawn whole, which
   // today is the mark grid's tile.
-  ring(60, 3, PALETTE.menu.labelRedDeep);
-  ring(52, 2, PALETTE.menu.labelRedLight);
+  ring(60, 3, PALETTE.menu.labelInkDeep);
+  ring(52, 2, PALETTE.menu.labelInkLight);
 
   // The two rules, inside the crop so they frame the wordmark at full cover.
-  arc(37, 2, 202, 338, PALETTE.menu.labelCreamAlt);
-  arc(37, 2, 22, 158, PALETTE.menu.labelCreamAlt);
+  arc(37, 2, 202, 338, PALETTE.menu.labelPaperAlt);
+  arc(37, 2, 22, 158, PALETTE.menu.labelPaperAlt);
 
   drawText(ctx, {
     text: 'BOTTLE',
     x: c,
     y: 54,
     font: fontSpec({ size: 15, weight: 700 }),
-    color: PALETTE.menu.labelCream,
+    color: PALETTE.menu.labelPaper,
     align: 'center',
     slant: 0.22,
   });
@@ -401,7 +401,7 @@ export function capLogoTexture(texels = 512) {
     x: c,
     y: 76,
     font: fontSpec({ size: 22, weight: 700 }),
-    color: PALETTE.menu.labelCream,
+    color: PALETTE.menu.labelPaper,
     align: 'center',
     slant: 0.22,
   });
@@ -410,7 +410,7 @@ export function capLogoTexture(texels = 512) {
     x: c,
     y: 92,
     font: fontSpec({ size: 13, weight: 700 }),
-    color: PALETTE.menu.labelGold,
+    color: PALETTE.menu.labelRule,
     align: 'center',
     slant: 0.22,
   });
@@ -487,8 +487,11 @@ export function foamTexture() {
  *   정반사    왼쪽 위, 작고 뜨겁다. 장면의 키 라이트와 같은 방향.
  *   되비침    오른쪽 아래, 넓고 어둡다. 액체에서 되올라온 빛이라 테보다 약하다.
  *
- * 셋의 관계가 Frutiger Aero 의 물방울 그 자체다. 하나라도 빠지면 원이 되고, 넷이
- * 되면 유리구슬 렌더가 된다 — 여기 크기에서는 후자가 그냥 지저분해진다.
+ * 셋의 관계가 물방울을 물방울로 만든다. 하나라도 빠지면 원이 되고, 넷이 되면
+ * 유리구슬 렌더가 된다 — 여기 크기에서는 후자가 그냥 지저분해진다.
+ *
+ * 이것은 §7 이 요구하는 "tiny carbonation bubbles" 이고, 유리 안의 물성이라
+ * 광택 금지(§19 · §24)의 대상이 아니다 — 그쪽은 **컨트롤**에 대한 규칙이다.
  *
  * 64 텍셀인 것은 화면에서 거품이 커야 20 픽셀쯤 되기 때문이다. 밉맵이 있으므로
  * 작을 때 손해가 없고, 큰 거품이 계단지지 않는다.
@@ -642,13 +645,17 @@ export function burstSheet() {
 }
 
 /**
- * 메뉴 항목의 판. 젤 버튼이다.
+ * 메뉴 항목. 판이 아니라 **글자와 밑줄**이다.
  *
- * ── 왼쪽 세로 막대가 없어졌다 ───────────────────────────────────────────────
- * 예전 판은 각진 사각형에 2px 테두리, 왼쪽 가장자리에 상태를 알리는 세로 막대가
+ * ── 두 번에 걸쳐 비워졌다 ──────────────────────────────────────────────────
+ * 처음 판은 각진 사각형에 2px 테두리, 왼쪽 가장자리에 상태를 알리는 세로 막대가
  * 있었다. 막대의 근거는 "글씨보다 멀리서 읽힌다" 였고 각진 판에서는 맞았지만,
- * 젤 버튼은 몸통 전체가 상태에 따라 밝아지므로 같은 일을 더 크게 한다. 라운드
- * 카드에 색 레일을 붙인 모양은 지금 어디서나 보이는 기본값이기도 하다.
+ * 젤 버튼이 되면서 몸통 전체가 상태를 말하게 되어 막대가 중복이 됐다.
+ *
+ * 이제 몸통도 없다. §11 이 UI 를 필드 주변에 조용히 앉히라고 하고 §24 가 젤
+ * 컨트롤을 금지하므로, 남은 것은 `roleButton` 이 그리는 글자 한 줄과 그 아래
+ * 밑줄이다. 이 파일은 여전히 텍스처를 굽는다 — 항목이 3D 쿼드이기 때문이고, 그
+ * 사실은 판이 있든 없든 바뀌지 않는다.
  *
  * 라벨은 가운데다. 왼쪽 정렬은 막대가 있을 때 그 옆에 붙는 것이었고, 막대가
  * 사라지면 왼쪽에 이유 없는 여백만 남는다.
@@ -714,7 +721,7 @@ export function menuPlateTexture(label, state, { width = 256, height = 52, scale
    *
    * 이 판은 256x52 비율 그대로 커지므로 고정 반경은 판이 커질수록 상대적으로
    * 작아진다 — 작은 창에서 둥글던 것이 큰 창에서는 모서리만 살짝 깎인 사각형이
-   * 된다. `RADIUS.pill` 은 `roundRectPath` 가 높이의 절반으로 죄므로 어느
+   * 된다. `RADIUS.chip` 은 `roundRectPath` 가 높이의 절반으로 죄므로 어느
    * 크기에서도 같은 비율이다.
    */
   roleButton(ctx, {
@@ -722,7 +729,7 @@ export function menuPlateTexture(label, state, { width = 256, height = 52, scale
     y: 0,
     w: width,
     h: height,
-    radius: RADIUS.pill,
+    radius: RADIUS.chip,
     role,
     state: skinState,
     selected,
@@ -742,7 +749,6 @@ export function menuPlateTexture(label, state, { width = 256, height = 52, scale
      * 없애도 잃는 것이 없다. 이 판들은 이제 **패널 위에** 있고 패널이 그림자를
      * 지고 있다. 판을 바탕에서 떼어 놓는 일은 테두리(`edgeOuter`)가 한다.
      */
-    elevation: ELEVATION.flat,
   });
 
   if (stamp) {
@@ -864,8 +870,6 @@ export function iconPlateTexture(icon, state = 'idle', { size = 64, scale = 1 } 
     y: (size - inner) / 2,
     size: inner,
     color: roleSkin(ROLE.RETREAT, skinState).text,
-    // 판이 이미 유리다. 광택을 두 겹으로 얹으면 아이콘의 형태보다 반사가 먼저 읽힌다.
-    gloss: false,
   });
 
   const tex = toTexture(canvas);
@@ -896,14 +900,13 @@ export function titleTexture(text, sub, { width = 256, height = 80, scale = 1, p
    * 바로 그 혼동이다.
    */
   if (plate) {
-    glassPanel(ctx, {
+    panel(ctx, {
       x: 0,
       y: 0,
       w: width,
       h: height,
       radius: RADIUS.panel,
-      accent: PALETTE.accent.cyan,
-      elevation: ELEVATION.raised,
+      accent: PALETTE.cobalt,
     });
   }
 
@@ -941,16 +944,16 @@ export function titleTexture(text, sub, { width = 256, height = 80, scale = 1, p
    * 폭에 대해서는 접고, 높이에 대해서는 줄인다. 접을 축이 하나뿐이기 때문이다.
    */
   const fitK = (() => {
-    const probeLines = wrapToFit(probe.ctx, text, TYPE.title, room, 2);
+    const probeLines = wrapToFit(probe.ctx, text, TYPE.body, room, 2);
     const rows = probeLines.rows.length;
     const need =
-      rows * TYPE.title.size +
-      (rows - 1) * Math.round(TYPE.title.size * 0.18) +
+      rows * TYPE.body.size +
+      (rows - 1) * Math.round(TYPE.body.size * 0.18) +
       (sub ? TYPE.caption.size + SPACE.xs : 0) +
       SPACE.sm * 2;
     return Math.max(0.55, Math.min(1, height / Math.max(1, need)));
   })();
-  const titleType = { ...TYPE.title, size: Math.round(TYPE.title.size * fitK) };
+  const titleType = { ...TYPE.body, size: Math.round(TYPE.body.size * fitK) };
   const subType = { ...TYPE.caption, size: Math.round(TYPE.caption.size * fitK) };
 
   const lines = wrapToFit(probe.ctx, text, titleType, room, 2);

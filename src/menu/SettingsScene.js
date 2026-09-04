@@ -6,7 +6,7 @@ import { PALETTE } from '../core/palette.js';
 import { ROLE } from '../core/tokens.js';
 import { solvePanel } from './panelLayout.js';
 import { TIER_COUNT, TIER_NAMES } from '../core/quality.js';
-import { gelButton, roundRectPath } from '../ui/glass.js';
+import { plate, roundRectPath } from '../ui/paper.js';
 
 /**
  * 설정 — a heading, the things it holds, and a way back.
@@ -720,14 +720,15 @@ export class SettingsScene {
  * 화면에서만 쓰는 컨트롤 그림은 그 화면이 들고 있는다. 공용 `markIcons` 에 넣으면
  * `clearIconCache()` 가 이 화면 아래에서 그걸 없애 버린다.
  *
- * ── 각진 사각형에서 알약으로 ────────────────────────────────────────────────
- * 예전에는 1픽셀 테두리 사각형에 안쪽 사각형을 채운 것이었고, 밖으로 필터가 꺼져
- * 있었다("`imageSmoothingEnabled = false`"). 이 화면에서 유일하게 각진 것이었고,
- * 열 개가 나란히 있으니 유일하다는 사실이 눈에 띄었다.
+ * ── 각진 사각형에서, 알약을 거쳐, 작은 칩으로 ──────────────────────────────
+ * 처음에는 1픽셀 테두리 사각형에 안쪽 사각형을 채운 것이었고 필터가 꺼져 있었다
+ * ("`imageSmoothingEnabled = false`"). 이 화면에서 유일하게 각진 것이었고, 열 개가
+ * 나란히 있으니 유일하다는 사실이 눈에 띄었다. 그래서 알약이 됐다.
  *
- * 이제 알약이다. 채워진 칩은 젤 버튼의 `selected` 상태를, 빈 칩은 유리의
- * 가라앉은 바탕을 쓴다 — 같은 어휘라 볼륨 줄이 이 화면의 다른 컨트롤과 한 벌로
- * 읽힌다.
+ * `RADIUS.pill` 이 없어지면서 알약도 없어졌다 — 핏 모양은 젤 컨트롤의 것이고
+ * 새 방향이 그것을 금지한다. 지금은 `RADIUS.chip` 의 작은 모서리이고, 채워진 칩은
+ * `selected` 스킨을, 빈 칩은 가라앉은 종이를 쓴다. 어휘가 이 화면의 다른 컨트롤과
+ * 같다는 성질은 그대로다.
  */
 const chipCache = new Map();
 
@@ -746,7 +747,7 @@ function chipTexture(filled, state, size = L.chip) {
   ctx.imageSmoothingEnabled = true;
   ctx.scale(scale, scale);
 
-  gelButton(ctx, {
+  plate(ctx, {
     x: 0,
     y: 0,
     w,

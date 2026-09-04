@@ -80,8 +80,8 @@ const OVERHANG = 6;
 /** The winner line's plate, in frame pixels. Big — see `victoryPlateTexture`. */
 const PLATE = { width: 340, height: 72 };
 
-/** The number under it. The HUD's own score plate, at the HUD's own size. */
-const SCORE = { width: SIZE.scorePlate.w, height: SIZE.scorePlate.h };
+/** The number under it. The HUD's own score, at the HUD's own size. */
+const SCORE = { width: SIZE.score.w, height: SIZE.score.h };
 
 /**
  * One line of explanation under the winner, when the mode has one.
@@ -203,7 +203,7 @@ export class VictoryLayer {
      * 읽히는 동안 그것이 계속 보여야 한다.
      */
     this.dim = new Mesh(this._quad, this.uiMaterials.createSolid(0));
-    const dimRgb = toRgb(PALETTE.accent.skyDeep).map((v) => v / 255);
+    const dimRgb = toRgb(PALETTE.cobaltInk).map((v) => v / 255);
     this.dim.material.uniforms.uTint.value.set(dimRgb[0], dimRgb[1], dimRgb[2]);
     this.dim.scale.set(VICTORY_FRAME.width + OVERHANG * 2, VICTORY_FRAME.height + OVERHANG * 2, 1);
     this.dim.renderOrder = -50;

@@ -21,14 +21,17 @@ import { MOTION } from '../core/tokens.js';
  * `main.js` is a module, so it runs after the document has been parsed, and for
  * the frame or two before this function is called those variables do not exist.
  * A `var()` with no fallback resolves to the property's initial value, which for
- * a background is transparent — so the page starts as the browser's own white
- * and then becomes the palette's own near-white surround.
+ * a background is transparent — so the page would start as the browser's own
+ * white and then become the void's cobalt.
  *
- * That was NOT survivable under the old scheme, where the same gap was a flash
+ * That was NOT survivable under the first scheme, where the same gap was a flash
  * of white before a near-black UI, and it is the reason the old stylesheet hard
- * coded `#000000` at the top. Inverting the scheme inverted the hazard: white to
- * light blue is a transition nobody will see. Fallbacks would put the values
- * back in two places to solve a problem that no longer exists.
+ * coded `#000000` at the top. Inverting the scheme softened the hazard; the
+ * handover then sharpened it again, because the two documents now meet on a
+ * single flat cobalt and a white frame between them is exactly the flash the
+ * covered frame exists to remove. So `--msa-void` DOES carry a fallback, in
+ * `styles.css`, and that rule states its own reasoning. Everything else here
+ * still needs none.
  *
  * The one thing this cannot cover is the paint BEFORE the stylesheet has been
  * applied — the browser's own initial canvas. `index.html` pins that with
@@ -47,7 +50,7 @@ export function applyCssPalette(root = document.documentElement) {
   set('--msa-text-muted', PALETTE.ui.textMuted);
   set('--msa-edge', PALETTE.ui.edge);
   set('--msa-surface', PALETTE.ui.surface);
-  set('--msa-accent', PALETTE.accent.cyan);
+  set('--msa-accent', PALETTE.cobalt);
 
   // Leaving a match for the menu. Fades to the UI's own surface, not to black —
   // the menu's first frame is a bright page and this is the seam into it.
@@ -69,8 +72,8 @@ export function applyCssPalette(root = document.documentElement) {
   set('--msa-debug-edge', PALETTE.ui.edgeStrong);
   set('--msa-debug-ink', PALETTE.ui.text);
   set('--msa-debug-accent', PALETTE.accent.greenDeep);
-  set('--msa-debug-warn-ink', PALETTE.accent.orangeDeep);
-  set('--msa-debug-warn-edge', PALETTE.accent.orange);
+  set('--msa-debug-warn-ink', PALETTE.accent.terracottaDeep);
+  set('--msa-debug-warn-edge', PALETTE.accent.terracotta);
 
   // The WASM either loads or it does not, and a blank canvas says neither.
   set('--msa-error-bg', withAlpha(PALETTE.ui.dangerPale, 0.96));

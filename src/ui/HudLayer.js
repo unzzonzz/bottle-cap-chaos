@@ -82,7 +82,7 @@ export const HUD_FRAME = FRAME;
  * 여기서 직접 정하는 것은 두 개뿐이다: 클럭 바의 두께와 긴급 임계 초. 나머지는
  * `SIZE`/`SPACE` 를 그대로 읽는다 — UI 를 키울 때 고칠 곳이 한 군데여야 한다.
  */
-const SCORE = { width: SIZE.scorePlate.w, height: SIZE.scorePlate.h };
+const SCORE = { width: SIZE.score.w, height: SIZE.score.h };
 
 /**
  * How far a cinematic may have taken the HUD away before it stops answering.

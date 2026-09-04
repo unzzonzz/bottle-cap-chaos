@@ -1,20 +1,21 @@
 import { CanvasTexture, ClampToEdgeWrapping, LinearFilter, SRGBColorSpace } from 'three';
 import { darken, PALETTE, withAlpha } from '../core/palette.js';
 import { registerTextureCache } from './fonts.js';
-import { ELEVATION, PANEL, RADIUS, SIZE, SPACE, TYPE } from '../core/tokens.js';
+import { CTA, PANEL, RADIUS, RULE, SIZE, SPACE, TYPE } from '../core/tokens.js';
 import {
   applyTracking,
   fitText,
   focusRing,
   fontSpec,
   dialogPanel,
-  gelButton,
-  glassPanel,
+  plate,
+  panel,
   roleButton,
   roleSkin,
   skinFor,
-} from './glass.js';
+} from './paper.js';
 import { drawIcon } from './icons.js';
+import { drawNumber } from './lettering.js';
 
 /**
  * Every plate the HUD draws, as a canvas texture.
@@ -128,15 +129,22 @@ const BTN = PALETTE.button;
  *
  * Put a mode check in here and the next mode needs a third one.
  *
- * ── the numbers are as big as the plate allows ──────────────────────────────
- * They are the one thing on screen that has to be readable at a glance from
- * across a 640x480 frame, so they get 26 of the plate's 42 pixels and the
- * caption gets what is left. Each is drawn in its OWN player ink, and that ink
- * is the whole of the colour coding — the pair of solid bars down the outer
- * edges said the same thing a second time and have gone.
+ * ── there is no plate, and the numbers are drawn ────────────────────────────
+ * §8.1: the score is vector numerals straight onto the field, large, with no
+ * surface behind them. Both halves of that are the same decision — a white
+ * plate in the corner is the largest opaque thing in a frame the field is
+ * supposed to dominate, and taking it away is only possible because the numbers
+ * are heavy enough to read against turf and timber on their own. The UI face
+ * has one weight and could not have been.
  *
- * 42 tall and not the 64 it started at, because of what is above and below it
- * on a knockout board — see the band `HudLayer.layout` has to fit it into.
+ * Each number is in its OWN player ink, and that ink is the whole of the colour
+ * coding — the pair of solid bars down the outer edges said the same thing a
+ * second time and went long before the plate did.
+ *
+ * ── the colon is not a numeral ──────────────────────────────────────────────
+ * It is set smaller and in `textFaint`, because it is punctuation between two
+ * quantities rather than a third mark. At the numerals' own weight it reads as
+ * part of the score and the eye has to do work to discard it.
  */
 export function scorePlateTexture(board, { width, height, scale = 1 }) {
   const key = `score:${board.key}:${width}x${height}@${scale}`;
@@ -157,43 +165,36 @@ export function scorePlateTexture(board, { width, height, scale = 1 }) {
   const fw = width;
   const fh = height;
 
-  glassPanel(ctx, { x: 0, y: 0, w: fw, h: fh, radius: RADIUS.panel });
-
-  /**
-   * 팀 색 바는 없다. 색은 **숫자 자체**가 말한다.
-   *
-   * 예전에는 양쪽 바깥 가장자리에 팀 색 막대가 한 줄씩 서 있었다. 그것이 하던
-   * 일 — 어느 쪽 숫자가 누구 것인지 — 은 `inkFor` 가 숫자를 그 팀의 잉크로
-   * 칠하는 것으로 이미 되어 있고, 두 번 말하는 쪽이 막대였다. 알파 이진화를
-   * 걷어낸 뒤로는 44px 숫자의 색조가 그대로 살아 나오므로, 막대가 보험이던
-   * 이유(양자화가 두 색을 뭉갠다)도 남아 있지 않다.
-   */
-
   const mid = fw / 2;
-  const numberY = fh * 0.56;
-  applyTracking(ctx, TYPE.display.tracking);
-  drawText(ctx, {
-    text: board.left.value,
-    x: mid - SPACE.md,
-    y: numberY,
-    font: fontSpec(TYPE.display),
+  /**
+   * 숫자의 em 박스. 캡션이 있으면 그만큼 양보한다.
+   *
+   * 판이 없어졌으므로 높이를 나눠 갖던 상대가 캡션 하나뿐이다. `0.62` 는
+   * 캡션 한 줄과 그 위 여백을 뺀 나머지이고, 캡션이 없는 모드에서는 숫자가
+   * 박스를 거의 다 쓴다 — 판이 있던 시절에는 불가능했던 크기다.
+   */
+  const em = Math.round(fh * (board.caption ? 0.62 : 0.82));
+  const numberTop = SPACE.xs * 0.5;
+  const gap = SPACE.md;
+
+  drawNumber(ctx, board.left.value, {
+    x: mid - gap,
+    y: numberTop,
+    size: em,
     color: inkFor(board.left.color),
     align: 'right',
   });
-  drawText(ctx, {
-    text: board.right.value,
-    x: mid + SPACE.md,
-    y: numberY,
-    font: fontSpec(TYPE.display),
+  drawNumber(ctx, board.right.value, {
+    x: mid + gap,
+    y: numberTop,
+    size: em,
     color: inkFor(board.right.color),
     align: 'left',
   });
-  applyTracking(ctx, 0);
-  drawText(ctx, {
-    text: ':',
+  drawNumber(ctx, ':', {
     x: mid,
-    y: numberY - 4,
-    font: fontSpec(TYPE.title),
+    y: numberTop + em * 0.18,
+    size: em * 0.62,
     color: PALETTE.ui.textFaint,
     align: 'center',
   });
@@ -203,7 +204,7 @@ export function scorePlateTexture(board, { width, height, scale = 1 }) {
     drawText(ctx, {
       text: board.caption,
       x: mid,
-      y: fh - SPACE.sm,
+      y: fh - SPACE.xs,
       font: fontSpec(TYPE.caption),
       color: PALETTE.ui.textMuted,
       align: 'center',
@@ -237,12 +238,12 @@ function inkFor(color) {
  * background toward the text and cost contrast exactly when the player is
  * looking at it.
  *
- * ── 부록 B: 역할을 받는다 ──────────────────────────────────────────────────
- * 없으면 예전 그대로 `gelButton` — 역할이 없던 시절의 그림이고, 이 파일이 그리는
- * 것 중에는 아직 역할이 없는 표면도 있다. 역할이 오면 `roleButton` 이 그린다.
+ * ── 역할을 받는다 ──────────────────────────────────────────────────────────
+ * 없으면 `plate` — 종이 한 장에 라벨이고, 이 파일이 그리는 것 중에는 아직 역할이
+ * 없는 표면도 있다. 역할이 오면 `roleButton` 이 글자와 밑줄로 그린다.
  *
  * @param {'idle'|'hover'|'pressed'} state
- * @param {string} [o.role]  `ROLE.*`. 없으면 역할 없는 젤 버튼
+ * @param {string} [o.role]  `ROLE.*`. 없으면 역할 없는 종이 면
  */
 export function buttonTexture(label, state, { width, height, scale = 1, role = null }) {
   const key = `btn:${label}:${state}:${width}x${height}@${scale}:${role ?? '-'}`;
@@ -267,8 +268,8 @@ export function buttonTexture(label, state, { width, height, scale = 1, role = n
    */
   const pad = 6;
   const box = { x: pad, y: pad, w: width - pad * 2, h: height - pad * 2, label, state };
-  if (role) roleButton(ctx, { ...box, role, radius: RADIUS.pill });
-  else gelButton(ctx, { ...box, align: 'center' });
+  if (role) roleButton(ctx, { ...box, role, radius: RADIUS.chip });
+  else plate(ctx, { ...box, align: 'center' });
 
   const tex = toTexture(canvas);
   cache.set(key, tex);
@@ -311,9 +312,9 @@ export function iconButtonTexture(icon, state, { size, scale = 1, role = null })
    *
    * `RADIUS.panel`(20) 을 넘기고 있었다. 64 짜리 버튼에서 본체는 52 이고 반지름
    * 20 은 그 절반인 26 보다 작으므로, 그려지던 것은 **모서리가 둥근 사각형**이었다.
-   * `RADIUS.pill` 은 측정값이 아니라 센티널이고 — `tokens.js` 참조 — canvas
+   * `RADIUS.chip` 은 측정값이 아니라 센티널이고 — `tokens.js` 참조 — canvas
    * `roundRect` 가 반지름을 짧은 변의 절반으로 깎으므로, 정사각형 본체에 주면
-   * 크기가 얼마든 정원이 된다. `gelButton`/`roleButton` 의 기본값이기도 해서
+   * 크기가 얼마든 정원이 된다. `plate`/`roleButton` 의 기본값이기도 해서
    * 사실 넘기지 않는 것과 같지만, 여기서는 **의도**라서 적어 둔다.
    *
    * 여백이 6 에서 5 로 내려간 것은 턴 플레이트와 나란히 재기 위해서다.
@@ -323,9 +324,9 @@ export function iconButtonTexture(icon, state, { size, scale = 1, role = null })
    */
   const pad = 5;
   const box = size - pad * 2;
-  const frame = { x: pad, y: pad, w: box, h: box, state, radius: RADIUS.pill };
+  const frame = { x: pad, y: pad, w: box, h: box, state, radius: RADIUS.chip };
   if (role) roleButton(ctx, { ...frame, role });
-  else gelButton(ctx, frame);
+  else plate(ctx, frame);
 
   /**
    * 아이콘은 `icons.js` 의 벡터다. 사각형으로 손으로 찍던 것을 대체했다.
@@ -407,13 +408,12 @@ export function turnPlateTexture(text, color, { width, height, scale = 1, maxWid
   ctx.scale(scale, scale);
 
   const pad = 5;
-  glassPanel(ctx, {
+  panel(ctx, {
     x: pad,
     y: pad,
     w: frameW - pad * 2,
     h: height - pad * 2,
-    radius: RADIUS.pill,
-    elevation: ELEVATION.raised,
+    radius: RADIUS.chip,
   });
 
   /**
@@ -458,8 +458,8 @@ export function notePlateTexture(text, tone, { height, scale = 1, maxWidth = 360
   const hit = cache.get(key);
   if (hit) return hit;
 
-  const accent = tone === 'timeout' ? PALETTE.ui.danger : PALETTE.accent.yellow;
-  const ink = tone === 'timeout' ? PALETTE.ui.dangerDeep : PALETTE.accent.yellowDeep;
+  const accent = tone === 'timeout' ? PALETTE.ui.danger : PALETTE.accent.amber;
+  const ink = tone === 'timeout' ? PALETTE.ui.dangerDeep : PALETTE.accent.amberDeep;
 
   const probe = makeCanvas(8, 8);
   applyTracking(probe.ctx, TYPE.caption.tracking);
@@ -479,16 +479,15 @@ export function notePlateTexture(text, tone, { height, scale = 1, maxWidth = 360
    * 일 — 이 줄이 어떤 종류인지 읽기 전에 말하기 — 을 색조가 대신한다. 판 전체가
    * 옅게 물들면 3픽셀보다 멀리서 읽히고, 라운드 판에 붙은 직각 막대가 아니다.
    */
-  glassPanel(ctx, {
+  panel(ctx, {
     x: 0,
     y: 0,
     w: frameW,
     h: height,
-    radius: RADIUS.pill,
+    radius: RADIUS.chip,
     accent,
     tint: withAlpha(accent, 0.18),
     alpha: 1,
-    elevation: ELEVATION.raised,
   });
 
   applyTracking(ctx, TYPE.caption.tracking);
@@ -574,10 +573,10 @@ export function victoryPlateTexture(text, color, { width, height, scale = 1 }) {
    * 픽셀 폭이 되어도 값이 아니라 **색**으로 읽히는 쪽" 이었고, 근처의 다른 판들이
    * 전부 같은 어휘를 쓰고 있을 때는 맞았다. 지금은 이 판만 그렇다.
    *
-   * `gelButton` 이 아니라 `glassPanel` 인 이유는 이것이 누를 수 있는 것이 아니기
+   * `plate` 이 아니라 `panel` 인 이유는 이것이 누를 수 있는 것이 아니기
    * 때문이다. 아래에 진짜 버튼 두 개가 있고, 그 둘과 같은 모양이면 안 된다.
    */
-  glassPanel(ctx, {
+  panel(ctx, {
     x: 0,
     y: 0,
     w: width,
@@ -585,20 +584,32 @@ export function victoryPlateTexture(text, color, { width, height, scale = 1 }) {
     radius: RADIUS.panel,
     accent: color,
     alpha: 1,
-    elevation: ELEVATION.modal,
   });
 
   /**
    * 글자는 팀 색의 **어두운 쪽**이다.
    *
-   * 분업은 `scorePlateTexture` 의 것과 같다: 42px 에서 읽히려면 판에서 충분히 멀어야
-   * 하고, 순수한 팀 색은 그 거리를 주지 않는다. `PALETTE.playerInk` 가 그 값이고,
-   * 여기서 블렌드로 유도하지 않는 이유는 그 블렌드가 두 입력에만 우연히 맞기
-   * 때문이다. 무승부에는 팀이 없으므로 중립색이 들어온다.
+   * 분업은 `scorePlateTexture` 의 것과 같다: 판에서 충분히 멀어야 읽히고, 순수한
+   * 팀 색은 그 거리를 주지 않는다. `PALETTE.playerInk` 가 그 값이고, 여기서
+   * 블렌드로 유도하지 않는 이유는 그 블렌드가 두 입력에만 우연히 맞기 때문이다.
+   * 무승부에는 팀이 없으므로 중립색이 들어온다.
+   */
+  /**
+   * ── 이 줄만은 벡터 레터링이 아니다 ────────────────────────────────────────
+   * §5 의 디스플레이 목소리는 그리는 것이고 이건 화면에서 가장 큰 글자이니
+   * `lettering.js` 가 맞아 보인다. 아닌 이유는 **내용을 우리가 정하지 않기
+   * 때문**이다 — `'1P 승리'` 에는 라틴 대문자가 들어 있고, 모드가 `outcomeFor`
+   * 로 자기 문장을 넣을 수도 있다. 레터링에는 라틴 알파벳이 없고, 없는 글자는
+   * 빈 상자로 나온다. 임의의 문자열을 받는 자리에 그것은 버그다.
+   *
+   * 크기는 판에서 푼다. `TYPE` 에 이 한 줄을 위한 칸을 만들지 않는 이유는 그것이
+   * 다섯 번째 타입 스텝이 되고, 네 스텝만 있다는 것이 §4.2 의 요점이기 때문이다.
+   * 점수판이 `em` 을 자기 높이에서 푸는 것과 같은 방식이다.
    */
   const probe = makeCanvas(8, 8);
-  const fitted = fitText(probe.ctx, text, TYPE.display, width - SPACE.lg * 2);
-  applyTracking(ctx, TYPE.display.tracking);
+  const headline = { ...TYPE.body, size: Math.round(height * 0.42) };
+  const fitted = fitText(probe.ctx, text, headline, width - SPACE.lg * 2);
+  applyTracking(ctx, headline.tracking);
   drawText(ctx, {
     text: fitted.text,
     x: width / 2,
@@ -685,7 +696,7 @@ function wrapText(ctx, text, maxWidth) {
  */
 export function modalTexture(
   {
-    title, body, width = 320, scale = 1, accent = PALETTE.accent.cyan,
+    title, body, width = 320, scale = 1, accent = PALETTE.cobalt,
     extra = 0, footerHeight = 0, k = 1,
   },
 ) {
@@ -787,18 +798,19 @@ export function modalTexture(
 /**
  * 텍스트 입력 칸의 홈.
  *
- * ── 어두운 사각형에서 눌린 유리로 ──────────────────────────────────────────
- * 예전에는 rgb(0.05, 0.07, 0.1) 짜리 어두운 quad 에 금색 테두리 quad 를 겹친
+ * ── 어두운 사각형에서, 눌린 유리를 거쳐, 가라앉은 종이로 ───────────────────
+ * 처음에는 rgb(0.05, 0.07, 0.1) 짜리 어두운 quad 에 금색 테두리 quad 를 겹친
  * 것이었다. 두 색 다 팔레트가 아니라 셰이더 uniform 에 손으로 적힌 숫자였고,
- * 밝은 유리 모달 위에 검은 구멍이 뚫린 것처럼 보였다.
+ * 밝은 모달 위에 검은 구멍이 뚫린 것처럼 보였다.
  *
- * 이제 `pressed` 스킨을 쓴다 — 그라디언트가 반대로 흘러 표면이 **눌린** 것으로
- * 읽히는 스킨이고, 그게 정확히 입력 칸이 원하는 것이다. 누를 수 있는 것과
- * 헷갈리지 않는 이유는 라벨이 없기 때문이다: 젤 버튼은 늘 글자를 달고 있다.
+ * 그 다음은 `pressed` 스킨이었다 — 그라디언트가 반대로 흘러 표면이 눌린 것으로
+ * 읽혔다. 뒤집을 그라디언트가 없어졌으므로 지금은 **가라앉은 종이**다:
+ * `surfaceSunken` 채우기에 헤어라인. 누를 수 있는 것과 헷갈리지 않는 이유는
+ * 밑줄이 없기 때문이다 — 컨트롤은 전부 밑줄을 달고 있다.
  *
  * @param {boolean} focused  포커스 링을 그릴 것인가
  */
-export function slotTexture(width, height, { focused = false, scale = 1, accent = PALETTE.accent.cyan } = {}) {
+export function slotTexture(width, height, { focused = false, scale = 1, accent = PALETTE.cobalt } = {}) {
   const key = `slot:${width}x${height}:${focused}:${accent}@${scale}`;
   const hit = cache.get(key);
   if (hit) return hit;
@@ -806,14 +818,14 @@ export function slotTexture(width, height, { focused = false, scale = 1, accent 
   const pad = 4;
   const { canvas, ctx } = makeCanvas(Math.round(width * scale), Math.round(height * scale));
   ctx.scale(scale, scale);
-  gelButton(ctx, {
+  plate(ctx, {
     x: pad,
     y: pad,
     w: width - pad * 2,
     h: height - pad * 2,
     radius: RADIUS.chip,
-    state: 'pressed',
     accent,
+    fill: PALETTE.ui.surfaceSunken,
   });
   if (focused) {
     focusRing(ctx, {

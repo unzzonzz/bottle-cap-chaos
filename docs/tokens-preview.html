@@ -4,11 +4,28 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light" />
-    <title>PHASE 0 — 디자인 토큰 스펙 시트</title>
+    <title>PHASE 0 — 한여름 알까기 디자인 토큰 스펙 시트</title>
+    <link rel="stylesheet" href="/src/ui/styles.css" />
     <style>
-      html, body { margin: 0; padding: 0; background: #eaf4fb; }
-      body { font: 13px/1.5 Pretendard, -apple-system, system-ui, sans-serif; color: #2f4a6b; }
-      #sheet { display: block; margin: 0 auto; }
+      /* styles.css pins the document for the GAME — fixed body, 100% height,
+         overflow hidden — and this page is a long sheet that has to scroll.
+         The link stays because the @font-face lives there and this sheet has to
+         be rendered in the real face. */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        position: static;
+        overflow: visible;
+        height: auto;
+        background: #e4f0f9;
+        user-select: auto;
+        -webkit-user-select: auto;
+      }
+      #sheet {
+        display: block;
+        margin: 0 auto;
+      }
     </style>
   </head>
   <body>
@@ -17,19 +34,31 @@
       /**
        * PHASE 0 승인 게이트용 스펙 시트.
        *
-       * 실제 UI가 쓸 코드 그대로 그린다 — palette.js / tokens.js / glass.js /
-       * icons.js 를 import 해서 렌더하므로, 여기 보이는 것과 게임에 나올 것이
-       * 다를 수 없다. 별도의 목업이 아니다.
+       * 실제 UI 가 쓸 코드 그대로 그린다 — `palette.js` / `tokens.js` / `paper.js` /
+       * `marks.js` / `lettering.js` / `icons.js` 를 import 해서 렌더하므로, 여기
+       * 보이는 것과 게임에 나올 것이 다를 수 없다. 목업이 아니다.
+       *
+       * 프레임 픽셀 그대로 그린다. 화면에서는 2배로 보이는데, 그것이 640 폭
+       * 프레임이 실제 데스크톱 창에서 갖는 배율(약 1.97)과 거의 같다 — 즉 여기
+       * 보이는 크기가 게임에서 보일 크기다.
        */
       import { PALETTE, withAlpha } from '/src/core/palette.js';
-      import { RADIUS, SIZE, SPACE, TYPE, ELEVATION } from '/src/core/tokens.js';
-      import { gelButton, glassPanel, roundRectPath, fontSpec, applyTracking } from '/src/ui/glass.js';
-      import { ICON, drawIcon } from '/src/ui/icons.js';
-      import { FONT_FAMILY, whenFontsReady } from '/src/ui/fonts.js';
+      import { CTA, RADIUS, ROLE, RULE, SIZE, SPACE, TYPE } from '/src/core/tokens.js';
+      import {
+        applyTracking,
+        fontSpec,
+        panel,
+        plate,
+        roleButton,
+      } from '/src/ui/paper.js';
+      import { asterisk, dot, hairline, halftone, ring, ripple, sparkle, wave } from '/src/ui/marks.js';
+      import { drawLettering, drawNumber, drawTitle, letteringWidth } from '/src/ui/lettering.js';
+      import { drawIcon } from '/src/ui/icons.js';
+      import { whenFontsReady } from '/src/ui/fonts.js';
 
-      const W = 980;
-      const H = 1180;
-      const S = Math.min(3, (window.devicePixelRatio || 1) * 1.5);
+      const W = 940;
+      const H = 1320;
+      const S = Math.min(3, (window.devicePixelRatio || 1) * 2);
 
       const cv = document.getElementById('sheet');
       cv.width = W * S;
@@ -39,252 +68,273 @@
       const ctx = cv.getContext('2d');
 
       const heading = (text, x, y) => {
-        ctx.font = fontSpec({ ...TYPE.caption, weight: 700 });
-        applyTracking(ctx, 0.6);
-        ctx.fillStyle = withAlpha(PALETTE.ui.textOnAccent, 0.92);
+        ctx.font = fontSpec(TYPE.micro);
+        applyTracking(ctx, TYPE.micro.tracking + 1);
+        ctx.fillStyle = PALETTE.ui.textMuted;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'alphabetic';
         ctx.fillText(text.toUpperCase(), x, y);
         applyTracking(ctx, 0);
       };
-      const note = (text, x, y) => {
-        ctx.font = fontSpec(TYPE.caption);
-        ctx.fillStyle = withAlpha(PALETTE.ui.textOnAccent, 0.72);
+      const note = (text, x, y, color = PALETTE.ui.textFaint) => {
+        ctx.font = fontSpec(TYPE.micro);
+        applyTracking(ctx, TYPE.micro.tracking);
+        ctx.fillStyle = color;
         ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
         ctx.fillText(text, x, y);
+        applyTracking(ctx, 0);
+      };
+      const body = (text, x, y, type = TYPE.body, color = PALETTE.ui.text) => {
+        ctx.font = fontSpec(type);
+        applyTracking(ctx, type.tracking);
+        ctx.fillStyle = color;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(text, x, y);
+        applyTracking(ctx, 0);
       };
 
       function draw() {
         ctx.setTransform(S, 0, 0, S, 0, 0);
-        ctx.clearRect(0, 0, W, H);
-
-        // 배경: 실제 월드 백드롭 그라디언트. UI는 이 위에 얹힌다.
-        const bg = ctx.createLinearGradient(0, 0, 0, H);
-        bg.addColorStop(0, PALETTE.bg.skyTop);
-        bg.addColorStop(0.55, PALETTE.bg.skyMid);
-        bg.addColorStop(1, PALETTE.bg.skyLow);
-        ctx.fillStyle = bg;
+        ctx.fillStyle = PALETTE.ui.surface;
         ctx.fillRect(0, 0, W, H);
 
-        const M = SPACE.screenMargin + 12;
-        let y = 54;
+        const M = SPACE.screenMargin;
+        let y = 0;
 
-        // ── 제목 (백드롭 위 = 흰 글씨) ──────────────────────────────────────
-        ctx.font = fontSpec(TYPE.title);
-        ctx.fillStyle = PALETTE.ui.textOnAccent;
-        ctx.textAlign = 'left';
-        ctx.fillText('PHASE 0 — 디자인 토큰', M, y);
-        ctx.font = fontSpec(TYPE.caption);
-        ctx.fillStyle = withAlpha(PALETTE.ui.textOnAccent, 0.8);
-        ctx.fillText('palette.js · tokens.js · glass.js · icons.js — 실제 렌더', M, y + 22);
-        y += 62;
-
-        // ── 젤 버튼 5상태 ──────────────────────────────────────────────────
-        heading('gel button — SIZE.buttonPrimary 200×64, RADIUS.pill', M, y);
-        y += 16;
-        const states = ['idle', 'hover', 'pressed', 'selected', 'disabled'];
-        let x = M;
-        for (const st of states) {
-          gelButton(ctx, {
-            x, y, w: SIZE.buttonPrimary.w * 0.86, h: SIZE.buttonPrimary.h,
-            label: st === 'idle' ? '서바이벌' : st === 'hover' ? '축구' : st === 'pressed' ? '컬링' : st === 'selected' ? '설정' : '준비 중',
-            state: st,
-          });
-          note(st, x + 2, y + SIZE.buttonPrimary.h + 16);
-          x += SIZE.buttonPrimary.w * 0.86 + SPACE.md;
-        }
-        y += SIZE.buttonPrimary.h + 46;
-
-        // ── 보조 버튼 + 아이콘 버튼 ────────────────────────────────────────
-        heading('buttonSecondary 160×56 · buttonIcon 64×64', M, y);
-        y += 16;
-        x = M;
-        gelButton(ctx, { x, y, w: SIZE.buttonSecondary.w, h: SIZE.buttonSecondary.h, label: '메뉴로', state: 'idle' });
-        x += SIZE.buttonSecondary.w + SPACE.md;
-        gelButton(ctx, { x, y, w: SIZE.buttonSecondary.w, h: SIZE.buttonSecondary.h, label: '다시하기', state: 'hover' });
-        x += SIZE.buttonSecondary.w + SPACE.lg;
-        for (const [name, state] of [['recenter', 'idle'], ['exit', 'hover'], ['sound', 'idle'], ['back', 'pressed']]) {
-          const b = SIZE.buttonIcon;
-          gelButton(ctx, { x, y: y + 4, w: b.w, h: b.h, state, radius: RADIUS.panel });
-          const inner = b.w * 0.5;
-          drawIcon(ctx, name, {
-            x: x + (b.w - inner) / 2, y: y + 4 + (b.h - inner) / 2, size: inner,
-            color: state === 'hover' ? PALETTE.accent.cyanDeep : PALETTE.ui.text,
-          });
-          x += b.w + SPACE.sm;
-        }
-        y += SIZE.buttonSecondary.h + 46;
-
-        // ── 스코어 플레이트 ────────────────────────────────────────────────
-        heading('scorePlate — SIZE.scorePlate 300×84, glassPanel + ELEVATION.floating', M, y);
-        y += 16;
-        const sp = SIZE.scorePlate;
-        glassPanel(ctx, { x: M, y, w: sp.w, h: sp.h, radius: RADIUS.panel });
-        // 플레이어 색 바 — 양 끝
-        for (const [i, side] of [[0, M + 12], [1, M + sp.w - 12 - 10]]) {
-          ctx.fillStyle = PALETTE.player[i];
-          roundRectPath(ctx, side, y + 14, 10, sp.h - 28, 5);
-          ctx.fill();
-        }
-        ctx.font = fontSpec(TYPE.display);
-        applyTracking(ctx, TYPE.display.tracking);
-        ctx.textAlign = 'right';
-        ctx.textBaseline = 'alphabetic';
-        ctx.fillStyle = PALETTE.playerInk[0];
-        ctx.fillText('3', M + sp.w / 2 - 18, y + 54);
-        ctx.textAlign = 'left';
-        ctx.fillStyle = PALETTE.playerInk[1];
-        ctx.fillText('1', M + sp.w / 2 + 18, y + 54);
-        ctx.textAlign = 'center';
-        ctx.font = fontSpec(TYPE.title);
-        ctx.fillStyle = PALETTE.ui.textFaint;
-        ctx.fillText(':', M + sp.w / 2, y + 50);
-        ctx.font = fontSpec(TYPE.caption);
-        applyTracking(ctx, TYPE.caption.tracking);
-        ctx.fillStyle = PALETTE.ui.textMuted;
-        ctx.fillText('남은 뚜껑', M + sp.w / 2, y + 72);
-        applyTracking(ctx, 0);
-
-        // 턴 플레이트 + 클럭 바
-        const tp = SIZE.turnPlate;
-        const tx = M + sp.w + SPACE.groupGap;
-        glassPanel(ctx, { x: tx, y, w: tp.w, h: tp.h, radius: RADIUS.pill, elevation: ELEVATION.raised });
-        ctx.fillStyle = PALETTE.player[0];
-        roundRectPath(ctx, tx + 10, y + 10, 8, tp.h - 20, 4);
-        ctx.fill();
+        /* ── 1. 제목. 벡터 레터링 ─────────────────────────────────────── */
+        ctx.fillStyle = PALETTE.bg.skyTop;
+        ctx.fillRect(0, 0, W, 190);
+        drawTitle(ctx, { x: W / 2, y: 58, size: 62, color: PALETTE.whiteCool });
         ctx.font = fontSpec(TYPE.label);
+        applyTracking(ctx, TYPE.label.tracking);
+        ctx.fillStyle = withAlpha(PALETTE.whiteCool, 0.8);
+        ctx.textAlign = 'center';
+        ctx.fillText('PHASE 0 · 코발트와 차가운 흰색 · Gowun Dodum 400', W / 2, 156);
+        applyTracking(ctx, 0);
         ctx.textAlign = 'left';
-        ctx.fillStyle = PALETTE.ui.text;
-        ctx.fillText('PLAYER 1', tx + 28, y + tp.h / 2 + 6);
-        const cb = SIZE.clockBar;
-        ctx.fillStyle = withAlpha(PALETTE.ui.shadow, 0.16);
-        roundRectPath(ctx, tx, y + tp.h + 10, cb.w, cb.h, cb.h / 2);
-        ctx.fill();
-        const grad = ctx.createLinearGradient(tx, 0, tx + cb.w * 0.62, 0);
-        grad.addColorStop(0, PALETTE.accent.cyan);
-        grad.addColorStop(1, PALETTE.accent.sky);
-        ctx.fillStyle = grad;
-        roundRectPath(ctx, tx, y + tp.h + 10, cb.w * 0.62, cb.h, cb.h / 2);
-        ctx.fill();
-        note('turnPlate 240×44 + clockBar 240×10', tx, y + tp.h + 38);
-        y += sp.h + 56;
+        y = 190;
 
-        // ── 카드 아이콘 ────────────────────────────────────────────────────
-        heading('card icons — 벡터, 유니코드 글리프 대체', M, y);
-        y += 22;
-        const cards = [
-          ['swap', '교체', PALETTE.card.swap],
-          ['trajectory', '궤적', PALETTE.card.trajectory],
-          ['chaos', '혼돈', PALETTE.card.chaos],
-          ['onemore', '한 번 더', PALETTE.card.onemore],
-          ['smash', '강타', PALETTE.card.smash],
-          ['silence', '침묵', PALETTE.card.silence],
-        ];
-        x = M;
-        for (const [name, label, accent] of cards) {
-          const cw = 92;
-          const ch = 116;
-          glassPanel(ctx, { x, y, w: cw, h: ch, radius: RADIUS.card, accent, elevation: ELEVATION.raised });
-          ctx.fillStyle = accent;
-          roundRectPath(ctx, x + 10, y + 10, cw - 20, 4, 2);
-          ctx.fill();
-          drawIcon(ctx, name, { x: x + (cw - 44) / 2, y: y + 26, size: 44, color: accent });
-          ctx.font = fontSpec(TYPE.caption);
-          ctx.textAlign = 'center';
-          ctx.fillStyle = PALETTE.ui.text;
-          ctx.fillText(label, x + cw / 2, y + ch - 16);
-          x += cw + SPACE.sm;
-        }
-        y += 116 + 44;
-
-        // ── 타입 스케일 ────────────────────────────────────────────────────
-        heading('type scale — TYPE', M, y);
-        y += 12;
-        glassPanel(ctx, { x: M, y, w: 430, h: 196, radius: RADIUS.panel });
-        let ty = y + 40;
-        for (const [key, t] of Object.entries(TYPE)) {
-          ctx.font = fontSpec(t);
-          applyTracking(ctx, t.tracking);
-          ctx.textAlign = 'left';
-          ctx.fillStyle = PALETTE.ui.text;
-          ctx.fillText(key === 'display' ? '3 : 1' : '뚜껑을 튕겨라 Aa', M + 18, ty);
-          applyTracking(ctx, 0);
-          ctx.font = fontSpec(TYPE.caption);
-          ctx.fillStyle = PALETTE.ui.textFaint;
-          ctx.textAlign = 'right';
-          ctx.fillText(`${key} ${t.size}/${t.weight}`, M + 412, ty);
-          ty += t.size + 12;
-        }
-
-        // ── 팔레트 ─────────────────────────────────────────────────────────
-        const px0 = M + 430 + SPACE.groupGap;
-        heading('palette', px0, y - 12);
-        glassPanel(ctx, { x: px0, y, w: W - px0 - M, h: 196, radius: RADIUS.panel });
+        /* ── 2. 팔레트 ────────────────────────────────────────────────── */
+        y += 40;
+        heading('the four names, and the ink', M, y);
+        y += 16;
         const swatches = [
-          ['player 1P', PALETTE.player[0]], ['player 2P', PALETTE.player[1]],
-          ['accent.cyan', PALETTE.accent.cyan], ['accent.sky', PALETTE.accent.sky],
-          ['accent.green', PALETTE.accent.green], ['accent.yellow', PALETTE.accent.yellow],
-          ['accent.orng', PALETTE.accent.orange], ['ui.text', PALETTE.ui.text],
-          ['board.wood', PALETTE.board.wood], ['board.line', PALETTE.board.line],
-          ['pitch.grassA', PALETTE.pitch.grassA], ['curling.table', PALETTE.curling.table],
-          ['liquid.core', PALETTE.liquid.core], ['orb.shell', PALETTE.orb.shell],
-          ['aim.bow', PALETTE.aim.bow], ['ui.shadow', PALETTE.ui.shadow],
+          ['cobaltInk', PALETTE.cobaltInk],
+          ['cobalt', PALETTE.cobalt],
+          ['blueClear', PALETTE.blueClear],
+          ['bluePale', PALETTE.bluePale],
+          ['whiteCool', PALETTE.whiteCool],
+          ['wood', PALETTE.board.wood],
         ];
-        swatches.forEach(([label, hex], i) => {
-          const col = i % 4;
-          const row = Math.floor(i / 4);
-          const sx = px0 + 16 + col * 112;
-          const sy = y + 20 + row * 44;
+        const sw = 132;
+        swatches.forEach(([name, hex], i) => {
+          const x = M + i * (sw + SPACE.sm);
           ctx.fillStyle = hex;
-          roundRectPath(ctx, sx, sy, 30, 30, 8);
-          ctx.fill();
-          ctx.strokeStyle = withAlpha(PALETTE.ui.shadow, 0.2);
-          ctx.lineWidth = 1;
-          ctx.stroke();
-          ctx.font = fontSpec({ ...TYPE.caption, size: 11 });
-          ctx.fillStyle = PALETTE.ui.textMuted;
-          ctx.textAlign = 'left';
-          ctx.fillText(label, sx + 36, sy + 14);
-          ctx.fillStyle = PALETTE.ui.textFaint;
-          ctx.fillText(hex, sx + 36, sy + 26);
+          ctx.fillRect(x, y, sw, 56);
+          hairline(ctx, x, y, x + sw, y, PALETTE.ui.edge, RULE.hair);
+          hairline(ctx, x, y + 56, x + sw, y + 56, PALETTE.ui.edge, RULE.hair);
+          note(name, x, y + 74, PALETTE.ui.textMuted);
+          note(hex, x, y + 88);
         });
-        y += 196 + 44;
+        y += 112;
 
-        // ── 엘리베이션 ─────────────────────────────────────────────────────
-        heading('elevation — 그림자 색은 PALETTE.ui.shadow (남색, 검정 아님)', M, y);
+        heading('card accents — seven, told apart by hue', M, y);
         y += 16;
-        x = M;
-        for (const [key, step] of Object.entries(ELEVATION)) {
-          glassPanel(ctx, { x, y, w: 150, h: 76, radius: RADIUS.panel, elevation: step });
-          ctx.font = fontSpec(TYPE.caption);
-          ctx.textAlign = 'center';
-          ctx.fillStyle = PALETTE.ui.text;
-          ctx.fillText(key, x + 75, y + 38);
-          ctx.fillStyle = PALETTE.ui.textFaint;
-          ctx.fillText(`blur ${step.blur} · dy ${step.dy}`, x + 75, y + 54);
-          x += 150 + SPACE.md;
-        }
-        y += 76 + 44;
+        const cards = Object.entries(PALETTE.card);
+        const cw = (W - M * 2 - SPACE.sm * 6) / 7;
+        cards.forEach(([id, hex], i) => {
+          const x = M + i * (cw + SPACE.sm);
+          ctx.fillStyle = hex;
+          ctx.fillRect(x, y, cw, 34);
+          note(id, x, y + 50, PALETTE.ui.textMuted);
+        });
+        y += 74;
 
-        // ── UI 아이콘 ──────────────────────────────────────────────────────
-        heading('ui icons', M, y);
-        y += 16;
-        glassPanel(ctx, { x: M, y, w: W - M * 2, h: 78, radius: RADIUS.panel });
-        x = M + 22;
-        for (const name of ['recenter', 'exit', 'back', 'check', 'close', 'sound', 'lock']) {
-          drawIcon(ctx, name, { x, y: y + 16, size: 34, color: PALETTE.ui.text });
-          ctx.font = fontSpec({ ...TYPE.caption, size: 11 });
-          ctx.textAlign = 'center';
-          ctx.fillStyle = PALETTE.ui.textFaint;
-          ctx.fillText(name, x + 17, y + 66);
-          x += 74;
+        /* ── 3. 타입 ──────────────────────────────────────────────────── */
+        y += 24;
+        heading('type — one weight, four steps', M, y);
+        y += 26;
+        const typeRows = [
+          ['body 15', TYPE.body, '판이 없어졌으므로 여백이 그룹을 만든다'],
+          ['label 13', TYPE.label, '설정 · 내 마크 · 온라인 대전'],
+          ['caption 12', TYPE.caption, '남은 뚜껑 · 라운드 3/5 · 선공 P1'],
+          ['micro 10', TYPE.micro, '서버 연결됨 · 관측 60fps · 뚫린 자국'],
+        ];
+        for (const [name, t, sample] of typeRows) {
+          note(name, M, y + t.size * 0.35, PALETTE.ui.textFaint);
+          body(sample, M + 90, y + t.size * 0.35, t);
+          hairline(ctx, M, y + 18, W - M, y + 18, PALETTE.ui.edge, RULE.hair);
+          y += 34;
         }
+        note('11172 한글 코드포인트 전부 커버 · 뷁 쀍 뜷 꿱 쒏 홹 앐 뫯 긆 쥃', M, y + 12, PALETTE.ui.textMuted);
+        y += 32;
+
+        /* ── 4. 컨트롤 ────────────────────────────────────────────────── */
+        y += 20;
+        heading('a control is text with a rule under it', M, y);
+        y += 22;
+        const roles = [
+          [ROLE.CHOICE, '서바이벌', false],
+          [ROLE.CHOICE, '축구', true],
+          [ROLE.COMMIT, '시작', false],
+          [ROLE.RETREAT, '뒤로', false],
+          [ROLE.DESTRUCTIVE, '삭제', false],
+        ];
+        let cx = M;
+        for (const [role, label, selected] of roles) {
+          const w = 150;
+          roleButton(ctx, { x: cx, y, w, h: 40, label, role, selected });
+          // 히트 영역. 실제로는 보이지 않는다 — `config.victory.showHitAreas` 용.
+          ctx.save();
+          ctx.strokeStyle = withAlpha(PALETTE.accent.terracotta, 0.35);
+          ctx.setLineDash([2, 3]);
+          ctx.lineWidth = RULE.hair;
+          ctx.strokeRect(cx, y - CTA.hitPadY + 8, w, 40 + CTA.hitPadY * 2 - 16);
+          ctx.restore();
+          cx += w + SPACE.sm;
+        }
+        note('점선 = 보이지 않는 히트 영역 (CTA.hitPadX/Y)', M, y + 62, PALETTE.ui.textFaint);
+        y += 84;
+
+        // disabled 와 dimmed
+        cx = M;
+        for (const [state, caption] of [['disabled', 'disabled'], ['dimmed', 'dimmed'], ['idle', 'idle']]) {
+          roleButton(ctx, { x: cx, y, w: 150, h: 36, label: '카드 사용', role: ROLE.CHOICE, state });
+          note(caption, cx, y + 52, PALETTE.ui.textFaint);
+          cx += 150 + SPACE.sm;
+        }
+        y += 78;
+
+        /* ── 5. 표면 ──────────────────────────────────────────────────── */
+        heading('surfaces — paper and a hairline', M, y);
+        y += 18;
+        panel(ctx, { x: M, y, w: 240, h: 90, radius: RADIUS.panel });
+        body('panel', M + SPACE.md, y + 26, TYPE.label, PALETTE.ui.textMuted);
+        note('RADIUS.panel 10 · RULE.thin', M + SPACE.md, y + 46);
+        note('그림자 없음 (§19 · §24)', M + SPACE.md, y + 62);
+
+        plate(ctx, { x: M + 264, y, w: 150, h: 42, label: '칩', radius: RADIUS.chip });
+        plate(ctx, { x: M + 264, y: y + 50, w: 150, h: 40, label: '선택됨', state: 'selected', radius: RADIUS.chip });
+        note('plate', M + 264, y + 106, PALETTE.ui.textMuted);
+
+        // 카드 면
+        panel(ctx, { x: M + 434, y, w: 74, h: 106, radius: RADIUS.card });
+        drawIcon(ctx, 'smash', { x: M + 434 + 21, y: y + 12, size: 32, color: PALETTE.card.smash });
+        ctx.textAlign = 'center';
+        ctx.font = fontSpec(TYPE.label);
+        ctx.fillStyle = PALETTE.ui.text;
+        ctx.fillText('강타', M + 434 + 37, y + 64);
+        ctx.font = fontSpec(TYPE.micro);
+        ctx.fillStyle = PALETTE.ui.textMuted;
+        ctx.fillText('세게 친다', M + 434 + 37, y + 80);
+        ctx.fillText('콘이 두 배', M + 434 + 37, y + 92);
+        ctx.textAlign = 'left';
+        note('card face', M + 434, y + 122, PALETTE.ui.textMuted);
+        y += 148;
+
+        /* ── 6. 스코어 ────────────────────────────────────────────────── */
+        heading('the score — vector numerals, no plate behind them', M, y);
+        y += 16;
+        // 필드 위에 그려지는 것이므로 나무 위에 놓고 본다.
+        ctx.fillStyle = PALETTE.board.wood;
+        ctx.fillRect(M, y, 300, SIZE.score.h + 16);
+        const mid = M + 150;
+        drawNumber(ctx, '3', { x: mid - SPACE.md, y: y + 8, size: 32, color: PALETTE.playerInk[0], align: 'right' });
+        drawNumber(ctx, '2', { x: mid + SPACE.md, y: y + 8, size: 32, color: PALETTE.playerInk[1], align: 'left' });
+        drawNumber(ctx, ':', { x: mid, y: y + 14, size: 20, color: PALETTE.ui.textFaint, align: 'center' });
+        ctx.textAlign = 'center';
+        ctx.font = fontSpec(TYPE.caption);
+        ctx.fillStyle = PALETTE.ui.text;
+        ctx.fillText('남은 뚜껑', mid, y + 56);
+        ctx.textAlign = 'left';
+
+        // 같은 숫자를 종이 위에도.
+        drawNumber(ctx, '0123456789', { x: M + 324, y: y + 10, size: 30, color: PALETTE.cobaltInk });
+        note('lettering.drawNumber — 한 획 굵기(0.135em)가 목소리 전체다', M + 324, y + 58, PALETTE.ui.textFaint);
+        y += 96;
+
+        /* ── 7. 마크 ──────────────────────────────────────────────────── */
+        heading('marks — eight, one meaning each', M, y);
+        y += 30;
+        const marks = [
+          ['*', (x) => asterisk(ctx, x, y, 16, PALETTE.cobalt), '조건이 붙는다'],
+          ['✦', (x) => sparkle(ctx, x, y, 18, PALETTE.accent.amber), '새로 얻었다'],
+          ['·', (x) => dot(ctx, x, y, 7, PALETTE.cobalt), '지금 여기'],
+          ['○', (x) => ring(ctx, x, y, 9, RULE.thin, PALETTE.player[0]), '플레이어'],
+          ['~', (x) => wave(ctx, x - 14, y, 28, 4, PALETTE.blueClear), '물 · 움직임'],
+          ['ripple', (x) => ripple(ctx, x, y, 16, 0.45, PALETTE.cobalt), '도달했다'],
+        ];
+        const mstep = (W - M * 2) / 7;
+        marks.forEach(([name, fn, meaning], i) => {
+          const x = M + 24 + i * mstep;
+          fn(x);
+          note(name, x - 16, y + 30, PALETTE.ui.textMuted);
+          note(meaning, x - 16, y + 44);
+        });
+        // halftone 은 선이 아니라 면이라 스와치로 보여야 한다.
+        const hx = M + 24 + 6 * mstep - 16;
+        halftone(ctx, { x: hx, y: y - 14, w: 84, h: 28 }, 0.85, PALETTE.cobalt, 5);
+        note('halftone', hx, y + 30, PALETTE.ui.textMuted);
+        note('이것은 면이다', hx, y + 44);
+        y += 74;
+
+        /* ── 8. 오차 콘 (§5.2) ────────────────────────────────────────── */
+        heading('the error cone — always visible, and it is an AREA', M, y);
+        y += 14;
+        const coneH = 96;
+        [['board.wood', PALETTE.board.wood], ['pitch.grassA', PALETTE.pitch.grassA], ['curling.table', PALETTE.curling.table]].forEach(
+          ([name, bg], i) => {
+            const x = M + i * 290;
+            ctx.fillStyle = bg;
+            ctx.fillRect(x, y, 270, coneH);
+            for (const [half, alpha] of [[26, 0.12], [52, 0.09]]) {
+              // 넓어질수록 알파를 낮춘다 — §5.2.
+              const g = ctx.createLinearGradient(x + 20, 0, x + 250, 0);
+              g.addColorStop(0, withAlpha(PALETTE.aim.cone, alpha));
+              g.addColorStop(1, withAlpha(PALETTE.aim.cone, 0));
+              ctx.beginPath();
+              ctx.moveTo(x + 20, y + coneH / 2);
+              ctx.lineTo(x + 250, y + coneH / 2 - half);
+              ctx.lineTo(x + 250, y + coneH / 2 + half);
+              ctx.closePath();
+              ctx.fillStyle = g;
+              ctx.fill();
+              ctx.strokeStyle = withAlpha(PALETTE.aim.coneEdge, 0.35);
+              ctx.lineWidth = RULE.thin;
+              ctx.stroke();
+              if (half === 26) break;
+            }
+            // 강타의 두 배 콘, 같은 자리에 겹쳐서.
+            ctx.beginPath();
+            ctx.moveTo(x + 20, y + coneH / 2);
+            ctx.lineTo(x + 250, y + coneH / 2 - 52);
+            ctx.lineTo(x + 250, y + coneH / 2 + 52);
+            ctx.closePath();
+            ctx.strokeStyle = withAlpha(PALETTE.aim.smashCone, 0.3);
+            ctx.setLineDash([3, 3]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            note(name, x, y + coneH + 16, PALETTE.ui.textMuted);
+          },
+        );
+        note('실선 = 평소 · 점선 = 강타(두 배) · 궤적 카드는 이번 턴만 지운다', M, y + coneH + 32, PALETTE.ui.textFaint);
+        y += coneH + 52;
+
+        /* ── 발 ───────────────────────────────────────────────────────── */
+        hairline(ctx, M, y, W - M, y, PALETTE.ui.edge, RULE.hair);
+        note(
+          'src/core/palette.js · src/core/tokens.js · src/ui/paper.js · src/ui/marks.js · src/ui/lettering.js',
+          M,
+          y + 18,
+          PALETTE.ui.textFaint,
+        );
+        window.__sheetReady = true;
       }
 
-      draw();
-      // 폰트가 늦게 들어오면 다시 그린다 — 게임의 텍스처 캐시 무효화와 같은 이유.
       whenFontsReady().then(draw);
-      document.fonts?.ready?.then(draw);
+      draw();
     </script>
   </body>
 </html>

@@ -58,11 +58,11 @@ function panelWidth() {
   return Math.min(SIZE.modal.w, FRAME.width - SPACE.md * 2);
 }
 /** 저술 크기. 실제 크기는 `frameScale()` 을 곱한 것이고 `_layout` 이 푼다. */
-const BUTTON = { width: SIZE.buttonSecondary.w, height: SIZE.buttonSecondary.h };
+const BUTTON = { width: SIZE.buttonFooter.w, height: SIZE.buttonFooter.h };
 const BUTTON_GAP = SPACE.sm;
 /** Between the field and the button row. */
 const BUTTON_DROP = SPACE.sm;
-const FIELD_HEIGHT = SIZE.buttonSecondary.h;
+const FIELD_HEIGHT = SIZE.buttonFooter.h;
 /** 가림막의 최종 불투명도. 등장 동안 0 에서 여기까지 짙어진다. */
 const VEIL_ALPHA = 0.52;
 
@@ -104,7 +104,7 @@ export class ModalLayer {
      */
     this.veil = new Mesh(this._quad, this.materials.createSolid(VEIL_ALPHA));
     // `toRgb` 는 0..255 를 준다. 셰이더는 0..1 이다.
-    const veilRgb = toRgb(PALETTE.accent.skyDeep).map((c) => c / 255);
+    const veilRgb = toRgb(PALETTE.cobaltInk).map((c) => c / 255);
     this.veil.material.uniforms.uTint.value.set(veilRgb[0], veilRgb[1], veilRgb[2]);
     this.veil.scale.set(FRAME.width, FRAME.height, 1);
     this.veil.renderOrder = 100;
@@ -155,7 +155,7 @@ export class ModalLayer {
     return this._show({
       title,
       body,
-      accent: danger ? PALETTE.ui.danger : PALETTE.accent.cyan,
+      accent: danger ? PALETTE.ui.danger : PALETTE.cobalt,
       /**
        * 부록 B2.2-1 — RETREAT 왼쪽, 실행 오른쪽. 순서가 곧 화면 순서다.
        *
@@ -182,7 +182,7 @@ export class ModalLayer {
     return this._show({
       title,
       body,
-      accent: PALETTE.accent.cyan,
+      accent: PALETTE.cobalt,
       buttons: [{ id: 'ok', label: okLabel, value: undefined, role: ROLE.COMMIT }],
       fallback: undefined,
     });
@@ -206,7 +206,7 @@ export class ModalLayer {
     return this._show({
       title,
       body,
-      accent: PALETTE.accent.cyan,
+      accent: PALETTE.cobalt,
       field: { initial, placeholder, maxLength },
       validate,
       buttons: [
@@ -344,7 +344,7 @@ export class ModalLayer {
       this.field.material.uniforms.uMap.value = slotTexture(FIELD.width, FIELD.height, {
         focused: true,
         scale,
-        accent: this._error ? PALETTE.ui.danger : PALETTE.accent.cyan,
+        accent: this._error ? PALETTE.ui.danger : PALETTE.cobalt,
       });
       this.field.visible = true;
       this._fieldY = fy;
@@ -475,7 +475,7 @@ export class ModalLayer {
       textAlign: 'center',
       letterSpacing: '0.08em',
       zIndex: '30',
-      caretColor: PALETTE.accent.cyan,
+      caretColor: PALETTE.cobalt,
       // 등장 곡선과 함께 떠오른다. `update` 가 민다.
       opacity: '0',
     });

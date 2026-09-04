@@ -2,45 +2,62 @@
 
 ## MSA Sans (src/ui/fonts/)
 
-The UI typeface is a subset of **Pretendard** by Kil Hyung-jin (길형진),
+The UI typeface is a subset of **Gowun Dodum** (고운돋움) by Yanghee Ryu (류양희),
 licensed under the SIL Open Font License 1.1. The full licence text is in
 `src/ui/fonts/OFL.txt`, and the copyright and licence records are preserved
-inside the font binaries themselves.
+inside the font binary itself.
 
-- Upstream: https://github.com/orioncactus/pretendard
-- Version subsetted: 1.309
-- Presented as "MSA Sans" per OFL 1.1 §3, which forbids a Modified Version
-  from carrying the Reserved Font Name.
+- Upstream: https://github.com/yangheeryu/Gowun-Dodum
+- Distributed via: https://github.com/google/fonts/tree/main/ofl/gowundodum
+- Version subsetted: 2.000
+- Presented as "MSA Sans". Gowun Dodum declares **no** Reserved Font Name, so
+  OFL 1.1 §3 does not require the rename; it is a project convention, so that a
+  packaged build and a machine with the font already installed resolve to the
+  same metrics under the same family name. The copyright (name ID 0), licence
+  (13) and licence URL (14) records are carried through unchanged, and the
+  unique-ID record names what this file actually is.
 
-Pretendard itself is built on other OFL work, and that chain is recorded in the
-upstream font's own metadata: base glyphs from Inter by Rasmus Andersson;
-Hangul glyphs from Noto Sans CJK (Source Han Sans) by Jang Soo-young and Kang
-Joo-yeon, Sandoll Communications.
+### It was Pretendard, and why it is not
+
+The previous typeface was a subset of Pretendard by Kil Hyung-jin (길형진), also
+OFL 1.1, in two weights. That choice was made for the art direction before this
+one: a Korean-first humanist sans with a wide weight axis, as the nearest voice
+to the Frutiger family the aero look is usually described with.
+
+The current direction asks for the opposite of a wide axis — the display voice
+is DRAWN (`src/ui/lettering.js`) and the face is left with the quiet, small,
+precise half of the work. Gowun Dodum is a single weight with open counters and
+slightly modulated strokes, which is that half.
 
 ### What was kept
 
 | range | why |
 |---|---|
-| `U+AC00–D7A3` | Every precomposed Hangul syllable, all 11172. Non-negotiable: nicknames are user input and `NICKNAME_RE` admits the whole block, so a narrower subset renders somebody's name as tofu — a bug that surfaces for one user on one device. |
-| `U+3130–318F` | Hangul compatibility jamo. The 51 letters an IME actually emits (`U+3131–3163`) are all present; the 43 absent from this range are archaic letters the source font does not have either. |
-| `U+0020–007E`, `U+00A0–00FF` | Latin and Latin-1. |
+| `U+AC00–D7A3` | Every precomposed Hangul syllable, all 11172 — verified present in the source and in the subset. Non-negotiable: nicknames are user input and `NICKNAME_RE` admits the whole block, so a narrower subset renders somebody's name as tofu — a bug that surfaces for one user on one device. |
+| `U+3130–318F` | Hangul compatibility jamo. 94 of the 96 are present; the two absent are archaic letters the source font does not have either. Every letter an IME actually emits (`U+3131–3163`) is there. |
+| `U+0020–007E`, `U+00A0–00FF` | Latin and Latin-1, complete. |
 | `U+2010–2027`, `U+2030–205E` | Punctuation — dashes, ellipsis, the middle dot the UI uses as a separator. |
 | `U+2190–2193` | Arrows. |
 
-`U+1100–11FF` (conjoining jamo) was requested and is **absent from the source
-font** — Pretendard 1.309 carries 0 of those 256 codepoints. Asking for it would
-have been a silent no-op. Korean IME composition on the platforms this ships to
+`U+1100–11FF` (conjoining jamo) is **absent from the source font** — Gowun Dodum
+2.000 carries 0 of those 256 codepoints, exactly as Pretendard did. Asking for it
+would be a silent no-op. Korean IME composition on the platforms this ships to
 produces compatibility jamo and precomposed syllables, both of which are covered.
 
 ### What was dropped
 
-Cyrillic, Greek, kana, CJK ideographs, and Latin Extended beyond Latin-1. That
-is where the 1.5 MB source OTF's weight lives; removing it costs nothing this
-game draws.
+Vietnamese and Latin Extended beyond Latin-1, and the punctuation outside the two
+ranges above. The source is a 7.2 MB TTF whose weight is almost entirely the
+Hangul, so the subset is 387 KB rather than the tenfold cut the previous font's
+notice describes — there was much less to remove.
 
 ### Weights
 
-Two static faces only — 400 and 700. Not a variable font: this project
-rasterises every piece of UI text through canvas 2D, and weight-axis selection
-on a variable font is unreliable in WKWebView. `src/core/tokens.js` requests no
-weight that is not bundled here.
+**One static face, 400.** Not two, and not a variable font.
+
+`src/core/tokens.js` exports `FONT_WEIGHTS = [400]` and throws at module load if
+any `TYPE` entry names a weight that is not in it. `src/ui/styles.css` declares
+exactly one `@font-face`. Both are deliberate: a `font-weight: 700` that the
+browser cannot resolve is not a slightly-off weight, it is a SYNTHESISED one —
+the outlines are smeared, canvas 2D bakes that smear into a texture where it
+cannot be undone, and different engines smear by different amounts.

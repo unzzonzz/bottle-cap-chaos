@@ -1,29 +1,28 @@
 /* ── the UI typeface ─────────────────────────────────────────────────────────
-   Two static faces, subset from Pretendard and renamed per OFL 1.1 — see NOTICE
-   at the repository root and src/ui/fonts/OFL.txt.
+   ONE static face, subset from Gowun Dodum and renamed — see NOTICE at the
+   repository root and src/ui/fonts/OFL.txt.
+
+   There were two, 400 and 700, subset from Pretendard. The 700 is gone with the
+   direction that wanted it: hierarchy here comes from size, colour and space,
+   and the two things that used weight to shout — the title and the score — are
+   vector letterforms now (src/ui/lettering.js). Not declaring a bold is what
+   makes that a decision rather than a hope; a `font-weight: 700` anywhere would
+   otherwise be silently synthesised from these outlines.
 
    Bundled rather than fetched: a CDN link is a UI that loses its typeface on a
-   flaky connection, and it is a third-party request on every cold load for two
-   files that are already in the bundle.
+   flaky connection, and it is a third-party request on every cold load for a
+   file that is already in the bundle.
 
    `font-display: swap` is deliberate and is NOT the whole answer. The DOM text
    it governs is one nickname input; every other glyph in this game is baked
    into a canvas texture and cached, and a texture baked before the face arrives
    stays wrong forever because nothing invalidates it. `src/ui/fonts.js` is what
-   handles that — it waits for both weights and then drops every registered
-   texture cache. */
+   handles that — it waits for the face and then drops every registered texture
+   cache. */
 @font-face {
   font-family: 'MSA Sans';
   src: url('./fonts/msa-sans-400.woff2') format('woff2');
   font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'MSA Sans';
-  src: url('./fonts/msa-sans-700.woff2') format('woff2');
-  font-weight: 700;
   font-style: normal;
   font-display: swap;
 }
@@ -50,29 +49,33 @@ body {
      the browser's own white. That was survivable while both sides of the gap
      were near-white and that file says so at length.
 
-     It stopped being survivable when the transition became a letterbox. The
-     menu now hands over on a screen that is entirely this colour, and the game
-     document is supposed to open on the same one; a white frame in between is
-     exactly the flash the covered frame exists to remove, and it is the more
-     visible for being white-to-blue rather than white-to-white.
+     It stopped being survivable once the two documents had to hand over on a
+     single flat colour. The menu covers the screen with the cap's own colour and
+     the game document opens on the same one; a white frame in between is exactly
+     the flash the covered frame exists to remove, and it is the more visible for
+     being white-to-blue rather than white-to-white.
 
      So the value is written twice, here and in `cssPalette.js`, and this file
      joins the list in `docs/palette.md` of places a palette change has to be
-     carried by hand. `--msa-fade-ms` below has a fallback for the same kind of
-     reason and states it the same way. */
-  background: var(--msa-void, #1a76c4);
+     carried by hand. It is `PALETTE.menu.capBrand` — the cobalt §7.3 names.
+     `--msa-fade-ms` below has a fallback for the same kind of reason and states
+     it the same way. */
+  background: var(--msa-void, #1451b8);
   color: var(--msa-text);
-  font-family: 'MSA Sans', Pretendard, -apple-system, 'Segoe UI', system-ui, sans-serif;
+  font-family: 'MSA Sans', 'Gowun Dodum', Pretendard, -apple-system, 'Segoe UI', system-ui, sans-serif;
   overscroll-behavior: none;
 
-  /* ── the web view's own gestures, all of them, off ────────────────────────
+  /* ── the browser's own gestures, all of them, off ─────────────────────────
      `#view` below already says `touch-action: none`, and that was enough while
-     the only thing anyone could touch was the canvas. It is not enough in a web
-     view: the canvas is letterboxed to 4:3, so on a phone there are black bars
-     of BODY on two sides of it, and a drag that starts on a bar is a drag on the
-     document — which is a rubber-band scroll, or a pull-to-refresh, or a
-     two-finger zoom, depending on how it started. Saying it here covers the
-     bars, the fade veil and anything else that ever lands on the page.
+     the only thing anyone could touch was the canvas. It is not enough for the
+     document: the canvas is letterboxed to 4:3, so a window that is not 4:3 has
+     bars of BODY on two sides of it, and a drag that starts on a bar is a drag
+     on the document — a rubber-band scroll, or a two-finger zoom, depending on
+     how it started. Saying it here covers the bars, the fade veil and anything
+     else that ever lands on the page.
+
+     The bars are `--msa-void`, which is the transition's cobalt rather than the
+     black they were named for when this note was written.
 
      `touch-action: none` is what kills double-tap zoom as well; `manipulation`
      would keep panning alive and is the wrong half of the pair here. */
