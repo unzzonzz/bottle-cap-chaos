@@ -1,6 +1,6 @@
 import { RAPIER } from '../physics/rapier.js';
 import { describeCapColliders } from '../physics/capCollider.js';
-import { CapFriction } from '../physics/capFriction.js';
+import { CapFriction, upY } from '../physics/capFriction.js';
 import { FIXED_DT } from '../physics/PhysicsWorld.js';
 
 /**
@@ -426,6 +426,87 @@ export class Arena {
     body.setLinvel(zero, false);
     body.setAngvel(zero, false);
     body.wakeUp();
+  }
+
+  /**
+   * Turn a cap over, in place. Curling's flip.
+   *
+   * ── the body is really rotated, and that is the whole design ─────────────
+   * The alternative was a flag: mark the cap "flipped" in JS and have the
+   * friction rule consult it. `capFriction.js` opens by explaining at length why
+   * that cannot work — a flag is state, `takeSnapshot` knows nothing about it,
+   * and a restored world would disagree with the live one. The trajectory
+   * preview restores a snapshot and claims to draw the shot that will happen;
+   * the replay check restores one and claims to run the turn again. Both claims
+   * end at the first flag.
+   *
+   * Rotating the body instead makes the flip a fact about the POSE, and
+   * `frictionFor` already reads the pose and nothing else. So the flipped cap
+   * gets `flippedFriction` — the 0.16 that makes it slide twice as far, measured
+   * in `capCollider.js` — in the live world, in the preview, and inside every
+   * snapshot, with nothing here having to arrange any of it. That is the same
+   * mechanism a cap knocked onto its back has always used; this only lets a
+   * player ask for it.
+   *
+   * ── 180° about world X, so the pose is exactly inverted ──────────────────
+   * Pre-multiplied rather than composed in body space: `q' = qx180 · q` negates
+   * `upY` for ANY starting rotation, which is what "the other face is down" has
+   * to mean for a cap that is also sitting at some yaw. Composing in body space
+   * would turn the cap about its own tilted axis and leave a cap that had been
+   * nudged askew neither one face down nor the other.
+   *
+   * X rather than Z because the throw runs along Z: turning about the axis
+   * across the table is a cap rolling over toward you, which is what the
+   * animation draws. About Z it would be a cap rolling sideways off its own line.
+   *
+   * ── and the HEIGHT has to move with it ───────────────────────────────────
+   * A cap's body origin is its HEM, and the cap occupies `0..height` above that
+   * origin. Inverted, it occupies `-height..0` — so an origin left where it was
+   * puts the whole cap a full cap-height INTO the table. `CapSwap` documents the
+   * measured version of that mistake: 100% of the cap under the surface, thirty
+   * steps to squeeze back out, and settling 0.035 too deep for good. Adding a
+   * height on the way down and taking it back on the way up keeps the face that
+   * is going to be touching the table exactly where the old one was.
+   *
+   * Velocities are left alone. This is only ever called while the world is
+   * standing still between turns — see `Match.flipCap`, which refuses in any
+   * other state — so there is nothing to cancel, and zeroing them would be a
+   * write that does nothing except differ from what a snapshot would restore.
+   *
+   * @param {number} index
+   * @returns {boolean} whether the cap is now crown-down
+   */
+  flipCap(index) {
+    const body = this.physics.body(this.capBodies[index]);
+    if (!body) return false;
+
+    const q = body.rotation();
+    const t = body.translation();
+    const wasUp = upY(q) >= 0;
+
+    // qx180 = (1, 0, 0, 0). The product below is that multiplication written
+    // out, with every term that multiplies by a zero component dropped.
+    body.setRotation({ x: q.w, y: -q.z, z: q.y, w: -q.x }, true);
+    body.setTranslation({ x: t.x, y: t.y + (wasUp ? this.desc.height : -this.desc.height), z: t.z }, true);
+    body.wakeUp();
+    return wasUp;
+  }
+
+  /**
+   * Which face this cap has down. True when it is lying on its crown.
+   *
+   * Read off the pose rather than remembered, for the reason the flip writes to
+   * the pose: there is exactly one place this answer lives, and everything that
+   * needs it — the button's icon, the flip animation, the friction rule — reads
+   * the same quaternion. A cap knocked over by a shot is therefore "flipped" to
+   * every one of them, which is correct: it is lying on its crown, and it will
+   * slide like it.
+   *
+   * @param {number} index
+   */
+  capFlipped(index) {
+    const body = this.physics.body(this.capBodies[index]);
+    return body ? upY(body.rotation()) < 0 : false;
   }
 
   /**

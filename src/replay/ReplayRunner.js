@@ -137,6 +137,22 @@ export function runLog(log, { capDims, config = replayConfig() }) {
       }
       pump(match);
       turns.push({ seq: ev.seq, kind: ev.kind, hash: physics.hashState() });
+    } else if (ev.kind === INPUT_KIND.FLIP) {
+      /**
+       * A cap turned over. No turn passes and nothing is pumped.
+       *
+       * `pump` is what the other branches use to run the world forward until it
+       * is asking for input again, and there is nothing to run: the flip happens
+       * between turns, the world does not step, and `Match.flipCap` leaves the
+       * match in AIM exactly as it found it. What it does do is re-take the
+       * turn's snapshot, so the hash below is of the flipped world — which is
+       * the point of recording it, since the next shot happens on that world.
+       */
+      if (!match.flipCap()) {
+        refused = { seq: ev.seq, kind: ev.kind, reason: `cannot flip (state=${match.state})` };
+        break;
+      }
+      turns.push({ seq: ev.seq, kind: ev.kind, hash: physics.hashState() });
     } else if (ev.kind === INPUT_KIND.CARD) {
       const res = match.playCard(ev.cardId);
       if (!res.ok) {

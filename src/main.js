@@ -1139,6 +1139,8 @@ async function boot(canvas) {
     frame: FRAME,
   });
   cardFx.setArena(match.arena);
+  /** `match.flips` as the frame loop last saw it. See where it is compared. */
+  let lastFlips = match.flips;
   scene.add(cardFx.world);
   cards.scene.add(cardFx.screen);
 
@@ -1285,6 +1287,28 @@ async function boot(canvas) {
     onRecenter: () => {
       audio.play('ui_click');
       faceCurrentPlayer(true);
+    },
+    /**
+     * 뚜껑을 뒤집는다. 컬링에만 있는 버튼이고, 턴을 쓰지 않는다.
+     *
+     * ── 세 겹의 문, 그리고 각각이 다른 것을 막는다 ──────────────────────────
+     * `acceptsInput` 은 카드 분기와 발사가 통과하는 그 문이다 — AI 가 생각
+     * 중이거나 온라인 상대의 턴이면 닫힌다. `input.aiming` 은 드래그 중인지이고,
+     * 이건 부록 J3.2 의 결정이다: 오차 시드가 드래그 시작에 뽑히므로, 당기는
+     * 중에 뒤집으면 다른 포즈로 뽑힌 시드를 쓰거나 시드를 다시 뽑게 된다.
+     * 그리고 `Match.flipCap` 이 마지막으로 상태와 던질 뚜껑이 있는지를 본다.
+     *
+     * ── 로컬 먼저, 그 다음 전송 ────────────────────────────────────────────
+     * 카드는 반대다 — `playCard` 가 시드를 소비하므로 상대가 같은 카운터에서
+     * 시작하도록 보내는 쪽이 먼저다. 뒤집기는 아무것도 뽑지 않아서 순서가
+     * 카운터를 바꾸지 않고, 그러면 **거절될 수 있는 쪽을 먼저** 하는 편이 낫다:
+     * 로컬이 거절한 뒤집기를 상대에게 보내면 두 세계가 갈린다.
+     */
+    onFlip: () => {
+      if (!active().acceptsInput) return;
+      if (input.aiming) return;
+      if (!match.flipCap(input.aiming)) return;
+      netMatch?.localFlip();
     },
     // Whether there is anything to put back, for the dimming only. Asked of the
     // same bearing the reset would target — see `turnBearing`.
@@ -2470,6 +2494,24 @@ async function boot(canvas) {
      * on, and that is still true with the call moved.
      */
     matchAudio.observe();
+    /**
+     * 뚜껑이 방금 뒤집혔으면 연출과 소리를 시작한다.
+     *
+     * 버튼의 콜백이 아니라 **카운터**를 보는 이유는 온라인이다. 상대의 뒤집기는
+     * `OnlineMatch._drain` 이 `Match.flipCap` 을 직접 불러 적용하고 `onFlip` 을
+     * 거치지 않는다 — 그쪽에 같은 두 줄을 복사해 두면 언젠가 한쪽만 고쳐진다.
+     * `match.flips` 는 누가 눌렀든 오르므로, 여기 한 곳이 두 경우를 다 받는다.
+     *
+     * `cap_flip` 은 이미 있는 큐다. 맞아서 넘어가는 뚜껑이 내는 소리이고, 버튼이
+     * 만드는 것도 같은 사건이다 — 뚜껑 하나가 넘어간 것. 두 번째 소리를 만들면
+     * 같은 일이 두 가지로 들린다.
+     */
+    if (match.flips !== lastFlips) {
+      lastFlips = match.flips;
+      const flipped = match.rules.shooterFor?.(match.rules.currentPlayer) ?? -1;
+      if (flipped >= 0) cardFx.flipCap(flipped);
+      audio.play('cap_flip', { intensity: 0.8 });
+    }
     cardFx.update({ dt, match, camera: gameCamera.camera, struck: matchAudio.struckCaps });
     view.update(match.alpha, match.rules.alive, cardFx);
 

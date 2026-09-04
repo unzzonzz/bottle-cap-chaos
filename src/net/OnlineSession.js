@@ -214,13 +214,27 @@ export class OnlineSession {
       // arrives as a packet is played twice, and the match desyncs on the turn
       // it happens. Cheap comparison, whole class of bug.
       if ((m.player | 0) === this.mySeat) return;
+      const kind = m.event?.kind;
       this._pending.push({
-        kind: m.event?.kind,
+        kind,
         turn: m.turn | 0,
         player: m.player | 0,
         event: m.event,
       });
-      this.deadline = 0;
+      /**
+       * The displayed clock stops, unless the turn is still running.
+       *
+       * A shot ends the turn and a card is immediately followed by a fresh
+       * `TURN_CLOCK`, so clearing this is right for both: either nothing is
+       * being timed any more, or a new deadline is a packet away.
+       *
+       * A flip is neither. It costs no turn, and the server deliberately does
+       * not reset the clock for one — see `Room.input`, where resetting would
+       * make an unlimited stall out of an unlimited button. So nothing would
+       * arrive to put this back, and clearing it would blank the opponent's
+       * countdown for the rest of a turn that is very much still ticking.
+       */
+      if (kind !== 'flip') this.deadline = 0;
     });
 
     sub(S2C.DESYNC, (m) => {
@@ -457,6 +471,22 @@ export class OnlineSession {
     this.transport.send(C2S.INPUT, {
       turn: this.turn,
       event: { kind: 'card', player: this.mySeat, rngState, cardId },
+    });
+  }
+
+  /**
+   * "I turned my cap over."
+   *
+   * Carries `rngState` even though a flip draws no random number, and it is sent
+   * in the same shape as the other two on purpose. Every event on this wire has
+   * the same four fields in the same order, so the receiver restores the counter
+   * from one place for every kind — and the moment one kind is special, that
+   * place becomes a branch, and the branch is where the next desync comes from.
+   */
+  sendFlip(rngState) {
+    this.transport.send(C2S.INPUT, {
+      turn: this.turn,
+      event: { kind: 'flip', player: this.mySeat, rngState },
     });
   }
 

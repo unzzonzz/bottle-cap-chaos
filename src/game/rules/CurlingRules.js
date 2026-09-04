@@ -551,15 +551,31 @@ export class CurlingRules extends RuleSet {
    * 승리." One cap, across all four rounds, and it has to have been ON the table
    * when its round was judged — `closest` is only ever offered survivors.
    *
+   * ── the tiebreak DECIDES, and it no longer explains itself ──────────────
+   * It used to. `detail` read "라운드 2 : 2 동점 · 최근접 P1 1.43 (3R) —
+   * 타이브레이커", against an earlier brief that asked for exactly that: "왜
+   * 이겼는지 알아야 한다."
+   *
+   * That reversed. The result screen says who won and by how many rounds, and
+   * nothing else — the reasoning that produced the winner is not shown. Which
+   * is a decision about the SCREEN and not about the rule: everything below is
+   * unchanged, `closest` is still accumulated round by round, a 2–2 is still
+   * settled by the single nearest cap of the match, and `tiebreak` is still
+   * reported. A drawn match is still a draw.
+   *
+   * So the only thing that went is the sentence. Do not read the identical
+   * `note` and `detail` in the two branches as a copy-paste: they are identical
+   * because a match won on rounds and a match won on the tiebreaker now say the
+   * same thing, deliberately.
+   *
    * ── and a draw is a real outcome ────────────────────────────────────────
    * Level on rounds with nothing ever having survived a round is a draw. It
    * takes four rounds of both players going over the edge, which is a thing that
    * can happen and should be reported as what it is.
    *
-   * `detail` is the result screen's one explanatory line, and on a tiebreak it
-   * has to say so — "타이브레이커 발동 시 결과 화면에 표시해라. 왜 이겼는지 알아야
-   * 한다." A player who cannot see why they lost a 2–2 reads it as the game
-   * having picked at random.
+   * `detail` is the result screen's one line under the winner, and it is the
+   * round score in every branch — see the tiebreak note above for why it no
+   * longer explains anything.
    */
   _judgeMatch() {
     const score = `${this.wins[0]} : ${this.wins[1]}`;
@@ -579,19 +595,21 @@ export class CurlingRules extends RuleSet {
       const c = this.closest;
       return {
         winner: c.player,
+        // Reported, and read by nothing that draws. Kept because "was this
+        // decided on rounds or on the nearest cap" is a fact about the match,
+        // and a rule that stops being answerable is a rule that quietly stops
+        // being checkable.
         tiebreak: true,
-        note: `🥌 동점 ${score} — 최근접 뚜껑으로 PLAYER ${c.player + 1} 승리`,
-        detail:
-          `라운드 ${score} 동점 · 최근접 P${c.player + 1} ` +
-          `${c.distance.toFixed(2)} (${c.round + 1}R) — 타이브레이커`,
+        note: `🥌 PLAYER ${c.player + 1} 승리  ·  라운드 ${score}`,
+        detail: `라운드 ${score}${drawn}`,
       };
     }
 
     return {
       winner: -1,
       tiebreak: false,
-      note: `🥌 무승부 ${score} — 남은 뚜껑 없음`,
-      detail: `라운드 ${score} 동점 · 판정에 남은 뚜껑이 하나도 없음 — 무승부`,
+      note: `🥌 무승부  ·  라운드 ${score}`,
+      detail: `라운드 ${score}${drawn}`,
     };
   }
 

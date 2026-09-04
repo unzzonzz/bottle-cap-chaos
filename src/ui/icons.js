@@ -274,6 +274,74 @@ function iconRecenter(ctx, size, color) {
   ctx.fill();
 }
 
+/**
+ * 뒤집기 — 왕관 뚜껑을 옆에서 본 모습과, 그 위를 넘어가는 화살표.
+ *
+ * ── 이 아이콘은 동작이면서 동시에 상태다 ────────────────────────────────────
+ * 부록 J4.3: "눌린 순간 아이콘이 반 바퀴 돌아 현재 면을 반영 — 버튼이 곧 상태
+ * 표시가 된다." 그래서 뚜껑을 원이 아니라 **옆모습**으로 그린다. 원은 뒤집어도
+ * 같은 원이라 상태를 말할 수 없다. 옆모습은 평평한 판과 주름진 스커트가 위아래로
+ * 다르므로, 180도 돌리면 눈에 보이게 다른 그림이 된다.
+ *
+ * 그 둘이 물리적으로 하는 일이 다르다는 것이 이 게임의 규칙이기도 하다 —
+ * `capCollider.js` 의 `flippedFriction` 을 보라. 평평한 면이 아래면 미끄러지고,
+ * 주름이 아래면 물린다. 아이콘이 말하는 것이 정확히 그 사실이다.
+ *
+ * 화살표는 뚜껑 **위쪽 반**을 돈다. 아래로 돌리면 아이콘 상자 밖으로 나가고,
+ * 안쪽으로 줄이면 뚜껑과 겹쳐서 32픽셀에서는 한 덩어리가 된다.
+ *
+ * ── 두 상태는 같은 그림에 캔버스 변환 하나다 ────────────────────────────────
+ * 위아래 뒤집힌 쪽을 좌표마다 손으로 미러링하면 호와 화살촉의 각도까지 따로
+ * 뒤집어야 하고, 그건 부호 하나 틀리면 화살표만 반대로 도는 — 눈으로는 거의
+ * 안 보이고 뜻은 정반대인 — 종류의 실수가 된다. `scale(1, -1)` 한 번이면 획
+ * 굵기도 그대로고 두 그림이 정확히 서로의 거울이 된다.
+ *
+ * @param {number} dir  1 이면 판이 위(hem 이 바닥), -1 이면 뒤집힌 상태
+ */
+function drawFlip(ctx, size, color, dir) {
+  ctx.save();
+  if (dir < 0) {
+    ctx.translate(0, size);
+    ctx.scale(1, -1);
+  }
+  setup(ctx, size, color);
+
+  // 뚜껑의 옆모습. 위가 평평한 판, 아래로 벌어지는 짧은 다리가 스커트다.
+  ctx.beginPath();
+  ctx.moveTo(size * 0.3, size * 0.68);
+  ctx.lineTo(size * 0.7, size * 0.68);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(size * 0.3, size * 0.68);
+  ctx.lineTo(size * 0.26, size * 0.8);
+  ctx.moveTo(size * 0.7, size * 0.68);
+  ctx.lineTo(size * 0.74, size * 0.8);
+  ctx.stroke();
+
+  // 넘어가는 호. 뚜껑 위를 왼쪽에서 오른쪽으로 돈다.
+  const c = size / 2;
+  const rad = size * 0.25;
+  const cy = size * 0.44;
+  const to = Math.PI * 2.06;
+  ctx.beginPath();
+  ctx.arc(c, cy, rad, Math.PI * 0.94, to);
+  ctx.stroke();
+  // 끝에서 뚜껑 쪽으로 내려앉는 방향. 접선은 반지름에 수직이다.
+  arrowHead(ctx, size, c + Math.cos(to) * rad, cy + Math.sin(to) * rad, to + Math.PI / 2);
+
+  ctx.restore();
+}
+
+/** 뒤집기 — 판이 위. 지금 hem 으로 서 있는 뚜껑. */
+function iconFlip(ctx, size, color) {
+  drawFlip(ctx, size, color, 1);
+}
+
+/** 뒤집기 — 판이 아래. 지금 크라운으로 누워 있는 뚜껑. */
+function iconFlipped(ctx, size, color) {
+  drawFlip(ctx, size, color, -1);
+}
+
 /** Exit — a door with an arrow leaving it. */
 function iconExit(ctx, size, color) {
   setup(ctx, size, color);
@@ -734,6 +802,8 @@ export const ICON = {
   silence: iconSilence,
   lock: iconSilence,
   recenter: iconRecenter,
+  flip: iconFlip,
+  flipped: iconFlipped,
   exit: iconExit,
   back: iconBack,
   check: iconCheck,

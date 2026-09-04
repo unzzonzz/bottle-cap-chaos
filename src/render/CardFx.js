@@ -22,6 +22,7 @@ import {
   stunSheet,
 } from './fxTextures.js';
 import { PALETTE } from '../core/palette.js';
+import { easeInOut } from '../ui/motion.js';
 
 /**
  * What a card LOOKS like happening.
@@ -229,6 +230,26 @@ export class CardFx {
     this._now = 0;
     /** A one-shot effect in progress: {cardId, player, t}. */
     this._burst = null;
+    /**
+     * The cap currently tumbling over, if any: `{index, t}`.
+     *
+     * ── it is not a card, and it lives here anyway ──────────────────────────
+     * Curling's flip button. This class is called `CardFx` and owns no cards —
+     * it owns `capVisual`, which is the one seam in the project through which a
+     * cap can be moved in the DRAWING without the physics knowing. A second
+     * producer of cap offsets would mean `ArenaView` had two of them to combine,
+     * and the combination is the part that goes wrong.
+     *
+     * ── the logic has already happened when this starts ─────────────────────
+     * `Match.flipCap` turns the body over immediately and re-takes the turn's
+     * snapshot; the friction, the preview and the button's icon are all already
+     * showing the new face by the time this is armed. So this animates BACKWARDS
+     * onto the truth: at t=0 it draws the cap a half-turn off, where it used to
+     * be, and unwinds to zero. That ordering is what lets a player press the
+     * button twice quickly and have the second press be instant — the animation
+     * is never something the physics is waiting for.
+     */
+    this._flip = null;
     /** Set by `play` when the panel asks for an effect with no game behind it. */
     this._demo = null;
 
@@ -595,6 +616,20 @@ export class CardFx {
       if (this._demo.elapsed >= s) this._demo = null;
     } else {
       this._burst = null;
+    }
+
+    /**
+     * The tumble's clock. Cleared when it lands, so `capVisual` stops paying for
+     * a cap that is already where it belongs.
+     *
+     * Driven off render seconds like everything else here, NOT off physics
+     * steps: the world does not step at all while a flip is on screen — it
+     * happens between turns, with the match sitting in AIM — so a step-counted
+     * animation would never advance.
+     */
+    if (this._flip) {
+      this._flip.t += dt / Math.max(0.05, this.config.cardFx.flipSeconds);
+      if (this._flip.t >= 1) this._flip = null;
     }
 
     /**
@@ -1218,9 +1253,32 @@ export class CardFx {
   capVisual(index) {
     const cfg = this.config.cardFx;
     let dx = 0;
+    let dy = 0;
     let dz = 0;
+    let spinX = 0;
     let scale = 1;
     let touched = false;
+
+    /**
+     * 뒤집기. 몸은 이미 돌아가 있고, 그림이 뒤늦게 따라온다.
+     *
+     * `spinX` 는 물리 회전에 **더해지는** 각이고, 진행에 따라 −180도에서 0으로
+     * 풀린다. t=0 에서 그림은 뒤집히기 전 면을 보여 주고 t=1 에서 바디와 정확히
+     * 같아진다 — 끝에서 두 값이 만나야 애니메이션이 끝나는 순간에 뚜껑이 튀지
+     * 않는다.
+     *
+     * 축은 X 다. 던지는 방향이 Z 이므로 X 는 그것과 수직이고, 화면에서는 뚜껑이
+     * 던지는 사람 쪽으로 넘어오는 것으로 보인다. Z 축이면 자기 진행선 위에서
+     * 옆으로 구르는 것이 되는데, 그건 다음에 일어날 일과 방향이 겹친다.
+     */
+    if (this._flip?.index === index) {
+      const k = easeInOut(Math.min(1, this._flip.t));
+      spinX = -(1 - k) * Math.PI;
+      // 한 번 떠올랐다 내려앉는다. 사인이라 양 끝에서 정확히 0이므로, 시작과 끝
+      // 어느 쪽에서도 높이가 튀지 않는다.
+      dy += Math.sin(Math.PI * k) * cfg.flipHop * (this.arena?.desc?.radius ?? 1.6) * 2;
+      touched = true;
+    }
 
     // Chaos: a small, fast, per-cap wobble. Two frequencies that do not divide
     // into each other, so four caps never fall into step and start to look like
@@ -1316,7 +1374,24 @@ export class CardFx {
       touched = true;
     }
 
-    return touched ? { dx, dy: 0, dz, scale } : null;
+    return touched ? { dx, dy, dz, spinX, scale } : null;
+  }
+
+  /**
+   * A cap has just been turned over. Start the tumble.
+   *
+   * Restarts rather than queues, and there is no guard against interrupting one
+   * that is already running: the flip has no limit — see `Match.flipCap` — so a
+   * player leaning on the button is an expected input rather than an abuse of
+   * one. Cutting the current tumble and starting a new one from the old face is
+   * exactly what a cap being turned over twice in a third of a second looks
+   * like; queueing them would leave the drawing further and further behind a
+   * body that is already where it is going.
+   *
+   * @param {number} index
+   */
+  flipCap(index) {
+    this._flip = { index, t: 0 };
   }
 
   // ── the panel's replay button ────────────────────────────────────────────

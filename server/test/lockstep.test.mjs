@@ -209,6 +209,45 @@ async function playMatch(hub, mode, { turns = 12, scriptSeed = 0xabcdef, power =
     const capIndex = me.match.shooter;
     if (capIndex < 0) break;
 
+    /**
+     * Turn the cap over, sometimes, before throwing it.
+     *
+     * ── a flip is an input that ends no turn, which is why it is in here ────
+     * Every other input this file sends finishes a turn: a shot is followed by
+     * both worlds simulating to rest and reporting a hash, and the desync
+     * detector compares them. A flip does none of that — no turn passes, no
+     * hash is exchanged, and the server does not even reset the clock. So the
+     * only thing that can catch a flip going astray is the NEXT shot landing
+     * somewhere different on the two machines, which is exactly the failure
+     * lockstep is supposed to make loud.
+     *
+     * It is also the only input here that changes the physics without moving
+     * anything: what it alters is which face is against the table, and through
+     * that the friction the next shot gets. See `capFriction.js`.
+     *
+     * Zero flips some turns, deliberately — a script that always flipped would
+     * never test a cap thrown on the face it was dealt on.
+     */
+    if (me.match.mode.flip) {
+      const flips = Math.floor(script.float() * 3);
+      for (let f = 0; f < flips; f++) {
+        // The order a real press takes — see `main.js`'s `onFlip`: apply
+        // locally, then tell the other end. A flip draws no random number, so
+        // unlike a card the order cannot move the seeded counter.
+        if (!me.match.flipCap(false)) break;
+        me.bridge.localFlip();
+        await frames(clients, 2);
+      }
+      // Both worlds have to agree about which way up it is BEFORE the throw,
+      // because after the throw a disagreement is indistinguishable from a
+      // solver divergence.
+      assert.equal(
+        a.match.arena.capFlipped(capIndex),
+        b.match.arena.capFlipped(capIndex),
+        `clients disagree about cap ${capIndex}'s face before turn ${i}`,
+      );
+    }
+
     const angle = script.signed() * Math.PI;
     const shot = {
       capIndex,

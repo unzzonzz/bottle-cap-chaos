@@ -461,7 +461,7 @@ export class ArenaView {
   /**
    * @param {number} alpha  0..1 between the previous physics step and the current one
    * @param {boolean[]} alive
-   * @param {{capVisual: (i: number) => ({dx:number,dy:number,dz:number,scale:number}|null)}} [fx]
+   * @param {{capVisual: (i: number) => ({dx:number,dy:number,dz:number,spinX?:number,scale:number}|null)}} [fx]
    *   card effects, asked AFTER the physics transform has been written. Strictly
    *   a drawing offset: the body is wherever the solver put it and this moves the
    *   picture of it, which is what keeps a shake or a shrink out of the sim.
@@ -509,6 +509,15 @@ export class ArenaView {
         mesh.position.y += v.dy;
         mesh.position.z += v.dz;
         mesh.scale.setScalar(v.scale);
+        /**
+         * 물리 회전 **위에** 얹는 각. 컬링의 뒤집기 연출이 유일한 사용자다.
+         *
+         * `_place` 가 바디의 쿼터니언을 넣은 **뒤**라, 이것은 그 위의 오프셋이지
+         * 대체가 아니다 — 그래서 뒤집히는 중에도 뚜껑은 자기가 서 있던 요각을
+         * 그대로 지킨다. 바디는 움직이지 않는다: `Match.flipCap` 이 이미 돌려
+         * 놓았고 이 각은 0으로 풀리면서 그 진실에 도착한다.
+         */
+        if (v.spinX) mesh.rotateX(v.spinX);
       } else if (mesh.scale.x !== 1) {
         mesh.scale.setScalar(1);
       }

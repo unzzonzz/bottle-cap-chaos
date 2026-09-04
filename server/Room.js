@@ -392,8 +392,19 @@ export class Room {
       return { ok: false, code: ERR.OUT_OF_ORDER, message: ERR_TEXT[ERR.OUT_OF_ORDER] };
     }
 
+    /**
+     * The kinds this relay will pass on, listed rather than waved through.
+     *
+     * A relay that accepted anything would forward a typo as faithfully as a
+     * move, and the client on the other end would refuse it — leaving one side
+     * having played something the other never saw, which arrives later as a
+     * desync blamed on the physics. See `replay/InputLog.js`, which is where
+     * this list is really defined; these strings are its `INPUT_KIND` values and
+     * the server holds no import of it (it holds a HASH of the config, not the
+     * config, and the same restraint applies here).
+     */
     const event = msg.event;
-    if (!event || (event.kind !== 'shot' && event.kind !== 'card')) {
+    if (!event || (event.kind !== 'shot' && event.kind !== 'card' && event.kind !== 'flip')) {
       return { ok: false, code: ERR.BAD_MESSAGE, message: ERR_TEXT[ERR.BAD_MESSAGE] };
     }
 
@@ -420,7 +431,22 @@ export class Room {
       event,
     });
 
-    if (event.kind === 'card') {
+    if (event.kind === 'flip') {
+      /**
+       * A cap turned over. The clock keeps running, and it is not restarted.
+       *
+       * A card resets the turn clock below, on the grounds that playing one is
+       * an action and the player should then get a whole turn to aim. A flip is
+       * not an action — it costs no turn and there is no limit on it — so
+       * resetting the clock for one would hand any player an unlimited stall:
+       * tap the button every fourteen seconds and the turn never expires.
+       *
+       * Nothing else happens either. The turn does not advance and the shot
+       * clock does not stop, because neither of those is true of a flip; the
+       * relay above has already sent it to the opponent, which is the whole of
+       * what the server owes it.
+       */
+    } else if (event.kind === 'card') {
       /**
        * A card does not end the turn, and it buys a fresh clock.
        *

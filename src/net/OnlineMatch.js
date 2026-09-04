@@ -129,6 +129,25 @@ export class OnlineMatch {
     // A card does not end the turn; nothing to settle and nothing to report.
   }
 
+  /**
+   * The local player turned their cap over. Same discipline again.
+   *
+   * The flip has ALREADY been applied locally by the time this is called — it is
+   * an instant thing with an animation drawn over it, and making the player wait
+   * for a round trip to see their own cap turn would be the one place in this
+   * game where an input felt remote. That is the same bargain `localShot` makes
+   * and it is safe for the same reason: the mover is authoritative for their own
+   * input, and the hash comparison at the end of the turn is what checks it.
+   *
+   * Nothing is settled and nothing is reported, exactly as for a card: no turn
+   * ended, so there is no world to wait for and no verdict to agree on.
+   */
+  localFlip() {
+    const rngState = peekSeed();
+    this.log.recordFlip(this.session.mySeat);
+    this.session.sendFlip(rngState);
+  }
+
   _beginSettle() {
     this._settling = true;
     this._settlingTurn = this.session.turn;
@@ -182,6 +201,22 @@ export class OnlineMatch {
     if (ev.kind === INPUT_KIND.CARD) {
       this.log.recordCard(item.player, ev.cardId);
       this.match.playCard(ev.cardId);
+      return;
+    }
+
+    if (ev.kind === INPUT_KIND.FLIP) {
+      /**
+       * The opponent turned their cap over.
+       *
+       * Into the same `Match.flipCap` a local press takes, with no `aiming`
+       * argument — the drag that gate protects is the LOCAL player's, and there
+       * is never one in progress on a turn belonging to the other seat. Passing
+       * this client's own aim state here would let a remote flip be dropped
+       * because somebody on this end was fiddling with the pointer, which is the
+       * exact shape of a one-sided divergence.
+       */
+      this.log.recordFlip(item.player);
+      this.match.flipCap();
       return;
     }
 

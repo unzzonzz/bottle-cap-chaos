@@ -125,6 +125,25 @@ export class Match {
     this.alpha = 0;
     this._acc = 0;
 
+    /**
+     * How many caps have been turned over. A counter, not a state.
+     *
+     * The flipped-ness of a cap lives in its POSE and is read back with
+     * `Arena.capFlipped` — see `Arena.flipCap` for why it is nowhere else. This
+     * only ticks, so the renderer can notice that one just happened and start an
+     * animation without the turn loop having to know an animation exists.
+     *
+     * ── it counts the SESSION, and `start` deliberately does not reset it ────
+     * Every other counter here goes back to zero for a new match, and this one
+     * must not, because of how it is read: `main.js` remembers the last value it
+     * saw and treats any difference as "a cap just flipped". A counter that
+     * reset would hand that watcher a difference at the exact moment there is no
+     * cap to animate — the first frame of a new match — and the fix would be to
+     * remember to re-sync the watcher in every path that starts one. Monotonic,
+     * there is no such path and no such thing to remember.
+     */
+    this.flips = 0;
+
     /** Everything needed to run the last turn again, exactly. */
     this.lastTurn = null;
     /** Result of the most recent replay check. */
@@ -678,6 +697,58 @@ export class Match {
     if (this.rules.currentPlayer === player) return false;
     this.rules.setCurrentPlayer(player);
     this._beginAim();
+    return true;
+  }
+
+  /**
+   * Turn the cap this player is about to throw onto its other face.
+   *
+   * ── it does not cost a turn, and there is no limit ───────────────────────
+   * Flipping is not a move; it is how you are holding the cap. So nothing here
+   * touches `advanceTurn`, the score, or whose go it is, and it can be done as
+   * many times in a turn as anybody likes. The only cost is that the shot you
+   * then take is a different shot.
+   *
+   * ── before the pull starts, and that is a rule about the SEED ────────────
+   * Refused once a drag is under way. `AimInput` draws the shot's error seed
+   * when the drag STARTS, and the trajectory preview has already been drawn from
+   * it — so a flip mid-pull would either keep a seed drawn for a different cap
+   * pose, or draw a fresh one, which is a player re-rolling the error cone by
+   * tapping a button. Neither is a thing to leave available; the gate is the
+   * `aiming` flag the caller passes in, because the drag lives in `AimInput` and
+   * this class has never heard of it.
+   *
+   * ── the snapshot has to be RE-TAKEN, and this is the whole hazard ────────
+   * `_beginAim` takes one snapshot per turn and immediately restores the world
+   * from it, which makes that snapshot the canonical state — the preview runs on
+   * a copy of it, the replay check rewinds to it, and `startHash` is its
+   * fingerprint. Flipping a cap afterwards moves the world out from under all
+   * three: the preview would draw the shot the UNFLIPPED cap would take, and the
+   * replay would rewind the flip away and report the difference as a solver
+   * failure.
+   *
+   * So `_beginAim` is re-run, exactly as `setFirstPlayer` re-runs it and for the
+   * same reason. It is idempotent here — the cap is already dealt, so `_deploy`
+   * does nothing — and it leaves the flipped world as the new canonical one.
+   *
+   * @param {boolean} [aiming]  is a drag under way right now
+   * @returns {boolean} whether a cap was turned over
+   */
+  flipCap(aiming = false) {
+    if (this.state !== MATCH_STATE.AIM) return false;
+    if (aiming) return false;
+
+    const shooter = this.rules.shooterFor(this.rules.currentPlayer);
+    if (shooter < 0) return false;
+    // A cap that has not been dealt is in the pocket, thirty units under the
+    // table. There is nothing there to turn over, and `_beginAim` deals it.
+    if (this.rules.needsDeploy?.(shooter)) return false;
+
+    this.arena.flipCap(shooter);
+    this._beginAim();
+    // Published as a counter, the same one-way seam the round counter uses:
+    // `game/` says a cap turned over, `render/` decides what to draw about it.
+    this.flips++;
     return true;
   }
 

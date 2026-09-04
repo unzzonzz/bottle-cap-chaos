@@ -27,7 +27,15 @@
  * running a different game — which is what `CONFIG_HASH` is for below.
  */
 
-export const PROTOCOL_VERSION = 1;
+/**
+ * ── 2, because curling gained the flip ──────────────────────────────────────
+ * A client that does not know `INPUT_KIND.FLIP` will be relayed one and either
+ * refuse it or ignore it; either way its world stops matching the sender's from
+ * that cap onward, and the mismatch surfaces as a desync — a report that the
+ * physics diverged, about two builds that were never playing the same game. The
+ * handshake refusing the match up front is the whole reason this number exists.
+ */
+export const PROTOCOL_VERSION = 2;
 
 // ── message types ──────────────────────────────────────────────────────────
 
@@ -61,7 +69,10 @@ export const C2S = {
   /** Both sides have their opponent's mark and the cutscene is done. */
   READY: 'c:ready',
 
-  /** A shot or a card. The payload is an `InputEvent` — see `replay/InputLog.js`. */
+  /**
+   * A shot, a card, or a flip. The payload is an `InputEvent` — see
+   * `replay/InputLog.js`, which is the definition of what may be in it.
+   */
   INPUT: 'c:input',
 
   /** This client's state hash for a finished turn. */

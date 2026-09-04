@@ -149,6 +149,7 @@ export class HudLayer {
     config,
     onExit,
     onRecenter,
+    onFlip,
     atDefaultView,
     reserved,
   }) {
@@ -156,6 +157,15 @@ export class HudLayer {
     this.config = config;
     this.onExit = onExit ?? (() => {});
     this.onRecenter = onRecenter ?? (() => {});
+    /**
+     * Turn the cap over. Curling's only extra control.
+     *
+     * Optional like `onRecenter`, and absent everywhere else — the button is
+     * hidden in the other two modes, so the callback is never reached there
+     * either. See `_updateButtons` for why the bottom centre is a place only
+     * this mode has free.
+     */
+    this.onFlip = onFlip ?? (() => {});
     this._atDefaultView = atDefaultView ?? (() => false);
     /**
      * Whether a point belongs to the BOARD whatever is drawn over it.
@@ -237,6 +247,7 @@ export class HudLayer {
     this.timerTrack.material.uniforms.uTint.value.set(0.09, 0.11, 0.15);
     this.exit = plate(12);
     this.recenter = plate(12);
+    this.flip = plate(12);
 
     /**
      * The press targets, as oversized invisible quads.
@@ -253,6 +264,7 @@ export class HudLayer {
     this._hits = [
       { id: 'exit', mesh: this._hitQuad(), plate: this.exit, motion: controlState() },
       { id: 'recenter', mesh: this._hitQuad(), plate: this.recenter, motion: controlState() },
+      { id: 'flip', mesh: this._hitQuad(), plate: this.flip, motion: controlState() },
     ];
 
     this._ray = new Raycaster();
@@ -470,6 +482,22 @@ export class HudLayer {
     this.recenter.position.set(right, rowTwoY, 0);
 
     /**
+     * 뒤집기. **아래 가장자리 한가운데**, 컬링에서만.
+     *
+     * ── 이 자리가 비어 있는 것은 컬링에서뿐이다 ─────────────────────────────
+     * 다른 두 모드에서 아래 가장자리 중앙은 손패다. 부채꼴이 거기 펼쳐지고,
+     * `setHandParked` 가 그 도달 범위에 맞춰 다른 것들을 비켜 준다. 컬링은
+     * 카드를 안 쓰므로 — `MODES.curling.cards` 가 false 다 — 그 자리가 통째로
+     * 비고, 그래서 이 버튼은 컬링에만 있다. 다른 모드에 두면 손패가 덮는다.
+     *
+     * 나가기·리센터와 **같은 여백**이다. 셋이 같은 `MARGIN` 에 붙으므로 화면
+     * 가장자리를 도는 하나의 컨트롤 띠로 읽힌다 — 아래만 다른 값을 쓰면 그
+     * 버튼은 다른 무언가로 보인다.
+     */
+    this.flip.scale.set(ICON, ICON, 1);
+    this.flip.position.set(0, -halfH + edgeBottom + ICON / 2, 0);
+
+    /**
      * 누구 차례인가 — **좌측 하단**. 네 여백이 전부 같은 28 이다.
      *
      * ── 위가 아니라 아래인 이유 ────────────────────────────────────────────
@@ -604,7 +632,7 @@ export class HudLayer {
     this._updateScore(dt, match, gameCamera);
     this._updateTurn(match, labelFor, nameFor, outcomeFor);
     this._updateTimer(turnClock);
-    this._updateButtons(dt);
+    this._updateButtons(dt, match);
 
     /**
      * Last, over the top of whatever each updater decided for itself.
@@ -621,6 +649,7 @@ export class HudLayer {
       this.recenter,
       this.timerTrack,
       this.timerFill,
+      this.flip,
     ]) {
       // ASSIGNED from the plate's own base, never multiplied into what is
       // already there. Multiplying looks equivalent and is not: `turn` does
@@ -850,9 +879,35 @@ export class HudLayer {
    * opacity exists. Hover brings it back to full and swaps in the brighter
    * plate.
    */
-  _updateButtons(dt) {
+  _updateButtons(dt, match) {
     this.exit.userData.want = true;
     this.recenter.userData.want = true;
+
+    /**
+     * 뒤집기 버튼: 컬링에서만, 그리고 내 턴에만 온전히.
+     *
+     * `mode.flip` 이 없는 모드에서는 아예 안 나온다 — 손패가 이 자리를 쓰기
+     * 때문이고, 그 이유는 `layout` 에 적혀 있다. `want` 가 false 면 아래 공용
+     * 루프가 숨기고, 히트 쿼드는 `hitAt` 이 보이는 판만 맞추는 것이 아니므로
+     * 눌림 자체는 `onFlip` 쪽에서 한 번 더 막힌다 — 두 겹인 것은 일부러다:
+     * 여기는 보이는 것을 정하고, 저기는 일어나는 것을 정한다.
+     *
+     * 내 턴이 아니면 흐려진다. 리센터가 "되돌릴 것이 없다"를 말할 때 쓰는 것과
+     * 같은 `base` 가중치이고, 같은 이유로 같은 것을 쓴다: 이 화면에는 "지금은
+     * 이것을 할 수 없다"를 말하는 방법이 하나여야 한다.
+     */
+    const canFlip = !!match?.mode?.flip;
+    this.flip.userData.want = canFlip;
+    /**
+     * 아이콘이 지금 어느 면인지 말한다. 그래서 버튼이 곧 상태 표시다.
+     *
+     * 포즈에서 읽는다 — `Arena.capFlipped` 는 쿼터니언을 보고 답한다 — 이지
+     * 눌린 횟수를 세지 않는다. 그 차이가 드러나는 경우가 실제로 있다: 상대의
+     * 발사에 맞아 넘어간 뚜껑도 뒤집힌 것이고, 미끄러지는 것도 뒤집힌 쪽이다.
+     * 버튼은 그때도 맞는 그림을 보여 준다.
+     */
+    const shooter = canFlip ? (match.rules.shooterFor?.(match.rules.currentPlayer) ?? -1) : -1;
+    const flipped = shooter >= 0 && match.arena.capFlipped(shooter);
     const ui = this.config.ui;
     const dim = Math.min(1, Math.max(0, ui.dimOpacity));
     const shown = smoothstep(this._scoreShown);
@@ -874,6 +929,10 @@ export class HudLayer {
       // when the pointer is on it; dimmed the rest of the time.
       let base = hot ? 1 : dim + (1 - dim) * shown;
       if (h.id === 'recenter' && settled && !hot) base = dim;
+      // 던질 뚜껑이 없다 = 내 턴이 아니거나 매치가 끝났다. 호버해도 안 밝아진다:
+      // 되돌릴 것이 없는 리센터와 달리 이건 눌러도 아무 일이 없으므로, 밝아지면
+      // 눌리는 것처럼 보인다.
+      if (h.id === 'flip' && shooter < 0) base = dim;
       h.plate.userData.base = base;
     }
 
@@ -908,7 +967,7 @@ export class HudLayer {
       h.plate.scale.set(s, s, 1);
     }
 
-    const key = `${this.hovered ?? '-'}|${ui.textureScale}|${size}`;
+    const key = `${this.hovered ?? '-'}|${ui.textureScale}|${size}|${canFlip ? (flipped ? 'f' : 'u') : '-'}`;
     if (key === this._buttonKey) return;
     this._buttonKey = key;
     /**
@@ -932,6 +991,13 @@ export class HudLayer {
       this.hovered === 'recenter' ? 'hover' : 'idle',
       iconBox,
     );
+    if (canFlip) {
+      this.flip.material.uniforms.uMap.value = iconButtonTexture(
+        flipped ? 'flipped' : 'flip',
+        this.hovered === 'flip' ? 'hover' : 'idle',
+        iconBox,
+      );
+    }
   }
 
   // ── pointer ────────────────────────────────────────────────────────────────
@@ -996,6 +1062,7 @@ export class HudLayer {
     if (this.hovered !== id) return false;
     if (id === 'exit') this.onExit();
     else if (id === 'recenter') this.onRecenter();
+    else if (id === 'flip') this.onFlip();
     return true;
   }
 
@@ -1015,6 +1082,7 @@ export class HudLayer {
       this.recenter,
       this.timerTrack,
       this.timerFill,
+      this.flip,
     ]) {
       m.geometry.dispose();
     }

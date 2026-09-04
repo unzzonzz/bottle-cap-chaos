@@ -41,15 +41,31 @@ export const LOG_FORMAT = 'msa-inputlog';
 export const LOG_VERSION = 1;
 
 /**
- * The two things a player can do on their turn.
+ * What a player can do that the simulation sees.
  *
- * Shared with the network protocol — see `net/protocol.js`. A third kind is not
- * anticipated: everything else a player can press is either camera work, which
- * the simulation does not see, or menu navigation, which ends the match.
+ * Shared with the network protocol — see `net/protocol.js`. The test for
+ * belonging here is not "is it a move": it is whether the WORLD is different
+ * afterwards. Camera work is not, and menu navigation ends the match rather than
+ * changing it.
+ *
+ * `FLIP` is the one that makes that distinction worth stating. It costs no turn,
+ * has no limit, and does not touch the score — by every ordinary reading it is
+ * not a move at all. It turns a cap over, which changes which face is on the
+ * table, which changes the friction the next shot gets. A log that left it out
+ * would replay every subsequent shot on the wrong surface.
  */
 export const INPUT_KIND = {
   SHOT: 'shot',
   CARD: 'card',
+  /**
+   * A cap turned over. See `Match.flipCap`.
+   *
+   * Carries nothing but the seat. Which cap is not in it: only one cap is
+   * flippable at a time — the one whose turn it is — and `Match.flipCap` works
+   * that out from the rules rather than being told. An index in the payload
+   * would be a second opinion about whose cap it is, and the two could differ.
+   */
+  FLIP: 'flip',
   /**
    * Nobody moved in time, and the turn passed.
    *
@@ -66,7 +82,12 @@ export const INPUT_KIND = {
  * One input, as recorded and as sent.
  *
  * @typedef {object} InputEvent
- * @property {number} seq        turn ordinal, from zero, gap-free
+ * @property {number} seq        event ordinal, from zero, gap-free
+ *
+ *   An EVENT ordinal, not a turn one — it was described as a turn ordinal when
+ *   every kind here ended a turn, and `FLIP` does not. A turn can now carry
+ *   several events, and `seq` still counts every one of them exactly once,
+ *   which is what `parse` checks and what the relay orders by.
  * @property {string} kind       an `INPUT_KIND`
  * @property {number} player     who acted
  * @property {number} rngState   `peekSeed()` immediately before applying
@@ -137,6 +158,27 @@ export class InputLog {
     });
   }
 
+  /**
+   * Record a cap being turned over.
+   *
+   * Carries `rngState` like everything else here even though a flip draws no
+   * random number, and that is deliberate rather than sloppy: a replay restores
+   * the counter before each event, so an event that omitted it would leave the
+   * counter wherever the last one happened to end and the restore would silently
+   * stop being exact. Every event carries it or the guarantee has a hole in the
+   * shape of whichever kind was special.
+   *
+   * @param {number} player
+   */
+  recordFlip(player) {
+    this.events.push({
+      seq: this.events.length,
+      kind: INPUT_KIND.FLIP,
+      player,
+      rngState: peekSeed(),
+    });
+  }
+
   /** @param {number} player  whose turn ran out */
   recordSkip(player) {
     this.events.push({
@@ -185,6 +227,17 @@ export class InputLog {
    * broken.
    *
    * @param {string|object} src
+   */
+  /**
+   * ── `LOG_VERSION` did not move when `FLIP` was added, on purpose ──────────
+   * The version describes the SHAPE of the file, and adding a kind does not
+   * change it: every field of every existing event means what it meant, and a
+   * log recorded before flips existed replays byte for byte. What a version bump
+   * would buy is a loud failure when a new log meets an old build — and the kind
+   * check below already gives exactly that, naming the offending event and the
+   * kind it did not recognise, which is more use than a version number would be.
+   * Bumping it would instead have invalidated every determinism fixture on disk
+   * to say something the parser was already saying better.
    */
   static parse(src) {
     const raw = typeof src === 'string' ? JSON.parse(src) : src;

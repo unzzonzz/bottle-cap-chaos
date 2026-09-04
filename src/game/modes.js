@@ -363,6 +363,20 @@ export const MODES = {
      * ever clears a hand, which is what `CardHands.reset` already says.
      */
     cards: false,
+    /**
+     * 뚜껑을 뒤집을 수 있다. 이 모드에만 있다.
+     *
+     * ── 이것이 켜는 것은 규칙이 아니라 버튼이다 ─────────────────────────────
+     * 뒤집기 자체는 `Match.flipCap` 이 하고 물리는 `capFriction.js` 가 이미
+     * 가지고 있다 — 맞아서 넘어간 뚜껑은 세 모드 어디서나 크라운으로 미끄러진다.
+     * 이 플래그가 정하는 것은 **플레이어가 그것을 요청할 수 있는가**이고,
+     * 실질적으로는 HUD 하단 중앙에 버튼이 서는가이다.
+     *
+     * 컬링에만 있는 이유는 그 자리가 컬링에만 비어 있기 때문이다. 다른 두
+     * 모드에서 아래 가장자리 중앙은 손패의 부채꼴이고, 거기 버튼을 두면 카드가
+     * 덮는다. 바로 위의 `cards: false` 가 그 말이다.
+     */
+    flip: true,
 
     /**
      * ── both players look at the table the same way up ──────────────────────
