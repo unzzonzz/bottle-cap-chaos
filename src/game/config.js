@@ -375,11 +375,22 @@ export const CONFIG = {
      * The rim is the fall. Its slope is `thickness / slopeRun` and it has to be
      * steeper than the friction angle or a cap can come to rest on it — which is
      * the pathological pose `KnockoutBoard` documents at length, and the reason
-     * survival's board is a truncated pyramid rather than a slab. At 1.2 over 2.0
-     * the slope is 31 degrees against a surface that cannot hold much past 13,
+     * survival's board is a truncated pyramid rather than a slab. At 1.0 over 2.0
+     * the slope is 27 degrees against a surface that cannot hold much past 13,
      * so a cap that gets far enough over tips and goes rather than teetering.
+     *
+     * ── 1.0 rather than the 1.2 it was, to match the survival board ─────────
+     * The table and the board are now the same plank drawn by the same function,
+     * and a plank that is a fifth thicker in one mode than the other reads as a
+     * different object however identical its grain is — the rim is the one place
+     * the thickness is actually visible, and it is visible on every edge of the
+     * frame. `knockout.boardThickness` is 1.0 and this follows it. The fillet
+     * below already matched.
+     *
+     * It costs 4 degrees of slope, which the margin above absorbs: 27 against a
+     * surface that holds 13 is the same "tips and goes" as 31 was.
      */
-    tableThickness: 1.2,
+    tableThickness: 1.0,
     slopeRun: 2.0,
     /**
      * The fillet where the flat meets the rim. Structural.

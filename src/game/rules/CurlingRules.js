@@ -1,5 +1,5 @@
 import { RuleSet } from './RuleSet.js';
-import { Rng } from '../../physics/rng.js';
+import { Rng, nextSeed } from '../../physics/rng.js';
 import { distanceToTarget } from '../layout/curlingTableMetrics.js';
 
 /**
@@ -30,6 +30,20 @@ import { distanceToTarget } from '../layout/curlingTableMetrics.js';
  * parameter: P1, P2, or a seeded draw. Seeded, never `Math.random`, because
  * "같은 시드·같은 입력이면 결과가 완전히 동일하다" has to survive the very first
  * decision the match makes.
+ *
+ * ── the target line MOVES, and it is drawn here ─────────────────────────────
+ * Every round the line lands somewhere new between half and nine tenths of the
+ * way up the table, and this class is the one that draws it. It has to be one
+ * place: the judge, the tiebreaker, the marks, the panel and the view all read
+ * `metrics.targetZ`, and a second draw anywhere would give one of them a
+ * different line from the rest — which shows up as the game awarding a round to
+ * the cap that visibly lost it. See `_drawTargetLine`.
+ *
+ * Because there is flat table past the line, going long is no longer falling
+ * off. Overshooting costs nothing but distance, and a cap that has run past can
+ * be measured back toward the line from the far side — so a round has two
+ * approaches to it rather than one, and both players can be behind the line at
+ * once. `distanceToTarget` is absolute for exactly that reason.
  *
  * ── the judgement is a DISTANCE, and a fallen cap has none ──────────────────
  * "목표 라인에 가장 가까운 뚜껑의 주인이 그 라운드를 이긴다 … 떨어진 뚜껑은
@@ -129,6 +143,61 @@ export class CurlingRules extends RuleSet {
     this.history = [];
     /** The final judgement, kept for the result screen. Null until the end. */
     this.result = null;
+
+    /**
+     * Where this round's line sits, 0..1 along the table. Drawn, never derived.
+     *
+     * Last in `reset` because `_drawTargetLine` pushes it at the layout, and the
+     * layout is only worth telling once the rest of the round state it will be
+     * judged against exists.
+     */
+    this.targetFrac = 0;
+    this._drawTargetLine();
+  }
+
+  /**
+   * Put this round's target line somewhere new. Exactly once per round.
+   *
+   * ── one draw, unconditionally ────────────────────────────────────────────
+   * `nextSeed()` is the match's own stream, so every later shot seed and card
+   * draw descends from wherever this leaves the counter. That makes the CALL
+   * COUNT part of the match: a draw that happened only on some rounds — "the
+   * first round is fixed", say — would shift the stream by one from that point
+   * on, and every subsequent shot would land somewhere else. So this is called
+   * from exactly two places, `reset` for the opening round and `advanceTurn`
+   * when the round rolls over, and neither of them asks a question first.
+   *
+   * The match's stream rather than a private one, and that is the reason the
+   * line varies at all: a stream seeded off the config would put the same four
+   * lines in every match ever played. `seedRun` points this counter at the
+   * match seed, so `?seed=` reproduces the lines and two different matches get
+   * two different sets. See `physics/rng.js`.
+   *
+   * ── the band, and why it stops at 0.9 ────────────────────────────────────
+   * 0.5 to 0.9 of the table's length. The near half is out because a line a
+   * player can reach with a nudge is not a throw; 0.9 rather than 1.0 because
+   * the far tenth is where the flat runs out, and a line closer to the edge than
+   * a cap can stop past would quietly bring back the old rule — overshoot and
+   * die — that this whole change exists to remove. At 0.9 there is most of a cap
+   * length of table behind the line to come back from.
+   */
+  _drawTargetLine() {
+    const t = new Rng(nextSeed()).float();
+    this.targetFrac = 0.5 + t * 0.4;
+    this._applyTargetLine();
+  }
+
+  /**
+   * Hand the layout the fraction this round is being played on.
+   *
+   * Split from the draw because `load` has to do it too: a replay restores the
+   * round's state including its line, and the line has to reach the metrics or
+   * the rewound turn would be judged against the live round's line. Optional
+   * chaining because `RuleSet` is constructed against layouts in general and
+   * only this one has a target line to move.
+   */
+  _applyTargetLine() {
+    this.arena.layout?.setTargetFrac?.(this.targetFrac);
   }
 
   /**
@@ -318,7 +387,7 @@ export class CurlingRules extends RuleSet {
     if (!roundOver) {
       // Half a round. Nothing is decided and nothing is swept; the marks are so
       // the second thrower can see exactly what they have to beat.
-      this.marks = this._marks(list, -1);
+      this.marks = this._marks(list);
       return { eliminated, winner: null, note: this._openNote(list, eliminated) };
     }
 
@@ -339,7 +408,21 @@ export class CurlingRules extends RuleSet {
       }
     }
 
-    this.marks = this._marks(list, decided.winner);
+    /**
+     * The round is over, so the marks come DOWN.
+     *
+     * They used to be rebuilt here with the winner's flagged — a guide from the
+     * winning cap to the line, drawn onto a table that was swept on the same
+     * frame. Two things were wrong with it. It measured caps that no longer
+     * existed, so the picture outlived what it was a picture of; and the round's
+     * result is already stated in words on the note line and in the score, so
+     * the guide was a third telling of an outcome nobody was still deciding.
+     *
+     * What the marks are FOR is the moment between the two throws, when the
+     * second player has to see exactly what they are trying to beat. That is a
+     * live question. After the round there is no question left.
+     */
+    this.marks = [];
     this.history.push({
       round: this.round,
       lead: this.leadFor(this.round),
@@ -387,21 +470,23 @@ export class CurlingRules extends RuleSet {
   }
 
   /**
-   * One entry per cap on the table, with the round's winner flagged.
+   * One entry per cap on the table. Only ever built mid-round.
    *
-   * `best` is a per-cap boolean rather than an index, because the renderer draws
-   * a list and should not have to look anything up to know which line to
-   * emphasise. `winner` is −1 mid-round and on a drawn round, and then nothing
-   * is emphasised — which is correct: mid-round nothing has been decided, and a
-   * draw has no winning cap to point at.
+   * It used to take the round's winner and flag one of them, and it no longer
+   * does: there is exactly one moment these are drawn — after the first throw,
+   * while the second player is deciding — and at that moment nothing has been
+   * decided, so there is nothing to emphasise. See the note in `resolveTurn`
+   * where the round-end rebuild was removed.
    *
    * `toX`/`toZ` is the point on the line the distance was measured TO, carried
    * on the mark rather than looked up. It is what lets the renderer draw the
    * measurement without knowing what a target line is or which mode it is
    * drawing for — and it is the only version of this that stays honest for a cap
-   * that has stopped PAST the line, where the mark runs backwards.
+   * that has stopped PAST the line, where the mark runs backwards. With the line
+   * now inland, that is no longer a rare case: half the throws in a round can
+   * legitimately end up beyond it.
    */
-  _marks(list, winner) {
+  _marks(list) {
     const m = this.metrics;
     return list.map((e) => ({
       cap: e.cap,
@@ -411,7 +496,6 @@ export class CurlingRules extends RuleSet {
       toX: e.x,
       toZ: m ? m.targetZ : e.z,
       distance: e.distance,
-      best: winner >= 0 && e.player === winner,
     }));
   }
 
@@ -525,6 +609,11 @@ export class CurlingRules extends RuleSet {
       this.round++;
       this.threw = [false, false];
       this.player = this.leadFor(this.round);
+      // A new round is a new line. Unconditional, including on the roll into a
+      // round that will not be played — `over` is checked by `Match`, not here,
+      // and a draw skipped on the last rollover would make the stream depend on
+      // how the match ended. See `_drawTargetLine`.
+      this._drawTargetLine();
       return;
     }
     // Mid-round: the other player answers.
@@ -578,6 +667,10 @@ export class CurlingRules extends RuleSet {
       marks: this.marks.map((m) => ({ ...m })),
       history: this.history.map((h) => ({ ...h, distances: h.distances.map((d) => ({ ...d })) })),
       result: this.result ? { ...this.result } : null,
+      // The round's line. In here for the same reason `firstLead` is: a replay
+      // restores a turn whole, and a turn judged against a different line from
+      // the one it was played on is a different turn.
+      targetFrac: this.targetFrac,
     };
   }
 
@@ -600,5 +693,11 @@ export class CurlingRules extends RuleSet {
       distances: (h.distances ?? []).map((d) => ({ ...d })),
     }));
     this.result = s.result ? { ...s.result } : null;
+    // Restored AND pushed back down, because the line lives in the layout's
+    // metrics and nothing else would put it back. A rewind that left the live
+    // round's line in place would replay the turn against a line it was never
+    // thrown at.
+    this.targetFrac = s.targetFrac ?? this.targetFrac;
+    this._applyTargetLine();
   }
 }

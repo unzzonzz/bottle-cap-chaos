@@ -74,6 +74,14 @@ export class CurlingTable extends Layout {
      * arena will measure — see `MODES.curling.createLayout`.
      */
     this.capDiameter = capDiameter;
+    /**
+     * Where this round's target line sits, as a fraction of the table's length.
+     *
+     * Null until a round sets one, and null means the far edge — the geometry
+     * this table had before the line started moving. `CurlingRules` owns the
+     * number and draws it; see `setTargetFrac`.
+     */
+    this.targetFrac = null;
     /** @type {ReturnType<typeof curlingTableMetrics>} */
     this.metrics = this._metrics();
     this.tableCollider = -1;
@@ -93,7 +101,69 @@ export class CurlingTable extends Layout {
       slopeRun: c.slopeRun,
       edgeRadius: c.edgeRadius,
       throwFromEdge: c.throwFromEdge,
+      targetZ: this._targetZFor(this.targetFrac),
     });
+  }
+
+  /**
+   * A length fraction turned into a z. Undefined for null, which is the default.
+   *
+   * Written against the table's own length rather than against `halfZ` so the
+   * fraction reads the way it is described — 0 is the near edge, 1 is the far
+   * one — instead of as a signed half-measure nobody could check by eye.
+   *
+   * `curlingTableMetrics` recomputes the length from the same config this does,
+   * so this arithmetic is duplicated for exactly one frame's worth of it and
+   * cannot drift: both read `widthCaps`, `ratio` and `capDiameter`, and the
+   * metrics module clamps whatever comes out of here anyway.
+   */
+  _targetZFor(frac) {
+    if (frac == null) return undefined;
+    const c = this.config.curling;
+    const length = Math.max(0.2, this.capDiameter) * Math.max(3, c.widthCaps) * Math.max(1.2, c.ratio);
+    return -length * 0.5 + length * frac;
+  }
+
+  /**
+   * Move the target line. Called once per round, by the rules.
+   *
+   * ── this is not a rebuild, and must not become one ──────────────────────
+   * The target line is not a collider — "시각 요소일 뿐 물리 충돌 없음" — so
+   * nothing about the world changes here. Only the numbers `describe()` hands
+   * out do, which is what makes it safe to call between rounds while the
+   * physics world stands: recomputing the metrics touches `targetZ` and `run`
+   * and leaves every dimension the colliders were built from at the value they
+   * were built from.
+   *
+   * Everything downstream reads `metrics.targetZ` live — the judge through
+   * `distanceToTarget`, the camera through `MODES.curling.camera.keepLineZ`,
+   * the view when the round tells it to re-place the band — so this one
+   * assignment is the whole of the move. That is the point of there being a
+   * single owner: see `curlingTableMetrics`.
+   *
+   * @param {number|null} frac  0..1 along the table, or null for the far edge
+   */
+  setTargetFrac(frac) {
+    this.targetFrac = frac == null ? null : frac;
+    const next = this._metrics();
+
+    /**
+     * Mutated in place, NOT replaced, and that is the load-bearing line.
+     *
+     * `describe()` hands the metrics object itself to `CurlingTableView`, which
+     * holds the reference for the life of the match. Assigning a fresh object
+     * here would leave the view drawing the round-one line for four rounds while
+     * the judge measured to a line that had moved — the exact disagreement
+     * `curlingTableMetrics` exists to make impossible, reintroduced by an
+     * assignment that looks like bookkeeping.
+     *
+     * So there is one metrics object per table and everybody holding it sees the
+     * move. Only the two fields the line touches are written; every dimension
+     * the colliders were built from is left exactly as built.
+     */
+    this.metrics.targetZ = next.targetZ;
+    this.metrics.run = next.run;
+    return this.metrics.targetZ;
   }
 
   /**

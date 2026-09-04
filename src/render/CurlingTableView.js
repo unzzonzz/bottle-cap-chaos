@@ -6,61 +6,83 @@ import {
   LineSegments,
   Mesh,
 } from 'three';
-import { makeMetalTexture, METAL_TILE } from './metalTexture.js';
+import { makeBoardTexture, BOARD_TILE } from './boardTexture.js';
 import { PALETTE } from '../core/palette.js';
 
 /**
  * The curling table, drawn.
  *
+ * ── the same wood as the survival board, from the same function ─────────────
+ * The table was brushed aluminium and is now a plank, and it is the survival
+ * board's plank: `makeBoardTexture` and `BOARD_TILE`, imported rather than
+ * reimplemented. That is the point of it. Two modes with two different woods
+ * read as two different games, and the difference would not be a style — it
+ * would be an accident of two functions drifting apart, which is what a second
+ * wood texture guarantees the moment either one is touched.
+ *
+ * So there is no curling wood. There is THE wood, at the same world scale, and
+ * the table is a longer piece of it.
+ *
  * ── the target line is the loudest thing on the table ────────────────────────
- * "목표 지점은 책상의 반대편 끝 가장자리 … 이 라인이 시각적으로 명확해야 한다.
- * 여기가 게임의 전부다." So it is not a hairline. `LineBasicMaterial` gives one
- * device pixel whatever the projection, and one pixel on a 320-wide framebuffer
- * that is then dithered and quantised is a dashed suggestion — the old lane's
- * house rings were filled discs for exactly this reason. The target line is a
- * flat quad a real world-space width across, so it is the same object at every
- * zoom and cannot thin out to nothing.
+ * "이 라인이 시각적으로 명확해야 한다. 여기가 게임의 전부다." So it is not a
+ * hairline. `LineBasicMaterial` gives one device pixel whatever the projection,
+ * and one pixel on a 320-wide framebuffer that is then dithered and quantised is
+ * a dashed suggestion. The line is filled geometry, two rows deep.
  *
- * The other three edges are lines, and dim ones. Falling off them costs a cap
- * exactly as much, but nobody is aiming at them and drawing all four the same
- * would say the table has four target lines.
+ * It is a racing chequer rather than the red bar it used to be, because what it
+ * has to say changed. The line was the far edge and the bar meant "stop"; the
+ * line now sits inland with table on both sides, and a chequered flag is the
+ * mark you aim AT — which is the rule as it now stands. See `_buildTargetBand`.
  *
- * ── it has no colliders in it, and it cannot get one ─────────────────────────
- * Every line and quad here is geometry in a `Group`. There is no path by which
- * one becomes a body: "라인은 시각 요소일 뿐 물리 충돌 없음", and the strongest
- * way to honour that is for the markings to exist nowhere but in
- * `curlingTableMarkings` and here.
+ * ── and it MOVES, which is why so little of this is built once ──────────────
+ * `targetZ` is drawn fresh every round. The band is therefore built once, at the
+ * origin, and slid — `update` watches the metrics for a change and re-places it.
+ * The metrics object it watches is the layout's own, handed over by `describe()`
+ * and mutated in place by `CurlingTable.setTargetFrac` precisely so that this
+ * view and the judge cannot end up looking at two different lines.
  *
- * ── the slab is drawn from the same numbers the collider was built from ──────
- * Not from the collider, because a round convex hull has no vertex list worth
- * reading, but from the same `metrics` — one module, called twice. The rim in
- * particular has to be honest: it is the fall, and a drawn edge in a different
- * place from the real one would have the player playing to a line that is not
- * there. Same discipline `PitchView` states at length for its fence.
+ * ── one marking, where there were three ─────────────────────────────────────
+ * The throw line and the outline of the flat are gone; see
+ * `curlingTableMarkings`, which stopped returning them. What is left on the flat
+ * is the one mark that decides anything, which is the only way a chequer at this
+ * distance stays readable.
+ *
+ * ── nothing here is a collider ──────────────────────────────────────────────
+ * "시각 요소일 뿐 물리 충돌 없음." The markings are geometry in this file and
+ * numbers in `curlingTableMetrics`, and there is no path from either to a body.
  */
 
 /** The table's own colour lives in its texture; this is a tint on top. */
-const METAL_TINT = PALETTE.curling.tint;
-/** The target line. The single most important thing on screen. */
-const TARGET_COLOR = PALETTE.curling.targetLine;
+const WOOD_TINT = PALETTE.curling.tint;
+/** The two squares of the target checkerboard. See `_buildTargetBand`. */
+const TARGET_DARK = PALETTE.curling.targetDark;
+const TARGET_LIGHT = PALETTE.curling.targetLight;
+
 /**
- * Where a cap is dealt. Present, not shouting.
+ * How many squares the checkerboard is cut into across the table's width.
  *
- * Deliberately dimmer than the target line, and it started out brighter — which
- * inverted the whole table: the throw line is where every cap starts and is
- * therefore obvious anyway, and having it out-shout the one line the game is
- * played to made the far end read as an edge rather than as a target.
+ * EVEN, which is the whole reason this is a count and not a size. An odd count
+ * puts a square straddling the centre of the table and brings both ends of the
+ * band out the same colour, so the board reads as having been laid from one
+ * side. An even one divides the width exactly in half, and mirroring the band
+ * about that centre maps it onto itself with its two rows exchanged — which for
+ * a two-row chequer is the same figure. Nothing about it favours a side.
+ *
+ * A count rather than a world size, so the squares scale with the table: at the
+ * default 33.6-unit width a square is 0.99 units, within a hair of the 0.84-unit
+ * red band this replaced, and the band is two rows deep — the squares have to be
+ * square — so it comes out at twice that. The width slider runs 5 to 18 cap
+ * diameters and the squares follow it, exactly as the old band's own fraction
+ * of the width did.
  */
-const THROW_COLOR = PALETTE.curling.throwLine;
-/** The other three edges of the flat. Dim: a hazard, not a target. */
-const EDGE_COLOR = PALETTE.curling.edge;
+const TARGET_CELLS = 34;
 /** The bottom of the rim, dimmer still — so the drop has a visible end. */
 const APRON_COLOR = PALETTE.curling.apron;
 /** The guides, when the panel asks. Matching the other views' pink. */
 const GUIDE_COLOR = PALETTE.curling.guide;
 
 
-/** Board-plane y for the flat markings. Above the metal, below everything else. */
+/** Board-plane y for the flat markings. Above the wood, below everything else. */
 const MARK_Y = 0.03;
 
 export class CurlingTableView {
@@ -78,16 +100,20 @@ export class CurlingTableView {
     this._materials = [];
     this._lineMaterials = [];
 
-    this.metalTexture = makeMetalTexture();
+    this.woodTexture = makeBoardTexture();
 
     this._buildSlab();
-    this._buildTargetLine();
+    this._buildTargetBand();
     this._buildMarkings();
     this._buildGuides();
   }
 
   /** Called from the render loop; everything here that changes at runtime. */
   update() {
+    // The round's line. Cheap enough to check every frame, and checking is what
+    // means nothing has to remember to tell this view that the round rolled
+    // over — see `_placeTargetBand`.
+    this._placeTargetBand();
     if (this.guides) this.guides.visible = !!this.config.view.curlingGuides;
   }
 
@@ -124,8 +150,8 @@ export class CurlingTableView {
     const halfX = m.outerHalfX;
     const halfZ = m.outerHalfZ;
 
-    const nx = Math.max(6, Math.round((halfX * 2) / METAL_TILE) * 3);
-    const nz = Math.max(6, Math.round((halfZ * 2) / METAL_TILE) * 3);
+    const nx = Math.max(6, Math.round((halfX * 2) / BOARD_TILE) * 3);
+    const nz = Math.max(6, Math.round((halfZ * 2) / BOARD_TILE) * 3);
 
     const height = (x, z) => {
       const past = Math.max(
@@ -154,7 +180,7 @@ export class CurlingTableView {
 
         // World-unit UVs, so the grain stays the same physical size whatever the
         // table is resized to.
-        uv.push(x / METAL_TILE, z / METAL_TILE);
+        uv.push(x / BOARD_TILE, z / BOARD_TILE);
       }
     }
 
@@ -175,12 +201,12 @@ export class CurlingTableView {
     this._geometries.push(geo);
 
     const mat = this.retro.create({
-      map: this.metalTexture,
-      // WHITE, not a metal grey. `uColor` multiplies the map, and the map is
-      // already painted in the final aluminium tones — tinting it with those
-      // same tones would square them and take the table to near-black. Same
-      // mistake the survival board's `BOARD_TINT` records having made.
-      color: METAL_TINT,
+      map: this.woodTexture,
+      // WHITE. `uColor` multiplies the map, and the map is already painted in
+      // the final honey tones — tinting it with those same tones would square
+      // them and take the table to near-black. The survival board's own
+      // `BOARD_TINT` records having made exactly that mistake.
+      color: WOOD_TINT,
       /**
        * A lacquered surface rather than the near-matte it was.
        *
@@ -202,75 +228,128 @@ export class CurlingTableView {
   }
 
   /**
-   * The target line, as a flat band rather than a line.
+   * The target line, as a two-row racing chequer.
    *
-   * Width is a fraction of the table's own width, so it is the same relative
-   * weight on a narrow table and a wide one. The fraction is measured rather
-   * than chosen: the table runs about 4.95 target pixels per world unit framed
-   * whole, so 2.5% of the default 33.6-unit width is 0.84 units and a little
-   * over four pixels — thick enough to survive the dither, thin enough that it
-   * is a line and not a zone. At the 0.8% it started as it was one pixel, which
-   * is to say a dashed suggestion. Sitting on the far edge and reaching INWARD only
-   * — a band that straddled the edge would have half of itself hanging over a
-   * slope, which is the one place a cap can be while its distance is still being
-   * measured, and it would read as the line being somewhere it is not.
+   * ── built at the origin and slid, because the line moves ─────────────────
+   * Every vertex here is written relative to z = 0 and the whole band is then
+   * placed with `position.z`. The line lands somewhere new every round, and
+   * rebuilding two dozen quads four times a match to move them by a few units
+   * would be a geometry churn that buys nothing — worse, it would be a second
+   * place where the band's z is computed, and the one thing this file must not
+   * do is arrive at a different answer from the judge. One assignment, in
+   * `_placeTargetBand`, off the metrics the rules themselves measure to.
+   *
+   * ── two rows, and the squares are square ─────────────────────────────────
+   * The width is cut into `TARGET_CELLS` squares and the band is two of them
+   * deep, so a square is a square and the thing reads as a chequered flag
+   * rather than as a dashed line. See `TARGET_CELLS` for why the count is even.
+   *
+   * ── centred ON the line, not hanging off one side ────────────────────────
+   * The old red bar sat on the far edge and reached inward only, because half a
+   * bar over the slope would have drawn the line somewhere it was not. There is
+   * no slope here any more — the line is inland with table on both sides — and
+   * the rule is now symmetric: a cap short of the line and a cap the same
+   * distance past it are equally close. A band centred on the line says that;
+   * one reaching inward only would say the near side was the side that counted.
+   *
+   * ── two meshes, one per colour ───────────────────────────────────────────
+   * Rather than one mesh with vertex colours, because `GlossMaterials` takes a
+   * flat `color` and adding a vertex-colour path to it for one chequerboard
+   * would put a branch in every material in the project. Two draw calls of a
+   * few dozen triangles is not a cost worth a shader for.
    */
-  _buildTargetLine() {
+  _buildTargetBand() {
     const m = this.desc.metrics;
-    const w = Math.max(0.5, m.width * 0.025);
 
-    const z0 = m.targetZ - w;
-    const z1 = m.targetZ;
+    const cells = Math.max(2, Math.round(TARGET_CELLS / 2) * 2);
+    const cell = (m.halfX * 2) / cells;
+
+    const dark = [];
+    const light = [];
+    for (let j = 0; j < 2; j++) {
+      // Row 0 is the near half of the band, row 1 the far half — so the band
+      // straddles the line rather than sitting to one side of it.
+      const z0 = (j - 1) * cell;
+      const z1 = j * cell;
+      for (let i = 0; i < cells; i++) {
+        const x0 = -m.halfX + i * cell;
+        const x1 = x0 + cell;
+        const into = (i + j) % 2 === 0 ? dark : light;
+        into.push(
+          x0, MARK_Y, z0,
+          x0, MARK_Y, z1,
+          x1, MARK_Y, z0,
+          x1, MARK_Y, z0,
+          x0, MARK_Y, z1,
+          x1, MARK_Y, z1,
+        );
+      }
+    }
+
+    this.targetBand = new Group();
+    this.targetBand.add(this._quads(dark, TARGET_DARK), this._quads(light, TARGET_LIGHT));
+    this.root.add(this.targetBand);
+
+    /** Where the band is currently standing. Compared against, never trusted. */
+    this._bandZ = null;
+    this._placeTargetBand();
+  }
+
+  /**
+   * Slide the band onto the round's line, if it is not already there.
+   *
+   * The metrics object is the layout's own and is mutated in place when the
+   * round draws a new line, so this is a read of the live number rather than of
+   * a copy that could be stale. Guarded on the value rather than on a dirty flag
+   * because a flag is a second thing to keep true, and the comparison is one
+   * float against another once a frame.
+   */
+  _placeTargetBand() {
+    const z = this.desc.metrics.targetZ;
+    if (z === this._bandZ) return;
+    this._bandZ = z;
+    if (this.targetBand) this.targetBand.position.z = z;
+    if (this.targetGuide) this.targetGuide.position.z = z;
+  }
+
+  /**
+   * A list of triangles as one flat-shaded mesh.
+   *
+   * No map, and `matte`: these are painted marks and the one thing they must not
+   * do is pick up a highlight that makes part of a square brighter than the rest
+   * of it — on a chequer that would read as a square of a third colour.
+   */
+  _quads(vertices, color) {
     const geo = new BufferGeometry();
-    geo.setAttribute(
-      'position',
-      new Float32BufferAttribute(
-        [
-          -m.halfX, MARK_Y, z0,
-          -m.halfX, MARK_Y, z1,
-          m.halfX, MARK_Y, z0,
-          m.halfX, MARK_Y, z0,
-          -m.halfX, MARK_Y, z1,
-          m.halfX, MARK_Y, z1,
-        ],
-        3,
-      ),
-    );
-    geo.setAttribute(
-      'normal',
-      new Float32BufferAttribute([0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0], 3),
-    );
+    geo.setAttribute('position', new Float32BufferAttribute(vertices, 3));
+    const n = [];
+    for (let i = 0; i < vertices.length / 3; i++) n.push(0, 1, 0);
+    geo.setAttribute('normal', new Float32BufferAttribute(n, 3));
     this._geometries.push(geo);
 
-    // No map, and `gloss` at zero: this is a painted mark and the one thing it
-    // must not do is pick up a highlight that makes part of it brighter than the
-    // rest. Flat colour, shaded only by the scene's own lighting.
-    const mat = this.retro.create({ color: TARGET_COLOR, preset: 'matte' });
+    const mat = this.retro.create({ color, preset: 'matte' });
     this._materials.push(mat);
-
-    this.targetLine = new Mesh(geo, mat);
-    this.root.add(this.targetLine);
+    return new Mesh(geo, mat);
   }
 
   // ── markings ─────────────────────────────────────────────────────────────
 
+  /**
+   * What is left after the throw line and the flat's outline were deleted.
+   *
+   * Just the apron, which is not a rule and never was: it is the bottom of the
+   * rim, and without it the drop has no visible end and the table looks like it
+   * fades out into the background rather than stopping.
+   *
+   * The two that went were both marks on the FLAT, and both were competing with
+   * the target band for the same glance. The throw line labelled a spot no
+   * player chooses — every cap is dealt there — and the outline drew a boundary
+   * the table's own silhouette states better than a hairline can. See
+   * `curlingTableMarkings`, which no longer returns either.
+   */
   _buildMarkings() {
     const m = this.desc.metrics;
-    const mk = this.desc.markings;
 
-    const seg = (into, s) => into.push(s[0][0], MARK_Y, s[0][1], s[1][0], MARK_Y, s[1][1]);
-
-    const throwLine = [];
-    seg(throwLine, mk.throwLine);
-    this.throwLine = this._lines(throwLine, THROW_COLOR);
-
-    const edges = [];
-    for (const e of mk.edges) seg(edges, e);
-    this.edges = this._lines(edges, EDGE_COLOR);
-
-    // The bottom of the rim, all the way round. Not a rule — the edges above are
-    // — but without it the drop has no visible end and the table looks like it
-    // simply fades out into the background.
     const apron = [];
     const c = [
       [-m.outerHalfX, -m.outerHalfZ],
@@ -317,10 +396,21 @@ export class CurlingTableView {
     const m = this.desc.metrics;
     const v = [];
 
+    /**
+     * The target plane, at the ORIGIN, and slid by `_placeTargetBand` with the
+     * band it is checking.
+     *
+     * Split into its own object rather than left in the list below, because the
+     * line moves every round and the pit box does not. Drawn where the band is
+     * drawn, from the same one number — which is the entire point of the toggle:
+     * if the plane and the chequer ever separate on screen, the view and the
+     * judge have come apart and this is what says so.
+     */
+    const plane = [];
     const high = Math.max(2, m.thickness * 3);
-    for (const x of [-m.halfX, m.halfX]) v.push(x, 0, m.targetZ, x, high, m.targetZ);
-    v.push(-m.halfX, high, m.targetZ, m.halfX, high, m.targetZ);
-    v.push(-m.halfX, 0, m.targetZ, m.halfX, 0, m.targetZ);
+    for (const x of [-m.halfX, m.halfX]) plane.push(x, 0, 0, x, high, 0);
+    plane.push(-m.halfX, high, 0, m.halfX, high, 0);
+    plane.push(-m.halfX, 0, 0, m.halfX, 0, 0);
 
     const pit = this.desc.pitBox;
     if (pit) {
@@ -360,13 +450,25 @@ export class CurlingTableView {
     this.guides.frustumCulled = false;
     this.guides.visible = false;
     this.root.add(this.guides);
+
+    const pgeo = new BufferGeometry();
+    pgeo.setAttribute('position', new Float32BufferAttribute(plane, 3));
+    this._geometries.push(pgeo);
+    this.targetGuide = new LineSegments(pgeo, mat);
+    this.targetGuide.renderOrder = 9;
+    this.targetGuide.frustumCulled = false;
+    this.guides.add(this.targetGuide);
+    // Built after the band, so the band's first placement missed it. Placed now,
+    // and every round after this by the same call.
+    this._bandZ = null;
+    this._placeTargetBand();
   }
 
   dispose() {
     for (const g of this._geometries) g.dispose();
     for (const m of this._materials) m.dispose();
     for (const m of this._lineMaterials) m.dispose();
-    this.metalTexture.dispose();
+    this.woodTexture.dispose();
     this._geometries.length = 0;
     this._materials.length = 0;
     this._lineMaterials.length = 0;

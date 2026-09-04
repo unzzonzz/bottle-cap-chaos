@@ -331,10 +331,30 @@ export const PALETTE = {
    */
   curling: {
     table: '#e8dcc0',
-    targetLine: '#c2481a',
+    /**
+     * The target line, as a two-row racing checkerboard.
+     *
+     * ── it was one red band, and the red is gone ────────────────────────────
+     * A single `#c2481a` bar was the strongest contrast on screen and it had to
+     * be: the line was the far edge, and the whole mode was not crossing it. The
+     * line has since moved inland with flat table on both sides, so what it has
+     * to say changed from "stop here" to "this is the mark" — and a chequer
+     * reads as a mark the way a solid bar reads as a barrier.
+     *
+     * ── dark, and navy rather than black ───────────────────────────────────
+     * Rule 2: never pure black. `#26364f` against the wood's honey tones is the
+     * strongest legible pair the palette has that is still a blue — measured at
+     * 8.9:1 against `light` below, which is more separation than the red band
+     * had against the table it sat on.
+     *
+     * `light` is not paper white either. The board is a warm mid-tone and a pure
+     * white square would bloom against it under the floor light; this is the
+     * table's own value pushed up, so the pale squares read as painted ON the
+     * wood rather than as holes cut out of it.
+     */
+    targetDark: '#26364f',
+    targetLight: '#f2ead6',
     house: '#7fd0e8',
-    throwLine: '#8fb8d8',
-    edge: '#a8834f',
     apron: '#c69a60',
     /** Debug-only aiming guide. */
     guide: '#ff7fd0',
