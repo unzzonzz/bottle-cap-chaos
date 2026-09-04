@@ -28,6 +28,7 @@ import { MarkBook } from '../marks/MarkBook.js';
 import { LocalStorageMarks } from '../marks/MarkStorage.js';
 import { LocalStorageNicknames, Profile } from '../profile/NicknameStorage.js';
 import { OnlineScene } from './OnlineScene.js';
+import { CollectionScene } from './CollectionScene.js';
 import { ModalLayer } from '../ui/ModalLayer.js';
 import { DEFAULT_MARK } from '../marks/MarkStorage.js';
 import { STAGE, Transition } from './Transition.js';
@@ -336,6 +337,8 @@ export function bootMenu(
   scene.add(menuRoot);
 
   let settings = null;
+  /** 컬렉션. 처음 열 때 만든다 — 나머지 화면과 같은 규칙이다. */
+  let collection = null;
   /**
    * 내 마크, and the things it needs.
    *
@@ -526,7 +529,7 @@ export function bootMenu(
      * 크기를 `solvePanel` 에서 받으므로 프레임이 바뀌면 다시 풀어야 하는 것은
      * 똑같다.
      */
-    for (const scene of [settings, opponent, online, marks, editor, confirm]) {
+    for (const scene of [settings, collection, opponent, online, marks, editor, confirm]) {
       scene?.layout?.(u);
     }
   }
@@ -608,6 +611,12 @@ export function bootMenu(
       setCursor(null);
       return;
     }
+    if (current === 'collection') {
+      const hit = collection?.pick(canvas, camera, pointer.x, pointer.y);
+      collection?.setHover(hit);
+      setCursor(intentOf(hit));
+      return;
+    }
     if (current === 'settings') {
       const hit = settings?.pick(canvas, camera, pointer.x, pointer.y);
       settings?.setHover(hit);
@@ -671,6 +680,13 @@ export function bootMenu(
 
     if (transition.running) return;
 
+    if (current === 'collection') {
+      const hit = collection?.pick(canvas, camera, e.clientX, e.clientY);
+      if (!hit) return;
+      menuAudio?.press('menu', hit);
+      if (hit.id === 'back') returnToMenu();
+      return;
+    }
     if (current === 'settings') {
       const hit = settings?.pick(canvas, camera, e.clientX, e.clientY);
       if (!hit) return;
@@ -907,6 +923,21 @@ export function bootMenu(
    * `launch` below, which is where a navigation actually begins.
    */
   function run(target, opts) {
+    /**
+     * ── two of the home's three rows do not leave this column ──────────────
+     * `PLAY` and `뒤로` only change what the column is showing, and a cap wipe
+     * for that would be the menu covering the screen to redraw three words. The
+     * cap is what the menu spends on ENTERING something, and the same division
+     * `설정` and `상대 선택` already make: a swap gets the wipe, a page does not.
+     *
+     * There is no fade either. `pageFade` is for a document, and the column's
+     * own items already fade in `MenuItems.update`.
+     */
+    if (target === 'play' || target === 'home') {
+      items.setPage(target);
+      refreshHover();
+      return true;
+    }
     if (Object.hasOwn(MODES, target)) {
       pendingMode = target;
       return runTransition(() => swapTo('opponent'), opts);
@@ -1099,6 +1130,7 @@ export function bootMenu(
     // Whatever is showing, stop showing it. One line rather than a subtraction
     // per screen, so adding a third cannot forget to remove the second.
     scene.remove(menuRoot);
+    if (collection) scene.remove(collection.root);
     if (settings) scene.remove(settings.root);
     if (marks) scene.remove(marks.root);
     if (editor) scene.remove(editor.root);
@@ -1189,6 +1221,15 @@ export function bootMenu(
       });
       scene.add(asUiLayer(opponent.root));
       current = 'opponent';
+      return;
+    }
+
+    if (id === 'collection') {
+      if (!collection) {
+        collection = new CollectionScene({ retro, unitsPerPixel: unitsPerPixel() });
+      }
+      scene.add(asUiLayer(collection.root));
+      current = 'collection';
       return;
     }
 

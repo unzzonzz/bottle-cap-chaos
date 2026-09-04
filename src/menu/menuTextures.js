@@ -2,7 +2,7 @@ import { CanvasTexture, ClampToEdgeWrapping, LinearFilter, LinearMipmapLinearFil
 import { PALETTE, withAlpha } from '../core/palette.js';
 import { RADIUS, ROLE, RULE, SPACE, TYPE } from '../core/tokens.js';
 import { drawIcon } from '../ui/icons.js';
-import { drawLettering } from '../ui/lettering.js';
+import { drawLettering, drawTitle, letteringWidth } from '../ui/lettering.js';
 import {
   applyTracking,
   dialogPanel,
@@ -12,6 +12,7 @@ import {
   panel,
   roleButton,
   roleSkin,
+  skinFor,
 } from '../ui/paper.js';
 
 /**
@@ -827,17 +828,17 @@ export function menuPlateTexture(label, state, { width = 256, height = 52, scale
     // 도장이 오른쪽을 먹으므로 라벨은 남은 왼쪽에서 가운데를 잡는다.
     labelWidth: width - stampW,
     /**
-     * 그림자 없음. 캔버스가 판과 같은 크기라 그릴 자리가 없다.
+     * ── 여기에 그림자가 있었고, 두 번 없어졌다 ─────────────────────────────
+     * 처음에는 이 판이 10 픽셀 번지고 3 픽셀 내려가는 그림자를 지고 있었는데,
+     * 캔버스가 판에 딱 맞으므로 그 번짐이 네 변에서 직선으로 잘렸다 — 둥근 판
+     * 주위에 사각형 자국이 남았고 화면에서 제일 눈에 띄는 결함이었다. 캔버스를
+     * 키우는 것이 다른 답이고, 그러려면 판 쿼드도 같이 커져 슬롯 밖으로 나간다.
      *
-     * `ELEVATION.raised` 는 10 픽셀 번지고 3 픽셀 내려가는데, 캔버스는 판에 딱
-     * 맞으므로 그 번짐이 네 변에서 직선으로 잘린다 — 둥근 판 주위에 사각형
-     * 자국이 남았고, 그게 화면에서 제일 눈에 띄는 결함이었다.
-     *
-     * 캔버스를 키우는 것이 다른 답이고, 그러려면 판 쿼드도 같이 커져 슬롯 밖으로
-     * 나간다 — 이웃과 겹치고 그 겹침은 레이캐스트 순서로 임의로 갈린다.
-     *
-     * 없애도 잃는 것이 없다. 이 판들은 이제 **패널 위에** 있고 패널이 그림자를
-     * 지고 있다. 판을 바탕에서 떼어 놓는 일은 테두리(`edgeOuter`)가 한다.
+     * 그래서 이 판만 그림자를 뺐다. 두 번째로 없어진 것은 그림자라는 개념
+     * 자체이고(§19 · §24), 그때 판도 같이 없어졌다 — 지금 여기 있는 것은 글자와
+     * 밑줄이다. 이 주석이 남는 이유는 캔버스를 판에 딱 맞추는 규칙이 그대로이고,
+     * 무엇이든 판 밖으로 번지는 것을 다시 넣으면 같은 사각형 자국이 돌아오기
+     * 때문이다.
      */
   });
 
@@ -942,29 +943,83 @@ export function iconPlateTexture(icon, state = 'idle', { size = 64, scale = 1 } 
   const { canvas, ctx } = makeCanvas(Math.round(size * scale), Math.round(size * scale));
   ctx.scale(scale, scale);
 
+  /**
+   * ── the plate is gone, and the name is kept ─────────────────────────────
+   * This drew a `roleButton` behind the icon and then the icon on top. PHASE 4's
+   * audit removed it: two rounded squares under two icons at the foot of the
+   * home column are §24's "generic rounded UI cards" in the one place the page
+   * is supposed to be quietest, and the icons are already different shapes from
+   * each other, so the plate contributed nothing to telling them apart.
+   *
+   * The function keeps its name because what it makes is still a texture for an
+   * icon BUTTON — the hit quad is the mesh, and that is unchanged. Renaming it
+   * would touch four call sites to say the same thing.
+   *
+   * `hover` and `pressed` fold to `idle` in `skinFor` (the menu's plates react
+   * to nothing), so the two baked states differ only for `disabled`. That is
+   * kept rather than collapsed: `disabled` is a state of the thing.
+   */
   const SKIN_STATE = { active: 'pressed', dimmed: 'disabled' };
-  const skinState = SKIN_STATE[state] ?? state;
-  roleButton(ctx, {
-    x: 0,
-    y: 0,
-    w: size,
-    h: size,
-    radius: RADIUS.panel,
-    role: ROLE.RETREAT,
-    state: skinState,
-  });
+  const skin = skinFor(SKIN_STATE[state] ?? state);
 
-  const inner = size * 0.58;
+  const inner = size * 0.62;
+  ctx.globalAlpha = skin.alpha;
   drawIcon(ctx, icon, {
     x: (size - inner) / 2,
     y: (size - inner) / 2,
     size: inner,
-    color: roleSkin(ROLE.RETREAT, skinState).text,
+    color: skin.text,
   });
+  ctx.globalAlpha = 1;
 
   const tex = toTexture(canvas);
   tex.userData = { width: size, height: size };
   return tex;
+}
+
+/**
+ * 게임의 이름, 벡터 획으로. 판 없음.
+ *
+ * ── §4.4 가 제목을 그리라고 했고 이 자리가 마지막이었다 ────────────────────
+ * 홈의 제목은 `titleTexture` 로 그려지고 있었다 — 둥근 흰 판 위에 `한여름 알까기`
+ * 와 부제 `메인 메뉴`. 세 가지가 §11 과 §4.4 에 걸린다: 판은 화면에서 가장 큰
+ * 흰 사각형이고("두꺼운 패널"), 이름은 폰트로 조판돼 있고, 부제는 화면이 이미
+ * 말하는 것을 한 번 더 말한다.
+ *
+ * 셋 다 여기서 없어진다. `lettering.drawTitle` 은 자모를 획으로 조합하므로 폰트
+ * 로딩과 무관하고 — 이 텍스처는 한 번 구워서 캐시되므로 그 무관함이 여기서 가장
+ * 값지다 — 굵기를 웨이트가 아니라 획으로 얻는다.
+ *
+ * 크기는 폭에서 푼다. `letteringWidth` 로 재서 여백 안에 들어가는 배수를 찾는다.
+ */
+export function homeTitleTexture({ width = 256, height = 96, scale = 1 } = {}) {
+  const { canvas, ctx } = makeCanvas(Math.round(width * scale), Math.round(height * scale));
+  ctx.scale(scale, scale);
+
+  const room = width - SPACE.md * 2;
+  /**
+   * `drawTitle` 은 두 덩이 사이에 `size * 0.34` 의 간격을 넣으므로, 폭은 em 에
+   * 대해 선형이다. 한 번 재고 나누면 맞는 em 이 나온다 — 이분법이 필요 없다.
+   */
+  const probe = drawTitleWidth(ctx, 100);
+  const em = Math.max(12, Math.min(height * 0.62, (room / probe) * 100));
+
+  drawTitle(ctx, {
+    x: width / 2,
+    y: (height - em) / 2,
+    size: em,
+    color: PALETTE.ui.text,
+  });
+
+  const tex = toTexture(canvas);
+  tex.userData = { width, height };
+  return tex;
+}
+
+/** `drawTitle` 이 `size` 에서 차지하는 폭. 그리지 않고 잰다. */
+function drawTitleWidth(ctx, size) {
+  const tracking = size * 0.06;
+  return letteringWidth('한여름', size, tracking) + size * 0.34 + letteringWidth('알까기', size, tracking);
 }
 
 /**

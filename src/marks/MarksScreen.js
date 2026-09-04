@@ -242,11 +242,9 @@ export class MarksScreen {
         t.maps.hover = tileTexture('hover', { size: Math.round(tile), accent: t.accent });
         t.plus.material.uniforms.uMap.value = iconTexture('plus', 'idle', {
           size: Math.round(tile * 0.36),
-          withPlate: false,
         });
         t.trash.material.uniforms.uMap.value = iconTexture('trash', 'hover', {
           size: trashSize,
-          withPlate: true,
         });
         for (const b of t.badges) b.on = null;
       }

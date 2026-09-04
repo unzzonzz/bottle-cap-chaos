@@ -1,8 +1,8 @@
 import { Group, Mesh, PlaneGeometry, Raycaster, Vector2 } from 'three';
 import { createSpriteMaterial } from './menuMaterials.js';
-import { iconPlateTexture, menuPlateTexture, titleTexture } from './menuTextures.js';
+import { homeTitleTexture, iconPlateTexture, menuPlateTexture } from './menuTextures.js';
 import { FRAME } from '../core/frame.js';
-import { MOTION, SIZE, SPACE } from '../core/tokens.js';
+import { MOTION, ROLE, SIZE, SPACE } from '../core/tokens.js';
 
 /** 저술 기준 판 폭. 아이콘 버튼이 프레임 배수를 되읽는 기준이다. */
 const DEFAULT_PLATE_WIDTH = 256;
@@ -47,66 +47,78 @@ import { approach } from '../ui/motion.js';
 const PLATE_TEXEL_SCALE = 2;
 
 /**
- * 열에 서는 것: **모드뿐이다.**
+ * 열에 서는 것. **두 페이지다.**
  *
- * ── 설정이 여기 있었고, 종류가 달랐다 ──────────────────────────────────────
- * 네 판이 같은 크기·같은 모양·같은 열에 있었는데 앞의 셋은 모드 선택이고 설정은
- * 화면 이동이다. 설정은 게임을 시작하지 않는다. 메뉴에 온 사람은 게임을 하러 온
- * 것이고, 셋 중 하나를 고르는 화면이 되면 선택이 3분의 1 빨라진다.
+ * ── 한 페이지였고, 모드 셋이 전부였다 ──────────────────────────────────────
+ * 설정이 여기 있다가 아이콘으로 내려간 적이 있고, 그 근거는 좋았다: 네 판이 같은
+ * 크기·같은 모양·같은 열에 있었는데 앞의 셋은 모드 선택이고 설정은 화면 이동이며,
+ * 메뉴에 온 사람은 게임을 하러 온 것이다.
  *
- * 설정과 내 마크는 `TOOLS` 로 내려가 아이콘 버튼이 된다. 라우트는 그대로다 —
- * `menuRoutes.js` 의 설정 경로는 URL 로 여전히 도달 가능해야 한다(부록 B6-5).
+ * §14 가 홈에 `PLAY / COLLECTION / SETTINGS` 를 요구하고 사용자가 그 구조를
+ * 골랐으므로, 모드 셋은 `PLAY` 안으로 들어간다. 게임까지 한 번 더 눌러야 하고
+ * 그것이 이 결정의 값이다 — 홈이 **게임의 목차**가 되고, 목차에는 모드 이름이
+ * 아니라 할 수 있는 일이 적혀 있다.
+ *
+ * ── 페이지는 새 씬이 아니라 열의 내용이다 ──────────────────────────────────
+ * `PlayScene` 을 새로 만들지 않는 이유는 그것이 이 열과 같은 것을 다시 짓는
+ * 일이기 때문이다 — 같은 배치, 같은 레이캐스트, 같은 굽기. 열이 무엇을 담는지만
+ * 바꾸면 되고, 그러면 레이캐스트 목록이 하나로 남는다는 성질도 그대로다.
  */
-const DEFAULT_ITEMS = [
-  { id: 'knockout', label: '서바이벌' },
-  { id: 'football', label: '축구' },
-  { id: 'curling', label: '컬링' },
-];
+const PAGES = {
+  home: [
+    { id: 'play', label: 'PLAY' },
+    { id: 'collection', label: 'COLLECTION' },
+    { id: 'settings', label: 'SETTINGS' },
+  ],
+  play: [
+    { id: 'knockout', label: '서바이벌' },
+    { id: 'football', label: '축구' },
+    { id: 'curling', label: '컬링' },
+    { id: 'home', label: '뒤로', role: ROLE.RETREAT },
+  ],
+};
 
 /**
  * 열 밖의 것: 필요할 때만 찾는 것.
  *
- * 내 마크가 여기 있는 것은 설정 안에 묻혀 있었기 때문이다. 뚜껑에 새길 그림은
- * 이 게임에서 사람들이 실제로 바꾸는 유일한 것인데, 음량 슬라이더 아래 네 번째
- * 줄에 있었다.
+ * 내 마크만 남는다. 설정이 열로 돌아갔으므로 아이콘은 하나이고, 그 하나는
+ * 설정 안에 묻혀 있었다는 이유로 여기 있다 — 뚜껑에 새길 그림은 이 게임에서
+ * 사람들이 실제로 바꾸는 유일한 것인데 음량 슬라이더 아래 네 번째 줄에 있었다.
  */
-const DEFAULT_TOOLS = [
-  { id: 'settings', icon: 'settings' },
-  { id: 'marks', icon: 'marks' },
-];
+const DEFAULT_TOOLS = [{ id: 'marks', icon: 'marks' }];
 
 export class MenuItems {
   /**
    * @param {import('../core/GlossMaterial.js').GlossMaterials} retro
    * @param {object} tuning  the live `MENU_CONFIG.items` block
    */
-  constructor({ retro, tuning, items = DEFAULT_ITEMS, tools = DEFAULT_TOOLS }) {
+  constructor({ retro, tuning, tools = DEFAULT_TOOLS }) {
     this.tuning = tuning;
     this.root = new Group();
+    this._retro = retro;
+    /** Which page the column is showing. `setPage` swaps it. */
+    this.page = 'home';
 
     this.title = new Mesh(
       new PlaneGeometry(1, 1),
-      createSpriteMaterial(retro, {
-        map: titleTexture('한여름 알까기', '메인 메뉴', {
-          width: Math.round(tuning.plateWidth),
-          height: Math.round(tuning.plateWidth * 0.5),
-          scale: PLATE_TEXEL_SCALE,
-        }),
-      }),
+      createSpriteMaterial(retro, { map: this._bakeTitle() }),
     );
     this.root.add(this.title);
 
-    this.items = items.map((def) => {
-      // Three textures per item and no re-drawing later. Building one is a
-      // handful of canvas calls — nothing once, unthinkable on every hover.
-      const maps = this._bake(def.label);
-      const material = createSpriteMaterial(retro, {
-        map: def.disabled ? maps.disabled : maps.idle,
-      });
+    /**
+     * 두 페이지 중 **긴 쪽**만큼 메시를 만들어 두고 재사용한다.
+     *
+     * 페이지마다 메시를 짓고 버리면 레이캐스트 목록과 머티리얼을 매번 다시
+     * 엮어야 하고, 그 배선이 이 파일에서 이미 한 번 틀렸던 곳이다(레이어 1).
+     * 슬롯을 고정해 두면 페이지 전환은 텍스처와 `visible` 만 바꾸는 일이 된다.
+     */
+    const slots = Math.max(...Object.values(PAGES).map((p) => p.length));
+    this.items = Array.from({ length: slots }, () => {
+      const material = createSpriteMaterial(retro, { map: null });
       const mesh = new Mesh(new PlaneGeometry(1, 1), material);
       mesh.renderOrder = 10;
       this.root.add(mesh);
-      return { ...def, mesh, material, maps, hovered: false, shift: 0 };
+      return { id: null, label: '', role: null, mesh, material, maps: null, hovered: false, shift: 0 };
     });
 
     /**
@@ -147,7 +159,40 @@ export class MenuItems {
     /** The item under the pointer, or null. */
     this.hovered = null;
     this.enabled = true;
-    this._picks = [...this.items.filter((i) => !i.disabled), ...this.tools].map((i) => i.mesh);
+    this._plateKey = '';
+    this.setPage('home');
+  }
+
+  /**
+   * Which page the column is showing, and everything that follows from it.
+   *
+   * ── the live items are the visible ones, and that is the whole guard ─────
+   * `_picks` is rebuilt from the slots this page actually fills, so a slot left
+   * over from the longer page cannot be hovered or pressed. Hiding a mesh is
+   * not enough on its own — `Raycaster` skips invisible objects, but `hovered`
+   * could still be holding one from before the swap, which is why it is cleared
+   * here rather than left to the next `pick`.
+   */
+  setPage(name) {
+    const defs = PAGES[name] ?? PAGES.home;
+    this.page = name;
+    this.hovered = null;
+    this.items.forEach((item, i) => {
+      const def = defs[i] ?? null;
+      item.id = def?.id ?? null;
+      item.label = def?.label ?? '';
+      item.role = def?.role ?? null;
+      item.disabled = def?.disabled ?? false;
+      item.hovered = false;
+      item.mesh.visible = !!def;
+    });
+    this._plateKey = '';
+    this._rebakeIfResized();
+    this._picks = [
+      ...this.items.filter((i) => i.id && !i.disabled),
+      ...this.tools,
+    ].map((i) => i.mesh);
+    if (this._unitsPerPixel) this.layout(this._unitsPerPixel);
   }
 
   /**
@@ -163,18 +208,27 @@ export class MenuItems {
    * 판 크기가 프레임에 따라 변하므로 — `bootMenu.applyArrangement` 를 보라 —
    * 부팅 때 한 번이 아니라 크기가 바뀔 때마다 필요하다. 그래서 함수로 뺐다.
    */
-  _bake(label) {
+  _bake(label, role) {
     const t = this.tuning;
     const size = {
       width: Math.round(t.plateWidth),
       height: Math.round(t.plateHeight),
       scale: PLATE_TEXEL_SCALE,
     };
+    // `role` is passed through so 뒤로 gets its left arrow. Everything else on
+    // these two pages is a CHOICE and takes the default.
+    const spec = (state) => (role ? { role, state } : state);
     return {
-      idle: menuPlateTexture(label, 'idle', size),
-      hover: menuPlateTexture(label, 'hover', size),
-      disabled: menuPlateTexture(label, 'disabled', size),
+      idle: menuPlateTexture(label, spec('idle'), size),
+      hover: menuPlateTexture(label, spec('hover'), size),
+      disabled: menuPlateTexture(label, spec('disabled'), size),
     };
+  }
+
+  /** The game's name, as vector strokes. See `menuTextures.homeTitleTexture`. */
+  _bakeTitle() {
+    const w = Math.round(this.tuning.plateWidth);
+    return homeTitleTexture({ width: w, height: Math.round(w * 0.34), scale: PLATE_TEXEL_SCALE });
   }
 
   /** 아이콘 버튼 한 개의 두 상태. */
@@ -214,8 +268,12 @@ export class MenuItems {
     if (key === this._plateKey) return;
     this._plateKey = key;
     for (const item of this.items) {
-      const next = this._bake(item.label);
-      for (const tex of Object.values(item.maps)) tex.dispose();
+      if (item.maps) for (const tex of Object.values(item.maps)) tex.dispose();
+      if (!item.id) {
+        item.maps = null;
+        continue;
+      }
+      const next = this._bake(item.label, item.role);
       item.maps = next;
       item.material.uniforms.uMap.value = item.disabled
         ? next.disabled
@@ -231,13 +289,8 @@ export class MenuItems {
     }
 
     const title = this.title.material.uniforms.uMap.value;
-    const titleW = Math.round(t.plateWidth);
-    this.title.material.uniforms.uMap.value = titleTexture('한여름 알까기', '메인 메뉴', {
-      width: titleW,
-      height: Math.round(titleW * 0.5),
-      scale: PLATE_TEXEL_SCALE,
-    });
-    title.dispose();
+    this.title.material.uniforms.uMap.value = this._bakeTitle();
+    title?.dispose();
   }
 
   layout(unitsPerPixel) {
@@ -248,7 +301,8 @@ export class MenuItems {
 
     const w = t.plateWidth * u;
     const h = t.plateHeight * u;
-    const n = this.items.length;
+    const live = this.items.filter((i) => i.id);
+    const n = live.length;
 
     /**
      * 제목판과 항목들은 **하나의 덩어리**로 배치되고, 그 덩어리가 프레임에 맞춰
@@ -280,7 +334,7 @@ export class MenuItems {
     this.title.position.set(t.columnX * u, titleY * u, 0);
     this.title.rotation.y = yaw;
 
-    this.items.forEach((item, i) => {
+    live.forEach((item, i) => {
       const y = t.columnY + ((n - 1) / 2 - i) * t.pitch + shift;
       item.home = { x: t.columnX * u, y: y * u };
       item.mesh.scale.set(w, h, 1);
@@ -326,6 +380,8 @@ export class MenuItems {
     const t = this.tuning;
     const u = this._unitsPerPixel ?? 1;
     for (const item of this.items) {
+      // 빈 슬롯. 이 페이지가 안 쓰는 자리이고 `home` 이 없으므로 배치도 없다.
+      if (!item.id) continue;
       /**
        * ── 호버는 아무것도 하지 않는다 ──────────────────────────────────────
        * 판이 `hoverShift` 만큼 앞으로(그리고 오른쪽으로) 나왔다. 사용자가 상호작용

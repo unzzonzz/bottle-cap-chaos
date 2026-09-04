@@ -83,16 +83,22 @@ const cache = new Map();
  *
  * @param {string} name  `ui/icons.js` 의 ICON 키
  * @param {'idle'|'hover'|'active'|'disabled'} state
- * @param {{size?: number, scale?: number, withPlate?: boolean}} [opts]
- *   `scale` 은 이제 **텍셀 배수**다. 좌표는 프레임 픽셀 그대로 두고 캔버스만 키운다.
- *   `withPlate: false` 는 아이콘만 그린다 — 다른 것 위에 얹히는 아이콘(칸의
- *   휴지통)용. 옵션 이름이 `plate` 였고, 면을 그리는 함수가 `gelButton` 에서
- *   `plate` 로 바뀌면서 **불리언이 함수를 가렸다** — `if (plate) plate(ctx, …)` 가
- *   "plate is not a function" 으로 죽었다. 빌드는 통과한다: 둘 다 스코프 안에
- *   있는 유효한 식별자다.
+ * @param {{size?: number, scale?: number}} [opts]
+ *   `scale` 은 **텍셀 배수**다. 좌표는 프레임 픽셀 그대로 두고 캔버스만 키운다.
+ *
+ * ── 판이 없어졌고, 판을 끄던 옵션도 같이 없어졌다 ─────────────────────────
+ * 아이콘마다 `RADIUS.chip` 둥근 사각형이 깔려 있었다. PHASE 4 의 감사가 없앴다:
+ * 둥근 사각형 일곱 개가 세로로 쌓인 것이 이 프로젝트에서 §24 의 "generic rounded
+ * UI cards" 에 가장 가까운 그림이고, 아이콘 자체가 이미 일곱 개의 다른 모양이라
+ * 판이 구분에 기여하지 않았다. 상태는 잉크가 말한다 — `SKINS` 가 원래 그 자리다.
+ *
+ * `withPlate` 가 같이 없어진 이유는 그것이 "다른 것 위에 얹히는 아이콘" 을 위한
+ * 옵션이었기 때문이다. 판이 아무 데도 없으면 두 경우가 같은 그림이 된다. 그 옵션의
+ * 원래 이름은 `plate` 였고 그리기 함수와 이름이 겹쳐 이 파일을 죽였다 — PHASE 4
+ * 감사표에 그 기록이 있다.
  */
-export function iconTexture(name, state = 'idle', { size = 28, scale = 1, withPlate = true } = {}) {
-  const key = `${name}:${state}:${size}:${scale}:${withPlate}`;
+export function iconTexture(name, state = 'idle', { size = 28, scale = 1 } = {}) {
+  const key = `${name}:${state}:${size}:${scale}`;
   const hit = cache.get(key);
   if (hit) return hit;
 
@@ -103,18 +109,6 @@ export function iconTexture(name, state = 'idle', { size = 28, scale = 1, withPl
   const ctx = canvas.getContext('2d');
   ctx.imageSmoothingEnabled = true;
   ctx.scale(scale, scale);
-
-  if (withPlate) {
-    plate(ctx, {
-      x: 0,
-      y: 0,
-      w: size,
-      h: size,
-      radius: RADIUS.chip,
-      state: TOOL_STATE[state] ?? 'idle',
-      accent: PALETTE.cobalt,
-    });
-  }
 
   const inner = size * 0.62;
   drawIcon(ctx, name, {

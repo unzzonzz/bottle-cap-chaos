@@ -3,10 +3,11 @@ import { createSpriteMaterial } from './menuMaterials.js';
 import { menuPlateTexture, panelTexture, titleTexture } from './menuTextures.js';
 import { toMarkTexture } from '../marks/markTextures.js';
 import { PALETTE } from '../core/palette.js';
-import { ROLE } from '../core/tokens.js';
+import { RADIUS, ROLE, RULE } from '../core/tokens.js';
 import { solvePanel } from './panelLayout.js';
 import { TIER_COUNT, TIER_NAMES } from '../core/quality.js';
 import { plate, roundRectPath } from '../ui/paper.js';
+import { dot, hairline } from '../ui/marks.js';
 
 /**
  * 설정 — a heading, the things it holds, and a way back.
@@ -515,7 +516,12 @@ export class SettingsScene {
           : !muted && volume >= (chip.index + 1) / L.steps - 1e-6;
       const hot = this._hovered === `${chip.prefix}:${chip.index}`;
       const size = this._chipSize.get(chip.row) ?? L.chip;
-      chip.mesh.material.uniforms.uMap.value = chipTexture(filled, hot ? 'hover' : 'idle', size);
+      chip.mesh.material.uniforms.uMap.value = chipTexture(
+        filled,
+        hot ? 'hover' : 'idle',
+        size,
+        chip.row === 'graphics' ? 'step' : 'meter',
+      );
     }
   }
 
@@ -725,17 +731,17 @@ export class SettingsScene {
  * ("`imageSmoothingEnabled = false`"). 이 화면에서 유일하게 각진 것이었고, 열 개가
  * 나란히 있으니 유일하다는 사실이 눈에 띄었다. 그래서 알약이 됐다.
  *
- * `RADIUS.pill` 이 없어지면서 알약도 없어졌다 — 핏 모양은 젤 컨트롤의 것이고
+ * 토큰에서 핏 반경이 없어지면서 알약도 없어졌다 — 그 모양은 젤 컨트롤의 것이고
  * 새 방향이 그것을 금지한다. 지금은 `RADIUS.chip` 의 작은 모서리이고, 채워진 칩은
  * `selected` 스킨을, 빈 칩은 가라앉은 종이를 쓴다. 어휘가 이 화면의 다른 컨트롤과
  * 같다는 성질은 그대로다.
  */
 const chipCache = new Map();
 
-function chipTexture(filled, state, size = L.chip) {
+function chipTexture(filled, state, size = L.chip, kind = 'step') {
   const w = Math.max(4, Math.round(size.width));
   const h = Math.max(4, Math.round(size.height));
-  const key = `${filled}:${state}:${w}x${h}`;
+  const key = `${kind}:${filled}:${state}:${w}x${h}`;
   const hit = chipCache.get(key);
   if (hit) return hit;
 
@@ -747,21 +753,33 @@ function chipTexture(filled, state, size = L.chip) {
   ctx.imageSmoothingEnabled = true;
   ctx.scale(scale, scale);
 
-  plate(ctx, {
-    x: 0,
-    y: 0,
-    w,
-    h,
-    radius: Math.min(w, h) / 2,
-    state: filled ? 'selected' : state === 'hover' ? 'hover' : 'idle',
-    accent: PALETTE.menu.meterOn,
-  });
-
-  if (filled) {
-    // 채워진 칩의 알맹이. 젤의 광택 아래에서 보여야 하므로 판보다 진하다.
-    ctx.fillStyle = PALETTE.menu.meterOn;
-    roundRectPath(ctx, w * 0.22, h * 0.22, w * 0.56, h * 0.56, w * 0.28);
-    ctx.fill();
+  /**
+   * ── 두 줄이 다른 그림이 됐다. 값의 종류가 다르기 때문이다 ─────────────────
+   * 둘 다 알약이었다. 핏 반경이 §4.2 에서 없어졌으므로 어차피 다시
+   * 그려야 했고, 그 김에 PHASE 4 의 감사가 지적한 것을 고친다: 볼륨 줄은 값
+   * 하나를 **열 개의 물체**로 말하면서 같은 줄에 숫자로도 말하고 있었다.
+   *
+   *   `meter`  볼륨. **연속값**이라 선 하나에 표식이 지나간다. 칸마다 선을
+   *            폭 전체에 그으므로 열 개가 이어져 한 줄로 읽힌다.
+   *   `step`   그래픽. **이름이 있는 이산값**이라 칸이 정보다. 다섯은 셀 수
+   *            있고, 티어를 고르는 것은 값을 미는 것과 다른 동작이다.
+   *
+   * 히트 영역은 둘 다 그대로 칸 하나씩이다. 바뀐 것은 그림뿐이다.
+   */
+  if (kind === 'meter') {
+    hairline(ctx, 0, h / 2, w, h / 2, filled ? PALETTE.menu.meterOn : PALETTE.menu.meterOff, RULE.thin);
+    if (filled) dot(ctx, w / 2, h / 2, Math.min(w, h) * 0.42, PALETTE.menu.meterOn);
+  } else {
+    const inset = RULE.thin;
+    roundRectPath(ctx, inset, inset, w - inset * 2, h - inset * 2, RADIUS.chip);
+    if (filled) {
+      ctx.fillStyle = PALETTE.menu.meterOn;
+      ctx.fill();
+    } else {
+      ctx.strokeStyle = state === 'hover' ? PALETTE.cobalt : PALETTE.ui.edgeStrong;
+      ctx.lineWidth = RULE.thin;
+      ctx.stroke();
+    }
   }
 
   const tex = toMarkTexture(canvas);
