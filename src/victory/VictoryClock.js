@@ -29,10 +29,10 @@
  *
  * There is no impact any more, so there is no frame count here. That discipline
  * did not go away with it: the one short beat left in this sequence is the
- * glint on the winning caps, and `CardFx` draws it with its own timing — the
+ * ripple on the winning caps, and `CardFx` draws it with its own timing — the
  * same 원모어 flourish the card plays, played with no card behind it. The
- * argument for counting it carefully is made in `CardFx._updateFlash`, which is
- * where it is actually spent. Two counters for one beat is two beats.
+ * argument for counting it carefully is made in `CardFx._updateRipple`, which
+ * is where it is actually spent. Two counters for one beat is two beats.
  *
  * ── a DRAW takes the same four stages ───────────────────────────────────────
  * There used to be a `jumpTo` and one caller: a draw, which had no loser to be

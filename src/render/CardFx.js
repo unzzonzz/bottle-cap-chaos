@@ -14,7 +14,6 @@ import {
   auraTexture,
   braceTexture,
   dashTexture,
-  flashTexture,
   flatTexture,
   frameTexture,
   ringTexture,
@@ -40,7 +39,7 @@ import { easeInOut } from '../ui/motion.js';
  * 파이프라인은 없다. 저해상도 타겟도, 디더도, 양자화도 남아 있지 않다.
  *
  * 지금 사실인 것은 이렇다. `world` 는 게임 씬이므로 **블룸을 받는다** — 가산으로
- * 그려지는 별과 링은 브라이트 패스가 찾는 바로 그 입력이라, 판 위에서 실제로
+ * 그려지는 물방울과 링은 브라이트 패스가 찾는 바로 그 입력이라, 판 위에서 실제로
  * 빛난다. `screen` 은 카드 씬이므로 **받지 않는다**: 카드 씬은 블룸 밖이고
  * (`CardLayer` 헤더에 이유가 있다), 전폭 효과에 블룸이 걸리면 번지는 것이 효과가
  * 아니라 화면 전체다.
@@ -81,15 +80,32 @@ import { easeInOut } from '../ui/motion.js';
  *   전폭 효과의 블룸              화면 전체가 번진다. `screen` 이 카드 씬인 이유다
  *   지속 효과의 부드러운 페이드   오라와 별은 **상태 표시**다. 페이드는 그 상태가
  *                                 끝나가는 중이라고 말하는데, 상태는 끝나가지 않는다
- *   화면 흔들림 증가              v2 §25
+ *   화면 흔들림 증가              흔들림은 이미 `shakeAmount` 에 있다. 늘리고 싶다면
+ *                                 고칠 곳은 이 파일이 아니라 그 값이다
+ *
+ * ── 그리고 **무엇의 그림**이어야 하는가 ─────────────────────────────────────
+ * 위의 표는 기법에 대한 것이고 지금도 사실이다. §13 이 더하는 것은 그 기법으로
+ * 무엇을 그리느냐다 — 충돌은 무기가 닿는 것이 아니라 **작은 것이 물에 떨어지는
+ * 것**이다. 이것이 위 표를 대신하지 않고 그 옆에 선다.
+ *
+ *   금지                          쓴다
+ *   불, 폭발, 만화 파열           물결
+ *   "BANG!", 데미지 숫자          작은 튀김, 작은 흰 입자
+ *   네온 충격파                   빛 왜곡, 부드러운 파형
+ *                                 주변 물체의 미세한 움직임
+ *
+ * 이 표는 색부터 걸린다. PHASE 8 이 지운 것은 대부분 모양이 아니라 램프였다 —
+ * 강타의 오라는 이미 물결 세 겹이었고 잉걸불 색을 입고 있었을 뿐이다. 모양까지
+ * 바뀐 것은 혼란의 별 하나이고, 그건 별에 물의 어휘가 없기 때문이다.
  *
  * ── 스텝은 남기는 것과 없애는 것이 갈린다 ──────────────────────────────────
  * 여기 있는 양자화는 거의 전부 "시대의 기법"에서 나왔으므로 전부 재검토 대상이지만,
  * 전부 없애는 것은 틀린 답이다. 기준은 하나다 — **스텝이 기계적 성격을 표현하면
  * 남기고, 해상도 한계를 흉내 내는 것이면 없앤다.**
  *
- *   남는다   혼란 별의 궤도와 프레임(둘이 **같이** 스텝해야 한다. 따로 놀면
- *            스프라이트가 모션에 뒤처져 보인다), 강타의 수축 링(부드러운 수축은
+ *   남는다   혼란 물방울의 궤도와 프레임(둘이 **같이** 스텝해야 한다. 따로 놀면
+ *            스프라이트가 모션에 뒤처져 보인다 — 이제는 아예 같은 `step` 에서
+ *            나온다), 강타의 수축 링(부드러운 수축은
  *            트윈이고 스텝은 기계가 장전되는 것이다), 원모어의 프레임 2박자와
  *            침묵 해제의 2박자(두 번 치는 것이 정보다), 침묵의 도장(일격이다)
  *   없앴다   팔레트 사이클의 하드 스텝(CLUT 흉내였다), 뚜껑의 답례 펄스 둘
@@ -115,6 +131,10 @@ const QUAD = new PlaneGeometry(1, 1);
  *
  * Cool-to-warm rather than a hue sweep, because a full rainbow reads as a modern
  * shader effect no matter how few steps it has.
+ *
+ * §9 가 이 카드에 요구하는 한 단어가 "파스텔" 이고, 이 다섯이 그것이다 — 흰색에서
+ * 시작해 옅은 파랑·연보라·연분홍을 지나 돌아온다. 물방울이 제 색을 갖지 않고
+ * 이 순환을 받으므로, 카드의 색은 스프라이트가 아니라 여기 있다.
  */
 const CHAOS_PALETTE = [
   [1.0, 1.0, 1.0],
@@ -125,20 +145,29 @@ const CHAOS_PALETTE = [
 ];
 
 /**
- * The 강타 palette. Hotter, and shorter than the chaos one.
+ * The 강타 palette. Shorter than the chaos one, and warmer only by a little.
  *
  * Four entries against chaos's five, so the two cycles never line up even when
- * both are on screen — an armed cap under 혼란 has both a star and an aura, and
+ * both are on screen — an armed cap under 혼란 has both a drop and a ripple, and
  * two markers pulsing in unison would read as one effect.
  *
- * 이쪽도 부드럽게 걷는다. 오라는 한 턴 내내 깔려 있는 **상태 표시**고, 상태 표시가
+ * 이쪽도 부드럽게 걷는다. 물결은 한 턴 내내 깔려 있는 **상태 표시**고, 상태 표시가
  * 딱딱 색을 갈면 무언가가 방금 일어난 것으로 읽힌다.
+ *
+ * ── 불이었다 ────────────────────────────────────────────────────────────────
+ * `[1, 0.62, 0.26]` 과 `[1, 0.36, 0.14]` 이 있었고, 그 둘은 잉걸불의 색이다.
+ * §13 이 불과 폭발을 금지하므로 그 두 항목이 이 파일에서 가장 명백한 위반이었다.
+ *
+ * 대신 걷는 것은 **온도**다: 햇빛과 그 사이로 비치는 하늘. 물은 제 색이 없고
+ * 밝기가 아니라 무엇을 비추느냐로 변하므로, 순환의 폭이 좁아 보이는 것이 맞다.
+ * 넷 다 밝은 것은 가산 합성이라 어두운 항목이 "다른 색"이 아니라 "없음"이기
+ * 때문이고, 그래도 맥동이 보이는 것은 따뜻한 둘과 차가운 둘이 번갈아 오기 때문이다.
  */
 const SMASH_PALETTE = [
-  [1.0, 0.94, 0.78],
-  [1.0, 0.62, 0.26],
-  [1.0, 0.36, 0.14],
-  [1.0, 0.72, 0.40],
+  [1.00, 0.97, 0.93],
+  [0.72, 0.88, 1.00],
+  [0.98, 0.86, 0.80],
+  [0.80, 0.92, 1.00],
 ];
 
 /**
@@ -169,7 +198,27 @@ const RESIST_PALETTE = [
   [0.64, 0.80, 0.94],
 ];
 
-const ONEMORE_TINT = [1.0, 0.86, 0.42];
+/**
+ * 원모어의 색. 뚜껑 위의 물결 두 번과 프레임의 두 박자가 같은 값을 쓴다.
+ *
+ * 금색 `[1, 0.86, 0.42]` 이었다. 카드의 액센트가 호박색이므로 따뜻한 쪽은 맞고,
+ * 순금은 §13 이 금지하는 폭발의 색이기도 하다 — 물 위의 것은 금이 아니라 **윤슬**
+ * 이고, 윤슬은 햇빛이므로 흰색에 훨씬 가깝다. 액센트는 남되 채도만 내려간다.
+ */
+const ONEMORE_TINT = [1.0, 0.92, 0.72];
+
+/**
+ * 물결 하나가 몇 박자를 사는가. §9 의 "물결 두 번" 이 이 상수와 `edgeBeats` 다.
+ *
+ * 1 이면 물결들이 줄줄이 지나가고 절대 겹치지 않는다 — 그건 두 번이 아니라 한 번을
+ * 두 번 하는 것이다. 돌이 물을 두 번 치면 첫 고리가 아직 퍼지는 중에 둘째가
+ * 태어나고, 둘 사이의 **간격**이 보여야 두 번으로 읽힌다. 그래서 1 보다 크고,
+ * 뚜껑 하나에 쿼드가 여럿 필요한 이유도 이것이다.
+ *
+ * 2 를 넘기지 않는 것은 그 이상이면 셋째가 태어날 때 첫째가 아직 있고, 동심원 셋은
+ * 사건이 아니라 상태로 읽히기 때문이다 — 그건 강타의 오라가 하는 말이다.
+ */
+const ONEMORE_WAVE_BEATS = 1.9;
 
 const SWAP_TINT = [0.72, 0.9, 1.0];
 const SWAP_LINE_COLOR = PALETTE.fx.swapLine;
@@ -296,7 +345,7 @@ export class CardFx {
 
     this._buildStun();
     this._buildSwap();
-    this._buildFlash();
+    this._buildRipple();
     this._buildSmash();
     this._buildScreen();
     this._buildSeal();
@@ -307,7 +356,7 @@ export class CardFx {
   setArena(arena) {
     this.arena = arena;
     this._ensureStun(arena?.capCount ?? 0);
-    this._ensureFlash(arena?.capCount ?? 0);
+    this._ensureRipple(arena?.capCount ?? 0, this._edgeBeats());
     this._ensureSmash(arena?.capCount ?? 0);
     this._ensureResist(arena?.capCount ?? 0);
   }
@@ -373,23 +422,44 @@ export class CardFx {
     this.swapGroup.add(this.swapLines);
   }
 
-  _buildFlash() {
-    this.flashGroup = new Group();
-    this.world.add(this.flashGroup);
-    this.flashes = [];
+  _buildRipple() {
+    this.rippleGroup = new Group();
+    this.world.add(this.rippleGroup);
+    this.ripples = [];
+    this._rippleCaps = 0;
+    this._rippleWaves = 0;
   }
 
-  _ensureFlash(n) {
-    const tex = flashTexture(this.config.cardFx.ringTexels);
-    while (this.flashes.length < n) {
+  /** 프레임 가장자리가 몇 번 점멸하는가. 뚜껑 위 물결도 이 수만큼 인다. */
+  _edgeBeats() {
+    return Math.max(1, Math.round(this.config.cardFx.edgeBeats));
+  }
+
+  /**
+   * 뚜껑당 물결 `waves` 개. 풀이 뚜껑 하나에 쿼드 하나가 아닌 유일한 자리다.
+   *
+   * 물결은 서로 겹친다(`ONEMORE_WAVE_BEATS`). 겹치는 것을 쿼드 하나로 그리려면
+   * 프레임마다 어느 물결을 그릴지 골라야 하고, 고른다는 것은 나머지를 안 그린다는
+   * 뜻이다 — 그러면 겹침이 없어지고 겹침이 이 효과의 전부다.
+   *
+   * `waves` 가 인자인 것은 `edgeBeats` 가 디버그 패널에서 1..6 으로 움직이기
+   * 때문이다. 풀을 6 으로 미리 잡아 두면 실제로는 언제나 2 만 쓰면서 뚜껑마다
+   * 쿼드 넷을 숨긴 채 들고 있게 된다.
+   */
+  _ensureRipple(n, waves) {
+    this._rippleCaps = n;
+    this._rippleWaves = waves;
+    const want = n * waves;
+    const tex = ringTexture(this.config.cardFx.ringTexels);
+    while (this.ripples.length < want) {
       const mat = this.materials.create(tex);
       const mesh = new Mesh(QUAD, mat);
       mesh.visible = false;
       mesh.renderOrder = 19;
-      this.flashGroup.add(mesh);
-      this.flashes.push({ mesh, mat });
+      this.rippleGroup.add(mesh);
+      this.ripples.push({ mesh, mat });
     }
-    for (let i = n; i < this.flashes.length; i++) this.flashes[i].mesh.visible = false;
+    for (let i = want; i < this.ripples.length; i++) this.ripples[i].mesh.visible = false;
   }
 
   /**
@@ -647,7 +717,7 @@ export class CardFx {
     this.resistCaps = this._resistCaps(match);
     this._updateStun(camera);
     this._updateSwap(match, camera);
-    this._updateFlash(match, camera);
+    this._updateRipple(match, camera);
     this._updateSmash(camera);
     this._updateResist(camera, struck);
     this._updateScreen();
@@ -907,46 +977,79 @@ export class CardFx {
   }
 
   /** One-more: a hard flash on the player's own caps. */
-  _updateFlash(match, camera) {
+  /**
+   * 원모어: 표시된 뚜껑마다 물결 두 번.
+   *
+   * ── 섬광이었다 ─────────────────────────────────────────────────────────────
+   * 뚜껑 위에 금색 빛덩이 하나가 떴다가 4분의 1 지점에서 꺼졌다. 예전 주석은 그
+   * 짧기를 길게 변호했는데 — "계단을 뺀 만큼 창을 좁혔다" — 변호가 필요했던 것은
+   * 빛덩이가 무엇을 뜻하는지 그림 자체가 말하지 않았기 때문이다. §9 가 그 자리에
+   * 물결 두 번을 놓는다.
+   *
+   * ── 왜 두 번인가 ───────────────────────────────────────────────────────────
+   * 카드의 뜻이 "한 번 더" 이고, 두 번은 그 말의 그림이다. 프레임 가장자리가 이미
+   * 두 박자로 점멸하고 있었으므로 뚜껑도 같은 수를 센다 — 화면의 두 곳이 같은
+   * 박자를 치면 그것은 두 효과가 아니라 하나다.
+   *
+   * ── 페이드가 여기서는 허용된다 ─────────────────────────────────────────────
+   * 이 파일의 금지 목록은 "**지속 효과**의 부드러운 페이드" 를 막는다. 오라와
+   * 물방울이 그것이다 — 상태가 끝나가지 않는데 끝나가는 것처럼 보이면 안 된다.
+   * 물결은 사건이고, 퍼지면서 옅어지는 것이 물결의 정의다.
+   */
+  _updateRipple(match, camera) {
+    const cfg = this.config.cardFx;
+    const beats = this._edgeBeats();
+    if (beats !== this._rippleWaves) this._ensureRipple(this._rippleCaps, beats);
+
     const burst = this._burst?.cardId === 'onemore' ? this._burst : null;
     if (!burst || !this.arena) {
-      for (const f of this.flashes) f.mesh.visible = false;
+      for (const r of this.ripples) r.mesh.visible = false;
       return;
     }
 
-    const cfg = this.config.cardFx;
-    /**
-     * Short and hard: full at the start, gone before the effect is.
-     *
-     * ── 계단이 사라지고 대신 짧아졌다 ─────────────────────────────────────
-     * `ceil(k * 4) / 4` 였다. 근거는 시대의 기법이었고, 그것이 사라진 뒤에 남는
-     * 것은 네 칸으로 끊기며 꺼지는 빛뿐이다 — 그건 섬광이 아니라 저속 촬영이다.
-     *
-     * 그런데 계단을 그냥 빼면 같은 길이의 페이드가 되고, "화면 전체를 페이드로
-     * 끄지 마라"는 이 파일의 규칙이 뚜껑 위에서 그대로 반복된다. 그래서 계단을
-     * 뺀 만큼 창을 좁혔다: 4분의 1 지점에서 이미 없다. 제곱으로 떨어뜨리는 것도
-     * 같은 이유로, 앞쪽이 강하고 꼬리가 없어야 섬광이다.
-     */
-    const k = Math.max(0, 1 - burst.t * 4);
-    const level = k * k;
-
-    for (let i = 0; i < this.flashes.length; i++) {
-      const f = this.flashes[i];
+    for (let i = 0; i < this._rippleCaps; i++) {
       // `_marks`, not `capOwner`: a cap that has gone off the board is still a
-      // body at a position, and flashing it lights up a corpse.
-      if (!this._marks(burst.player, i) || level <= 0.004) {
-        f.mesh.visible = false;
-        continue;
+      // body at a position, and rippling it stirs the water over a corpse.
+      const com = this._marks(burst.player, i) ? this.arena.capCom(i) : null;
+      for (let w = 0; w < beats; w++) {
+        const r = this.ripples[i * beats + w];
+        if (!r) continue;
+
+        // 물결 w 는 박자 w 에 태어나 `ONEMORE_WAVE_BEATS` 박자를 산다. 0..1 밖은
+        // 아직 없거나 이미 지나간 것이다.
+        const k = (burst.t * beats - w) / ONEMORE_WAVE_BEATS;
+        if (!com || k < 0 || k >= 1) {
+          r.mesh.visible = false;
+          continue;
+        }
+
+        // 뒤에 오는 물결일수록 약하다. 돌은 한 번 세게 치고 그 다음은 되튐이다.
+        const fall = 1 - k;
+        const level = fall * fall * (w === 0 ? 1 : 0.62);
+        if (level <= 0.004) {
+          r.mesh.visible = false;
+          continue;
+        }
+
+        r.mesh.position.set(com.x, com.y + cfg.ringHeight, com.z);
+        /**
+         * 퍼진다. 강타의 링이 **닫히는** 것과 정확히 반대이고, 그 대비가 두 카드를
+         * 가른다 — 하나는 힘이 모이는 것이고 하나는 무언가가 일어난 것이다.
+         *
+         * 0.3 에서 1.25 였다. 두 물결이 겹칠 때 반지름 차가 작아서 정지 화면으로는
+         * 고리 둘이 아니라 가운데가 빈 하나로 보였다 — 두 번이 한 번으로 읽히면
+         * 이 효과는 아무 말도 안 한다. 시작을 키우고 끝을 더 키워, 겹치는 순간
+         * 바깥 고리가 안쪽의 두 배 가까이 되게 했다.
+         */
+        r.mesh.scale.setScalar(cfg.ringSize * (0.42 + k * 1.15));
+        if (camera) r.mesh.quaternion.copy(camera.quaternion);
+        r.mat.uniforms.uTint.value.set(...ONEMORE_TINT);
+        r.mat.uniforms.uOpacity.value = level;
+        r.mesh.visible = true;
       }
-      const com = this.arena.capCom(i);
-      f.mesh.position.set(com.x, com.y + cfg.ringHeight, com.z);
-      f.mesh.scale.setScalar(cfg.ringSize * (1 + (1 - k) * 0.8));
-      if (camera) f.mesh.quaternion.copy(camera.quaternion);
-      f.mat.uniforms.uTint.value.set(...ONEMORE_TINT);
-      f.mat.uniforms.uOpacity.value = level;
-      f.mesh.visible = true;
     }
   }
+
 
   /**
    * 강타: a ring that closes onto the cap, and an aura that stays behind it.
@@ -1192,10 +1295,13 @@ export class CardFx {
 
     // ── the one-more edge ──
     if (burst?.cardId === 'onemore') {
-      // Two hard beats rather than one fade. The era's own screen flashes were
-      // whole frames of a colour, and a stepped double-blink is the closest
-      // thing to that which does not make the pitch unreadable.
-      const beats = Math.max(1, Math.round(cfg.edgeBeats));
+      // 두 박자, 페이드 하나가 아니라. §9 가 이 2박자를 명시적으로 남기라고
+      // 하고, 뚜껑 위의 물결도 같은 수를 센다 — `_updateRipple` 참조. 화면의 두
+      // 곳이 같은 박자를 치는 것이 "한 번 더" 를 말하는 방법이다.
+      //
+      // 가장자리만 밝히는 것은 그대로다: 프레임 전체를 색으로 채우면 피치가
+      // 읽히지 않고, §0.4 가 그것을 금지한다.
+      const beats = this._edgeBeats();
       const phase = Math.floor(burst.t * beats * 2);
       const on = phase % 2 === 0 && burst.t < 1;
       this.frameMat.uniforms.uTint.value.set(...ONEMORE_TINT);

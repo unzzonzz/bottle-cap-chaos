@@ -671,19 +671,45 @@ export const PALETTE = {
    * which is alpha-blended and whose near-black outline was the only piece of
    * pure darkness the effects layer put on screen.
    *
-   * §13 of the brief changes what these MEAN — an impact is a small object
-   * hitting water, not a weapon strike — but that is a change to shape and
-   * timing, which is PHASE 8's, not to whether added light is bright.
+   * §13 of the brief changed what these MEAN, and PHASE 8 spent it: an impact
+   * is a small object hitting water, not a weapon strike. That took `star` to
+   * `drop` and took the ember out of `aura`; it did not touch the rule above,
+   * because added light is bright whatever it is a picture of.
    */
   fx: {
     white: WHITE_PURE,
-    star: [WHITE_PURE, '#dfeaff', '#8fa4dc'],
+    /**
+     * 혼란의 물방울. 흰 핵, 옅은 파랑, 그림자 쪽의 남색.
+     *
+     * `star` 였다 — 뾰족한 팔 여덟. 색은 거의 그대로 옮겨 왔고 이름과 그림이
+     * 바뀌었다: §13 이 무기가 아니라 **물에 떨어진 작은 것**을 요구하는데, 팔이
+     * 여덟인 별은 그 목록의 어디에도 없다. §9 가 말하는 "파스텔" 이 이 세 톤이다.
+     */
+    drop: [WHITE_PURE, '#e2eeff', '#93a9dc'],
+    /** 물결 하나. 스왑의 이별, 강타의 수축, 원모어의 두 번이 전부 이 스프라이트다. */
     ring: ['#3f8fd8', '#a8d8f8', WHITE_PURE],
-    aura: ['#9c3a18', TERRACOTTA, '#f8c8a8'],
-    trail: [WHITE_PURE, '#dfeef8', '#9fb4c8'],
-    flash: [WHITE_PURE, '#eef4ff', '#a8c4e8'],
+    /**
+     * 강타의 물결 세 겹. `[바깥, 가운데, 안쪽]` — 퍼져 나간 순서다.
+     *
+     * 녹슨 주황이었다: `#9c3a18` → 테라코타 → `#f8c8a8`. 잉걸불이고, §13 이 불과
+     * 폭발을 금지한다. 링 세 겹이라는 **모양**은 이미 물결이었으므로 색만 바뀌면
+     * 되는 자리였다.
+     *
+     * 카드의 액센트(테라코타)는 남되 안쪽에만 남는다. 물은 제 색이 없고 비추는
+     * 것의 색을 가지므로, 뚜껑에 가장 가까운 고리가 산호빛을 띠고 바깥으로 갈수록
+     * 흰 물보라가 된다. `SMASH_PALETTE` 가 이 위에 다시 곱해지므로 셋 중 가장
+     * 어두운 것도 흰색 가까이 있어야 한다.
+     */
+    aura: ['#e4f0fa', '#f8d4c8', '#fff0e8'],
     lock: { outline: '#3a5878', body: '#e2eef8', shade: '#90a8c0', light: WHITE_PURE },
     dash: [WHITE_PURE, '#a8f0dc', '#2f9c82'],
+    /**
+     * 궤적의 띠. 흰 마루에서 초록으로, 그리고 짧게 끝난다.
+     *
+     * 네 톤인데 마지막 `#1f6e5e` 가 거의 보이지 않는 것이 의도다 — `scanTexture`
+     * 가 이 램프를 쿼드 위쪽 4분의 1 안에 다 쓰고 나머지를 비운다. §9 가 요구하는
+     * 것은 **얇은** 빛의 띠이고, 두께는 알파가 아니라 그림에서 온다.
+     */
     scan: [WHITE_PURE, '#a8ffe4', '#3fb096', '#1f6e5e'],
     frame: ['#f8e4c0', AMBER, '#6f5218'],
     swapLine: BLUE_CLEAR,

@@ -12,9 +12,15 @@
 | `src/ui/icons.js` | 카드 7종 + UI 아이콘 벡터 렌더러 |
 | `src/ui/fonts.js` | 폰트 스택 + `document.fonts.ready` 게이트 + 텍스처 캐시 무효화 |
 
-스펙 시트: 개발 서버를 띄우고 **`/docs/tokens-preview.html`**.
-목업이 아니라 위 파일들을 그대로 import 해서 그린 것이라, 여기 보이는 것과
-게임에 나오는 것이 다를 수 없다.
+스펙 시트: 개발 서버를 띄우고 아래 페이지들. 전부 목업이 아니라 위 파일들을
+그대로 import 해서 그린 것이라, 여기 보이는 것과 게임에 나오는 것이 다를 수 없다.
+
+| 페이지 | 무엇 |
+|---|---|
+| `/docs/tokens-preview.html` | 색 · 셰이프 · 타입 · 컨트롤의 스펙 시트 |
+| `/docs/roles-preview.html` | 역할별 컨트롤이 실제로 어떻게 그려지는가 |
+| `/docs/bottle-preview.html` | 메뉴의 병. 기울기별 액체 넘침 실측 포함 |
+| `/docs/fx-preview.html` | 카드 이펙트 스프라이트를 세 필드 바닥색 위에 가산으로 |
 
 ```bash
 grep -rInE "#[0-9a-fA-F]{6}" src/ | grep -v "^src/core/palette.js"

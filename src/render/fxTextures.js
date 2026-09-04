@@ -35,8 +35,9 @@ import { drawIcon } from '../ui/icons.js';
  * 전부 부드럽게 사라진다. 하드 스텝은 이제 그 반대의 신호이므로, 하나 남은
  * 곳(대시 패턴)에만 이유를 적어 두었다.
  *
- * 어휘 자체를 물결·입자·빛 왜곡으로 바꾸는 것은 PHASE 8 이다. 여기 적힌 것은
- * 가장자리를 어떻게 다루는가이고, 그 답은 두 방향에서 같다.
+ * 어휘 자체 — 무엇의 그림이냐 — 는 PHASE 8 이 바꿨고, 그 표는 `CardFx` 머리말에
+ * 있다. 여기 적힌 것은 가장자리를 어떻게 다루는가이고, 두 답이 같은 쪽을 가리켰다:
+ * 물의 어휘에는 부드러운 가장자리가 필요하고 그라디언트가 이미 기본이었다.
  *
  * 크기는 화면에서 차지할 크기를 따라간다. 링이 300 픽셀에 걸쳐 그려지면 256 텍셀로
  * 굽는다. 밉맵도 켜져 있으므로 작게 나올 때도 손해가 없다 — `core/textures.js` 의
@@ -92,73 +93,86 @@ function radial(ctx, size, stops) {
 }
 
 /**
- * 기절 별 한 장. `(ox, oy)` 에서 `size` 안에.
+ * 혼란의 물방울 한 장. `(ox, oy)` 에서 `size` 안에, 머리가 `angle` 쪽을 본다.
  *
- * ── 픽셀을 걸어 찍던 것에서 획으로 ──────────────────────────────────────────
- * 예전에는 네 팔을 텍셀 단위로 걸으며 세 톤을 찍었고, 주석이 `ctx.rotate` 를
- * 피하는 이유를 "캔버스 회전은 가장자리를 안티에일리어스하고, 안티에일리어스된
- * 스프라이트는 이 파이프라인에서 양자화기가 먼지로 만든다" 고 적어 두었다.
- * 그 파이프라인이 없으므로 회전해도 된다. 회전할 수 있으면 별은 한 번만 그리면
- * 된다.
+ * ── 별이었다 ────────────────────────────────────────────────────────────────
+ * 긴 팔 넷과 짧은 팔 넷이 난 사각별이었고, 예전 주석은 뾰족한 것이 "아프다"를
+ * 말한다고 적었다. §13 이 그 어휘를 통째로 바꾼다 — 충돌은 무기가 닿는 것이
+ * 아니라 **작은 것이 물에 떨어지는 것**이고, 그 목록에 별은 없다.
  *
- * 빛나는 사각별이다 — 긴 팔 넷, 짧은 팔 넷, 그리고 가운데 광원. 뾰족한 것은
- * "아프다"를 말하고, 가운데가 밝은 것은 그것이 빛이라는 것을 말한다.
+ * ── 방향이 있는 것이 요점이다 ───────────────────────────────────────────────
+ * 별은 네 겹 대칭이라 어느 쪽을 봐도 같았고, 그래서 시트가 90도만 담으면 됐다.
+ * 물방울은 대칭이 없다: 머리와 꼬리가 있고, 궤도를 도는 물방울은 꼬리를 안쪽으로
+ * 끌고 돈다. 그래서 시트가 한 바퀴를 담고(`stunSheet` 참조), 그 한 바퀴가
+ * `CardFx` 의 궤도 각과 **같은 수**에서 나온다 — 물방울은 자기가 도는 방향을
+ * 본다. 따로 계산하지 않는다.
+ *
+ * 가운데가 비지 않고 머리가 가장 밝은 것은 물방울이 렌즈이기 때문이다. 뒤에
+ * 깔리는 옅은 광채는 젖은 것 주위의 번짐이고, 이것이 별의 "가운데 광원" 이
+ * 남긴 유일한 부분이다.
  */
-function drawStar(ctx, ox, oy, size, angle) {
+function drawDrop(ctx, ox, oy, size, angle) {
   const c = size / 2;
-  const tones = PALETTE.fx.star;
+  const tones = PALETTE.fx.drop;
 
   ctx.save();
   ctx.translate(ox + c, oy + c);
   ctx.rotate(angle);
 
-  // 가운데 광원. 별의 팔이 여기서 자라 나오는 것으로 보여야 한다.
+  /**
+   * 물방울이 상자를 다 쓰지 않는다.
+   *
+   * 별은 팔이 상자 끝(0.94c)까지 갔지만 팔 사이가 비어 있어서 가벼웠다. 물방울은
+   * 속이 찬 모양이라 같은 크기면 훨씬 무겁고, `stunSize` 는 뚜껑 지름의 1.5배다 —
+   * 실측으로 뚜껑 옆에 흰 덩어리가 앉았다. 상자의 3분의 2만 쓰고 나머지를 번짐에
+   * 넘긴다. `stunSize` 자체는 `game/config.js` 에 있어 손댈 수 없고, 손댈 이유도
+   * 없다: 문제는 차지하는 자리가 아니라 그 자리를 얼마나 채우느냐였다.
+   */
+  const r = c * 0.25;
+  const hx = c * 0.2;
+  const tip = -c * 0.72;
+
+  // 젖은 것 주위의 번짐. 물방울 자체보다 넓고 훨씬 옅다.
   ctx.save();
   ctx.translate(-c, -c);
   radial(ctx, size, [
-    [0, tones[0], 0.95],
-    [0.16, tones[1], 0.7],
-    [0.42, tones[2], 0.12],
+    [0, tones[1], 0.34],
+    [0.3, tones[1], 0.16],
+    [0.62, tones[2], 0.05],
     [1, tones[2], 0],
   ]);
   ctx.restore();
 
-  // 팔 여덟. 긴 것 넷과 짧은 것 넷이 번갈아 난다.
-  const long = c * 0.94;
-  const short = c * 0.42;
-  const waist = c * 0.13;
-  for (let k = 0; k < 8; k++) {
-    const len = k % 2 === 0 ? long : short;
-    ctx.save();
-    ctx.rotate((k * Math.PI) / 4);
-    const g = ctx.createLinearGradient(0, 0, 0, -len);
-    g.addColorStop(0, withAlpha(tones[0], 0.9));
-    g.addColorStop(0.45, withAlpha(tones[1], 0.55));
-    g.addColorStop(1, withAlpha(tones[2], 0));
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.moveTo(-waist, 0);
-    ctx.quadraticCurveTo(-waist * 0.35, -len * 0.55, 0, -len);
-    ctx.quadraticCurveTo(waist * 0.35, -len * 0.55, waist, 0);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-  }
+  // 물방울. 머리는 원이고 꼬리는 거기서 뽑혀 나온다.
+  ctx.beginPath();
+  ctx.arc(hx, 0, r, -Math.PI / 2, Math.PI / 2);
+  ctx.quadraticCurveTo(hx - r * 0.45, r * 0.95, tip, 0);
+  ctx.quadraticCurveTo(hx - r * 0.45, -r * 0.95, hx, -r);
+  ctx.closePath();
+  const body = ctx.createLinearGradient(tip, 0, hx + r, 0);
+  body.addColorStop(0, withAlpha(tones[2], 0));
+  body.addColorStop(0.34, withAlpha(tones[2], 0.4));
+  body.addColorStop(0.72, withAlpha(tones[1], 0.72));
+  body.addColorStop(1, withAlpha(tones[1], 0.84));
+  ctx.fillStyle = body;
+  ctx.fill();
+
+  // 머리 안의 하이라이트 하나. 물방울이 렌즈라는 말이고, 이것이 있어야 흰 얼룩과
+  // 갈라진다 — 얼룩에는 안쪽이 없다.
+  ctx.beginPath();
+  ctx.ellipse(hx + r * 0.18, -r * 0.3, r * 0.3, r * 0.2, -0.5, 0, Math.PI * 2);
+  ctx.fillStyle = withAlpha(tones[0], 0.9);
+  ctx.fill();
 
   ctx.restore();
 }
 
 /**
- * The stun star, `frames` of it in a row.
+ * The stun drop, `frames` of it in a row.
  *
- * ── 프레임 수가 늘었다 ──────────────────────────────────────────────────────
- * 여덟 장이었고 그건 한 바퀴에 45도, 눈에 띄게 툭툭 끊긴다 — 예전 주석은 그것이
- * **의도**라고 적었다. 부드럽게 도는 쿼드가 "다른 게임에서 온 것처럼 보인다"는
- * 이유였는데, 지금은 그 다른 게임 쪽이 목표다.
- *
- * 쿼드를 회전시키지 않고 시트를 유지하는 이유는 `CardFx` 다: UV 창을 옮기는
+ * 쿼드를 회전시키지 않고 시트를 쓰는 이유는 `CardFx` 다: UV 창을 옮기는
  * 애니메이션이 이미 있고, 그걸 쿼드 회전으로 바꾸는 것은 이펙트 코드의 변경이지
- * 그림의 변경이 아니다. 장수를 늘리는 편이 같은 결과를 더 적은 위험으로 낸다.
+ * 그림의 변경이 아니다.
  *
  * @param {number} frames  한 바퀴를 나눌 장수
  * @param {number} size    장당 텍셀
@@ -172,13 +186,18 @@ export function stunSheet(frames = 16, size = 96) {
   const { canvas: cv, ctx } = canvas(f * s, s);
   ctx.clearRect(0, 0, f * s, s);
   /**
-   * 한 바퀴가 아니라 **90도**만 돌면 된다.
+   * **한 바퀴 전체.** 90도였다.
    *
-   * 팔이 여덟이지만 긴 것과 짧은 것이 번갈아 나므로 대칭은 여덟 겹이 아니라 네
-   * 겹이다 — 90도를 돌아야 긴 팔이 긴 팔 자리에 온다. 45도로 잡았다가 시트가 한
-   * 바퀴 돌 때마다 긴 팔과 짧은 팔이 자리를 바꿔 툭 튀었다.
+   * 별은 네 겹 대칭이라 90도면 긴 팔이 긴 팔 자리에 왔고, 그래서 시트가 사분원만
+   * 담아도 됐다. 물방울에는 대칭이 없으므로 사분원을 담으면 네 바퀴마다 머리가
+   * 순간이동한다.
+   *
+   * 한 바퀴를 담으면 프레임 번호가 곧 각도가 되고, `CardFx._updateStun` 의 궤도
+   * 각이 바로 그 프레임 번호에서 나온다 — 그래서 물방울은 자기가 도는 쪽을
+   * 본다. 장수를 바꿔도 둘은 같이 움직인다: 둘 다 `frames` 로 나눈 같은 `step`
+   * 이기 때문이다.
    */
-  for (let i = 0; i < f; i++) drawStar(ctx, i * s, 0, s, (i / f) * (Math.PI / 2));
+  for (let i = 0; i < f; i++) drawDrop(ctx, i * s, 0, s, (i / f) * Math.PI * 2);
   return finish(key, cv);
 }
 
@@ -213,12 +232,17 @@ export function ringTexture(size = 256) {
 }
 
 /**
- * 강타의 오라. 무장한 뚜껑 **아래** 깔린다.
+ * 강타의 물결. 무장한 뚜껑 **아래** 깔린다.
  *
+ * ── 오라였고, 그림은 그대로다 ───────────────────────────────────────────────
  * 분리된 링 세 겹인 이유는 그대로다: 이것은 사건이 아니라 카드가 유지되는 내내
  * 있는 것이고, 뚜껑 밑에 꽉 찬 후광이 한 턴 내내 있으면 두 초 뒤부터 읽히지
  * 않는다. 사이가 벌어져 있어야 눈이 형태를 계속 찾을 수 있고, 그 틈이 팔레트
  * 순환이 보이는 자리다.
+ *
+ * 바뀐 것은 색뿐이다 — `PALETTE.fx.aura` 의 주석을 보라. 링 세 겹은 처음부터
+ * 물결의 모양이었고 잉걸불 색을 입고 있었을 뿐이라, §13 이 불을 금지했을 때
+ * 여기서 지울 것이 없었다. 그것이 이 그림이 옳았다는 증거이기도 하다.
  */
 export function auraTexture(size = 192) {
   const s = Math.max(8, Math.round(size));
@@ -234,6 +258,9 @@ export function auraTexture(size = 192) {
    * 부드러운 감쇠는 같은 알파에서 훨씬 넓은 면적을 덮으므로 실측하니 뚜껑 셋이
    * 흰 후광에 거의 지워졌다. §0.4 는 효과가 도는 동안에도 무엇이 어디 있는지
    * 읽혀야 한다고 요구한다.
+   *
+   * 램프가 흰색 가까이로 옮겨 온 뒤에도 이 값들은 그대로다. 알파는 색이 아니라
+   * **덮는 면적**에 대한 답이고, 면적은 바뀌지 않았다.
    *
    * 링 사이의 **틈**이 여전히 요점이다. 틈이 있어야 눈이 형태를 계속 찾고, 그
    * 틈에서 팔레트 순환이 보인다.
@@ -255,20 +282,17 @@ export function auraTexture(size = 192) {
 }
 
 /**
- * ── 색을 입히는 스프라이트는 회색이어야 한다 ────────────────────────────────
- * `trailTexture` 는 `flashTexture` 를 회색으로 다시 칠한 것이다. 승리 화면이
- * 이긴 쪽의 **팀 색**으로 잔상을 물들이는데, 틴트는 곱셈이므로 원본이 중립이 아니면
- * 원본의 색조가 이긴다. 실측이다: `flashTexture` 의 금색에 대고 파란 뚜껑이 금색
- * 불꽃 셋을 달고 들어왔고, 그건 그 뚜껑이 어디서 왔는지가 아니라 근처에서 다른
- * 효과가 일어난 것으로 읽혔다.
+ * ── 색을 입히는 스프라이트는 중립이어야 한다 ────────────────────────────────
+ * `uTint` 는 곱셈이므로, 텍스처가 이미 색을 갖고 있으면 틴트가 그 색을 **누르지
+ * 못한다** — 두 색이 곱해진 제삼의 색이 나온다. 실측으로 배웠다: 금색으로 구운
+ * 스프라이트에 파란 팀 색을 걸었더니 파란 뚜껑이 금색 불꽃을 달고 들어왔고, 그건
+ * 그 뚜껑이 누구 것인지가 아니라 근처에서 다른 효과가 일어난 것으로 읽혔다.
+ *
+ * 그래서 팀 색이나 팔레트 순환을 받는 스프라이트(`ringTexture`, `auraTexture`,
+ * 시트의 물방울)는 흰색 가까이에서 굽는다. 자기 색을 갖는 것은 그 색이 곧 카드의
+ * 뜻인 것들뿐이다 — `scanTexture` 의 초록, `frameTexture` 의 호박색.
  */
 
-/**
- * `flashTexture` 의 모양을 회색으로. 색 입힌 잔상용.
- *
- * 링이 아니라 채워진 원반이다 — 이것은 뚜껑이 **있던 자리**를 표시하고, 그 크기에서
- * 빈 모양은 지나간 뚜껑의 유령이 아니라 더 작은 두 번째 뚜껑으로 읽힌다.
- */
 /**
  * 철벽의 링. 이 파일에서 유일하게 **각지고 가장자리가 단단한** 스프라이트다.
  *
@@ -347,43 +371,6 @@ export function braceTexture(sides = 8, size = 192) {
     ctx.stroke();
   }
 
-  return finish(key, cv);
-}
-
-export function trailTexture(size = 128) {
-  const s = Math.max(8, Math.round(size));
-  const key = `trail:${s}`;
-  if (cache.has(key)) return cache.get(key);
-
-  const { canvas: cv, ctx } = canvas(s, s);
-  ctx.clearRect(0, 0, s, s);
-  const [hot, mid, cool] = PALETTE.fx.trail;
-  radial(ctx, s, [
-    [0, hot, 0.92],
-    [0.34, mid, 0.7],
-    [0.66, cool, 0.32],
-    [0.94, cool, 0],
-    [1, cool, 0],
-  ]);
-  return finish(key, cv);
-}
-
-/** 원모어가 뚜껑 위에서 터질 때의 빛. */
-export function flashTexture(size = 128) {
-  const s = Math.max(8, Math.round(size));
-  const key = `flash:${s}`;
-  if (cache.has(key)) return cache.get(key);
-
-  const { canvas: cv, ctx } = canvas(s, s);
-  ctx.clearRect(0, 0, s, s);
-  const [hot, mid, cool] = PALETTE.fx.flash;
-  radial(ctx, s, [
-    [0, hot, 0.95],
-    [0.28, mid, 0.72],
-    [0.6, cool, 0.3],
-    [0.92, cool, 0],
-    [1, cool, 0],
-  ]);
   return finish(key, cv);
 }
 
@@ -483,7 +470,8 @@ export function dashTexture(length = 64) {
  * 프레임을 가로질러 늘여 한 번 내려 보낸다. V 로만 그리는 이유는 X 로 변하지 않기
  * 때문이다 — 전체 프레임 이미지는 변하지 않는 모양에 300 kB 를 쓰는 일이다.
  *
- * 선두는 여전히 밝고 꼬리는 길다. 스윕에는 방향이 있어야 한다.
+ * 선두가 밝고 꼬리가 그 뒤로 짧게 붙는다. 스윕에는 방향이 있어야 하고, 그 방향은
+ * 길이가 아니라 **비대칭**에서 온다 — 아래를 보라.
  */
 export function scanTexture(height = 128) {
   const h = Math.max(8, Math.round(height));
@@ -493,12 +481,24 @@ export function scanTexture(height = 128) {
   const { canvas: cv, ctx } = canvas(1, h);
   ctx.clearRect(0, 0, 1, h);
   const S = PALETTE.fx.scan;
+  /**
+   * ── 띠가 얇아졌다. 쿼드가 아니라 그림이 얇아진 것이다 ─────────────────────
+   * 감쇠가 쿼드 바닥까지 갔고 — 0.72 지점에도 알파가 남아 있었다 — 그래서 화면에
+   * 있는 것은 띠가 아니라 40픽셀짜리 초록 물결 앞머리였다. §9 는 **얇은** 빛의
+   * 띠를 요구한다.
+   *
+   * 쿼드 높이는 `cardFx.scanHeight` 이고 그 파일은 손댈 수 없으므로, 두께를
+   * 그림에서 뺀다: 램프를 위쪽 3분의 1 안에 다 쓰고 나머지를 비운다. 실효 두께가
+   * 40에서 약 13픽셀로 줄고, 마루가 한 텍셀 안에 서 있으므로 지나간 자리가
+   * 선으로 읽힌다 — 쓸고 지나가는 것에는 앞이 있어야 한다.
+   */
   const g = ctx.createLinearGradient(0, 0, 0, h);
   g.addColorStop(0, withAlpha(S[0], 0));
-  g.addColorStop(0.06, withAlpha(S[0], 0.9));
-  g.addColorStop(0.16, withAlpha(S[1], 0.62));
-  g.addColorStop(0.42, withAlpha(S[2], 0.3));
-  g.addColorStop(0.72, withAlpha(S[3], 0.1));
+  g.addColorStop(0.02, withAlpha(S[0], 0.95));
+  g.addColorStop(0.06, withAlpha(S[1], 0.7));
+  g.addColorStop(0.14, withAlpha(S[2], 0.34));
+  g.addColorStop(0.26, withAlpha(S[3], 0.09));
+  g.addColorStop(0.34, withAlpha(S[3], 0));
   g.addColorStop(1, withAlpha(S[3], 0));
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 1, h);
