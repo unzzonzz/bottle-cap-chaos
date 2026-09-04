@@ -1,5 +1,5 @@
 {
-  "format": "bcc-inputlog",
+  "format": "msa-inputlog",
   "version": 1,
   "mode": "knockout",
   "seed": 439041101,

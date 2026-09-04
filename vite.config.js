@@ -15,7 +15,7 @@ export default defineConfig({
    * pages.yml` sets it from the repository's own name, so a rename or a fork
    * carries it without editing this file.
    */
-  base: process.env.BCC_BASE || '/',
+  base: process.env.MSA_BASE || '/',
   // Vite does not read PORT on its own. Honouring it lets a second dev server
   // run alongside one that already holds 5173.
   server: { port: Number(process.env.PORT) || 5173 },

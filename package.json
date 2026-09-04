@@ -9,7 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "build:pages": "vite build && node tools/pages-routes.mjs",
-    "preview:pages": "BCC_BASE=/bottle-cap-chaos/ npm run build:pages && BCC_BASE=/bottle-cap-chaos/ vite preview",
+    "preview:pages": "MSA_BASE=/midsummer-alkkagi/ npm run build:pages && MSA_BASE=/midsummer-alkkagi/ vite preview",
     "det:emit": "node tools/determinism/harness.mjs emit",
     "det:node": "node tools/determinism/harness.mjs run",
     "det:jsc": "vite build --config tools/determinism/vite.jsc.config.js && /System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Helpers/jsc tools/determinism/build/jsc-bundle.js",

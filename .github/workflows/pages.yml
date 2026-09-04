@@ -44,7 +44,7 @@ jobs:
         env:
           # Derived from the repository rather than written out, so a rename or
           # a fork carries it. See the note on `base` in `vite.config.js`.
-          BCC_BASE: /${{ github.event.repository.name }}/
+          MSA_BASE: /${{ github.event.repository.name }}/
         run: npm run build:pages
 
       - uses: actions/upload-pages-artifact@v3

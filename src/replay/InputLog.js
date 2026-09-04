@@ -37,7 +37,7 @@ import { peekSeed } from '../physics/rng.js';
  * happened between events. See `peekSeed`.
  */
 
-export const LOG_FORMAT = 'bcc-inputlog';
+export const LOG_FORMAT = 'msa-inputlog';
 export const LOG_VERSION = 1;
 
 /**
