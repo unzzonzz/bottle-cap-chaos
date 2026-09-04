@@ -146,25 +146,35 @@ export function bootMenuDebug(ctx) {
   // ── pose and motion ──────────────────────────────────────────────────────
   const pose = gui.addFolder('자세 / 부유');
   const relean = () => ctx.onLean();
-  pose.add(config.bottle, 'leanZ', -40, 40, 0.5).name('기울기 (도)').onChange(relean);
-  pose.add(config.bottle, 'leanX', -25, 25, 0.5).name('앞뒤 기울기 (도)').onChange(relean);
+  pose.add(config.bottle, 'leanZ', -85, 85, 0.5).name('기울기 (도)').onChange(relean);
+  pose.add(config.bottle, 'leanX', -85, 85, 0.5).name('앞뒤 기울기 (도)').onChange(relean);
   pose.add(config.bottle, 'faceYaw', -180, 180, 1).name('라벨 방향 (도)').onChange(relean);
   pose.add(config.bottle, 'floatAmplitude', 0, 2, 0.01).name('부유 진폭');
   pose.add(config.bottle, 'floatSpeed', 0.1, 4, 0.01).name('부유 주기 (rad/s)');
   pose.add(config.bottle, 'originX', -16, 16, 0.1).name('가로 위치');
   pose.add(config.bottle, 'originY', -8, 8, 0.1).name('세로 위치');
   pose.add(config.bottle, 'shadowScale', 0, 6, 0.05).name('그림자 크기');
+  pose.add(config.bottle, 'shadowDrop', -30, 0, 0.1).name('그림자 높이 (바닥 아님)');
 
-  const shake = gui.addFolder('단계 1 — 흔들림');
-  shake.add(config.bottle, 'shakeFrequency', 2, 40, 0.5).name('흔들림 주파수 (Hz)');
-  shake.add(config.bottle, 'shakeAmplitude', 0, 2, 0.01).name('흔들림 진폭');
-  shake.add(config.bottle, 'shakeCurve', 0.2, 4, 0.05).name('진폭 커브 (지수)');
-  shake.add(config.camera, 'shakeStrength', 0, 1, 0.01).name('카메라 흔들림 강도');
-  shake.add(config.camera, 'shakeFrequency', 2, 40, 0.5).name('카메라 흔들림 주파수');
-  shake.add(config.bottle, 'aimLeanZ', -50, 50, 0.5).name('조준 기울기 (도)').onChange(() => ctx.onLean());
-  shake.add(config.bottle, 'aimPitch', -10, 85, 0.5).name('조준 피치 — 카메라 향함 (도)').onChange(() => ctx.onLean());
-  shake.add(config.bottle, 'aimRiseSeconds', 0.05, 1.5, 0.01).name('조준에 걸리는 시간 (s)');
-  shake.add(config.bottle, 'aimFallSeconds', 0.1, 3, 0.05).name('원위치까지 시간 (s)');
+  // ── 표류와 커서 (§6.2 · §6.3) ────────────────────────────────────────────
+  // 예전에는 여기가 '단계 1 — 흔들림' 이었다. 흔들기가 사라지면서 그 폴더가
+  // 하던 일 — 병이 어떻게 움직이는가 — 을 이 둘이 나눠 갖는다.
+  const drift = gui.addFolder('표류 / 커서 반응');
+  drift.add(config.bottle, 'driftTiltZ', 0, 20, 0.5).name('표류 기울기 Z (도)');
+  drift.add(config.bottle, 'driftTiltX', 0, 20, 0.5).name('표류 기울기 X (도)');
+  drift.add(config.bottle, 'driftPeriodZ', 4, 60, 0.5).name('표류 주기 Z (s)');
+  drift.add(config.bottle, 'driftPeriodX', 4, 60, 0.5).name('표류 주기 X (s)');
+  drift.add(config.bottle, 'pullTravel', 0, 3, 0.01).name('커서 쪽 이동');
+  drift.add(config.bottle, 'pullTilt', 0, 8, 0.1).name('커서 쪽 기울기 (도)');
+  drift.add(config.bottle, 'capLagTilt', 0, 30, 0.5).name('뚜껑 2차 모션 (도)');
+  drift.add(config.bottle, 'restFizz', 0, 1, 0.01).name('상시 탄산');
+  drift.add(config.bottle, 'pointerFizz', 0, 1, 0.01).name('커서가 더하는 탄산');
+
+  const aim = gui.addFolder('조준 — 개봉 직전의 회전');
+  aim.add(config.bottle, 'aimLeanZ', -50, 90, 0.5).name('조준 기울기 (도)').onChange(() => ctx.onLean());
+  aim.add(config.bottle, 'aimPitch', -10, 85, 0.5).name('조준 피치 — 카메라 향함 (도)').onChange(() => ctx.onLean());
+  aim.add(config.bottle, 'aimRiseSeconds', 0.05, 1.5, 0.01).name('조준에 걸리는 시간 (s)');
+  aim.add(config.bottle, 'aimFallSeconds', 0.1, 3, 0.05).name('원위치까지 시간 (s)');
 
   // ── the carbonation ──────────────────────────────────────────────────────
   const fizz = gui.addFolder('탄산 / 거품');
@@ -175,13 +185,13 @@ export function bootMenuDebug(ctx) {
   fizz.add(config.bottle, 'bubbleWobble', 0, 2, 0.01).name('나선 흔들림');
   fizz.add(config.bottle, 'fizzStrength', 0, 2, 0.01).name('기포 밝기');
   fizz.add(config.bottle, 'foamCeiling', 100, 196, 1).name('거품 최고 높이 (mm)');
-  fizz.add(config.bottle, 'foamProduction', 0, 600, 5).name('거품 생성량 (부피/s)');
+  fizz.add(config.bottle, 'foamProduction', 0, 600, 5).name('거품 생성량 (부피/s, 배수와 균형)');
   fizz.add(config.bottle, 'foamDrain', 0, 200, 1).name('거품 배수량 (부피/s)');
   fizz.add(config.bottle, 'foamPopSurge', 0, 3000, 10).name('개봉 순간 분출량');
   fizz.add(config.bottle, 'foamPopSeconds', 0.02, 0.8, 0.01).name('분출 지속 (s)');
   fizz.add(config.bottle, 'foamScrollSpeed', 0, 4, 0.05).name('거품 요동 속도');
   fizz.add(config.bottle, 'sloshDrive', 0, 900, 5).name('출렁임 구동력');
-  fizz.add(config.bottle, 'strokeFrequency', 0.5, 15, 0.1).name('팔 스트로크 (Hz, 공진 ~4)');
+  fizz.add(config.bottle, 'strokeFrequency', 0.01, 15, 0.01).name('출렁임 구동 주파수 (Hz, 공진 ~4)');
   fizz.add(config.bottle, 'sloshDamping', 0.01, 0.6, 0.005).name('출렁임 감쇠비');
   fizz.add(config.bottle, 'sloshLimit', 0, 2, 0.01).name('출렁임 최대 진폭');
 
@@ -196,10 +206,9 @@ export function bootMenuDebug(ctx) {
   };
   refreshTotal();
 
-  run.add(config.transition, 'shakeSeconds', 0, 1, 0.01).name('1 흔들림 (s)').onChange(refreshTotal);
-  run.add(config.transition, 'barSeconds', 0.05, 1, 0.01).name('2 바 닫힘 (s)').onChange(refreshTotal);
-  run.add(config.transition, 'popSeconds', 0.02, 0.6, 0.01).name('2 뚜껑 튀어오름 (s)');
-  run.add(config.transition, 'coverSeconds', 0.016, 1.2, 0.008).name('3 차폐 (s)').onChange(refreshTotal);
+  run.add(config.transition, 'barSeconds', 0.05, 1, 0.01).name('1 바 닫힘 (s)').onChange(refreshTotal);
+  run.add(config.transition, 'popSeconds', 0.02, 0.6, 0.01).name('1 뚜껑 튀어오름 (s)');
+  run.add(config.transition, 'coverSeconds', 0.016, 1.2, 0.008).name('2 차폐 (s)').onChange(refreshTotal);
   run.add(config.bottle, 'burstSeconds', 0, 0.5, 0.01).name('분출 지속 (s)');
   run.add(config.bottle, 'burstSize', 0, 20, 0.1).name('분출 크기');
   run.add({ play: () => ctx.onPlay() }, 'play').name('▶ 전환 강제 재생 (설정으로)');

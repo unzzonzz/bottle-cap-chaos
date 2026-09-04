@@ -2,6 +2,7 @@ import { CanvasTexture, ClampToEdgeWrapping, LinearFilter, LinearMipmapLinearFil
 import { PALETTE, withAlpha } from '../core/palette.js';
 import { RADIUS, ROLE, RULE, SPACE, TYPE } from '../core/tokens.js';
 import { drawIcon } from '../ui/icons.js';
+import { drawLettering } from '../ui/lettering.js';
 import {
   applyTracking,
   dialogPanel,
@@ -198,13 +199,22 @@ export function labelTexture() {
   ctx.clearRect(0, 0, w, h);
 
   /**
-   * 흰 타원 하나. 그게 전부다.
+   * 흰 타원 하나, 그 위에 이름 하나.
    *
    * ── 한때 인쇄물 흉내를 냈고, 그건 과했다 ─────────────────────────────────
    * 아치형 라틴 문자, 가운데 왕관 뚜껑 일러스트, 한글 제목, 하단 미세 인쇄 밴드까지
    * 얹혀 있었다. 라벨은 화면에서 세로 200픽셀 남짓이고 그 위에 유리 한 겹과 블룸이
-   * 올라가므로, 요소를 넣을수록 읽히는 게 아니라 지저분해진다. 지금은 종이 한 장이고,
-   * 그 위에서 빛나는 건 앞에 있는 유리가 맡는다.
+   * 올라가므로, 요소를 넣을수록 읽히는 게 아니라 지저분해진다. 그래서 전부 걷어내고
+   * 종이 한 장만 남겼다.
+   *
+   * ── 그 판단은 다섯 요소에 대한 것이었고, 하나는 다르다 ──────────────────
+   * 걷어낸 뒤로 라벨은 **빈 스티커**였다. §7 이 1990년대 음료 그래픽을 이 세계의
+   * 목소리로 삼는데, 음료병에서 그 목소리가 사는 자리가 바로 여기다. 그래서 하나만
+   * 돌아온다: 이름, 벡터 획으로.
+   *
+   * 다섯이 실패한 이유가 하나에는 걸리지 않는 근거는 그때의 근거 그 자체다 —
+   * "요소를 넣을수록 지저분해진다" 는 요소 수에 대한 말이었다. 그리고 이건 폰트가
+   * 아니라 획이라 유리와 블룸 아래에서 얇아지지 않는다.
    *
    * 타원의 가로 지름은 페이지 폭의 절반이다. 메시가 `bodyRadius` 30mm 병을 160도
    * 도는 호라서 페이지가 대응하는 호장이 2*pi*30*(160/360) = 83.8mm 이고, 라벨은
@@ -216,35 +226,93 @@ export function labelTexture() {
   ctx.fillStyle = PALETTE.label.paper;
   ctx.fill();
 
+  /**
+   * ── 페이지의 세로축이 병을 **감는다.** 축을 따라가지 않는다 ─────────────
+   * 처음엔 반대로 놓았고 화면에서 이름이 90도 누워 나왔다. 메시는 `bodyRadius`
+   * 30mm 병을 160도 도는 호이고, 페이지의 h 가 그 호를 따라간다 — 타원이 화면에서
+   * 세로로 길어 보이는 것은 **감긴** 결과이지 페이지가 세로라서가 아니다.
+   *
+   * 그래서 텍스트 블록 전체를 90도 돌려서 그린다. 페이지 좌표를 다시 저술하지
+   * 않는 이유는 타원의 이심률 계산(위)이 지금의 w/h 관계에 걸려 있기 때문이다 —
+   * 축을 바꾸면 그 계산도 같이 바꿔야 하고, 회전은 한 줄이다.
+   */
+  ctx.save();
+  ctx.translate(w / 2, h / 2);
+  ctx.rotate(Math.PI / 2);
+  // 회전 뒤의 좌표계: x 가 병의 축 방향, y 가 감기는 방향. 그래서 두 덩이는
+  // y 로 벌리고, 각 덩이는 x 로 가운데를 잡는다.
+  //
+  // 부호는 실측으로 정했다. -PI/2 는 글자가 뒤집혀 나온다 — 페이지의 y 가 병에
+  // 감기면서 방향이 한 번 더 뒤집히기 때문이고, 그건 UV 를 읽어서 알아내는 것보다
+  // 두 번 돌려 보는 쪽이 빠르다.
+  drawLettering(ctx, '한여름', {
+    x: 0,
+    y: -h * 0.1,
+    size: 96,
+    color: PALETTE.menu.labelInk,
+    tracking: 8,
+    align: 'center',
+  });
+  drawLettering(ctx, '알까기', {
+    x: 0,
+    y: h * 0.05,
+    size: 96,
+    color: PALETTE.menu.labelInk,
+    tracking: 8,
+    align: 'center',
+  });
+  // 아래를 받치는 줄 하나. §20 의 어휘이고, 인쇄물의 규칙선이다.
+  ctx.strokeStyle = PALETTE.menu.labelRule;
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.moveTo(-w * 0.22, h * 0.2);
+  ctx.lineTo(w * 0.22, h * 0.2);
+  ctx.stroke();
+  ctx.restore();
+
   return toSmoothTexture(canvas);
 }
 
 /**
- * The shadow under the bottle: one dark ellipse, in hard steps.
+ * The shadow under the bottle: one very soft, very faint ellipse.
  *
  * Not a rendered shadow, and not because one would be hard — a real one needs a
  * light, a caster, a receiver and a depth pass to produce a dark blob on the
- * floor. That IS the blob. The same argument `CardMaterial` makes about the
- * offset quad behind a card.
+ * floor. That IS the blob.
+ *
+ * ── it was four hard steps, and it was a CONTACT shadow ──────────────────
+ * 0.62 in the middle falling to 0.07 at the rim, in four discrete rings. That
+ * darkness is what a shadow looks like where an object meets a surface, and it
+ * was right while the bottle stood on one.
+ *
+ * §6.2 takes the surface away. What is left has one job — saying the bottle is
+ * ABOVE something — and §7 gives it one adjective, "very soft". So it is a
+ * continuous gradient rather than steps, it peaks at a fifth of what it did,
+ * and it reaches zero well inside the quad. A hard-edged shadow under a
+ * floating object is the thing that puts the floor back.
+ *
+ * The resolution went up with it: 64 texels was ample for four flat rings and
+ * is not for a gradient, which bands visibly when it is stretched across the
+ * two-and-a-half-unit quad `shadowScale` asks for.
  */
 export function shadowTexture() {
-  const size = 64;
+  const size = 128;
   const { canvas, ctx } = makeCanvas(size, size);
   ctx.clearRect(0, 0, size, size);
-  // A deep blue-grey rather than black, at the same four opacities. The alphas
-  // are the falloff's shape and stay here; only the ink moved to the palette.
-  const steps = [
-    [0.5, withAlpha(PALETTE.menu.shadow, 0.62)],
-    [0.68, withAlpha(PALETTE.menu.shadow, 0.4)],
-    [0.86, withAlpha(PALETTE.menu.shadow, 0.19)],
-    [1.0, withAlpha(PALETTE.menu.shadow, 0.07)],
-  ];
-  for (let i = steps.length - 1; i >= 0; i--) {
-    ctx.fillStyle = steps[i][1];
-    ctx.beginPath();
-    ctx.arc(size / 2, size / 2, (size / 2) * steps[i][0], 0, Math.PI * 2);
-    ctx.fill();
-  }
+  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  // The alphas are the falloff's shape and stay here; only the ink is the
+  // palette's. Squared-off in the middle so the core is broad rather than a
+  // point, then gone by 0.9 — the last tenth is what keeps the quad's own edge
+  // from ever being visible.
+  g.addColorStop(0, withAlpha(PALETTE.menu.shadow, 0.13));
+  g.addColorStop(0.35, withAlpha(PALETTE.menu.shadow, 0.1));
+  g.addColorStop(0.7, withAlpha(PALETTE.menu.shadow, 0.035));
+  g.addColorStop(0.9, withAlpha(PALETTE.menu.shadow, 0));
+  g.addColorStop(1, withAlpha(PALETTE.menu.shadow, 0));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+  ctx.fill();
   return toTexture(canvas);
 }
 
@@ -341,7 +409,7 @@ export function capLogoTexture(texels = 512) {
   // The corners are never sampled — the panel is the inscribed circle — but
   // filling them costs nothing and means a rounding error at the rim cannot
   // pick up a transparent texel.
-  ctx.fillStyle = PALETTE.menu.labelInk;
+  ctx.fillStyle = PALETTE.menu.labelPaper;
   ctx.fillRect(0, 0, size, size);
 
   /**
@@ -380,39 +448,48 @@ export function capLogoTexture(texels = 512) {
   // Rim. Outside the box the lockup is confined to — see the header — so it is
   // the half of the design that only reads where the disc is drawn whole, which
   // today is the mark grid's tile.
-  ring(60, 3, PALETTE.menu.labelInkDeep);
-  ring(52, 2, PALETTE.menu.labelInkLight);
+  ring(60, 3, PALETTE.menu.labelInk);
+  ring(52, 1.5, PALETTE.menu.labelRule);
 
   // The two rules, inside the crop so they frame the wordmark at full cover.
-  arc(37, 2, 202, 338, PALETTE.menu.labelPaperAlt);
-  arc(37, 2, 22, 158, PALETTE.menu.labelPaperAlt);
+  arc(37, 1.5, 202, 338, PALETTE.menu.labelRule);
+  arc(37, 1.5, 22, 158, PALETTE.menu.labelRule);
 
-  drawText(ctx, {
-    text: 'BOTTLE',
+  /**
+   * ── it said BOTTLE / CAP / CHAOS, in a weight that no longer exists ──────
+   * Two fossils in one lockup. The words were the game's OLD name — the rename
+   * to 한여름 알까기 reached the title bar, the routes and the package and never
+   * reached the label on the bottle, because nothing that reads the label reads
+   * the name. And all three lines asked for `weight: 700`, which the single-face
+   * bundle cannot supply: the browser would have synthesised it, and canvas 2D
+   * bakes a synthesised bold into a texture where it cannot be undone.
+   *
+   * Both are fixed by the same change. The wordmark is VECTOR LETTERING now
+   * (`ui/lettering.js`), so it carries the right name, it cannot ask for a
+   * weight, and it does not depend on the webfont having loaded — which matters
+   * more here than anywhere: this texture is baked once and cached, and it is
+   * the one piece of type that is part of an OBJECT rather than of the
+   * interface.
+   *
+   * The slant went with it. It was a 0.22 shear standing in for an italic the
+   * bundle did not have; stroked letterforms do not need one, and a sheared
+   * stroke system reads as a mistake rather than as a style.
+   */
+  drawLettering(ctx, '한여름', {
     x: c,
-    y: 54,
-    font: fontSpec({ size: 15, weight: 700 }),
-    color: PALETTE.menu.labelPaper,
+    y: 48,
+    size: 15,
+    color: PALETTE.menu.labelInk,
+    tracking: 1.2,
     align: 'center',
-    slant: 0.22,
   });
-  drawText(ctx, {
-    text: 'CAP',
+  drawLettering(ctx, '알까기', {
     x: c,
-    y: 76,
-    font: fontSpec({ size: 22, weight: 700 }),
-    color: PALETTE.menu.labelPaper,
+    y: 68,
+    size: 21,
+    color: PALETTE.menu.labelInk,
+    tracking: 1.6,
     align: 'center',
-    slant: 0.22,
-  });
-  drawText(ctx, {
-    text: 'CHAOS',
-    x: c,
-    y: 92,
-    font: fontSpec({ size: 13, weight: 700 }),
-    color: PALETTE.menu.labelRule,
-    align: 'center',
-    slant: 0.22,
   });
 
   /**

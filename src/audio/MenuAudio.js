@@ -229,10 +229,9 @@ export class MenuAudio {
 
   /**
    * @param {number} _dt
-   * @param {{stage: string, t: number, shake: number}} state  from `Transition.update`
-   * @param {number} shake  the curved envelope `bootMenu` already computed
+   * @param {{stage: string, t: number, pop: number}} state  from `Transition.update`
    */
-  update(_dt, { state, shake = 0 } = {}) {
+  update(_dt, { state } = {}) {
     if (!state) return;
 
     const stage = state.stage;
@@ -247,24 +246,31 @@ export class MenuAudio {
     }
 
     /**
-     * The carbonation, rising with the shake.
+     * The carbonation. Always on, and very quiet.
      *
-     * The envelope saturates at 1 after 0.38 s and holds there for as long as
-     * the press is held, which is the right shape: a wind-up that arrives and
-     * then sits under pressure rather than climbing forever.
+     * ── it used to rise with the shake, and there is no shake ──────────────
+     * The loop was driven by the wind-up envelope: it saturated after 0.38 s and
+     * held there while the press was held, and `rate` carried most of the build
+     * because the sound is a single band of noise with no oscillator under it —
+     * raising the rate lifts the noise playback and the band with it, so the
+     * fizz gets finer and more agitated, which is what more gas in less space
+     * sounds like.
      *
-     * `rate` carries most of the build and gain carries the rest. Because the
-     * sound is a single band of noise with no oscillator under it, raising the
-     * rate lifts both the noise playback and the band with it — the fizz gets
-     * finer and more agitated, which is what more gas in less space sounds
-     * like. Gain alone would just be the same hiss, louder.
+     * §6.1 turns the fizz from something a gesture produces into the drink's
+     * own, so the loop becomes a bed: on whenever the menu is, at a fraction of
+     * the gain it used to peak at, at the low end of the rate range where it
+     * reads as a settled drink rather than an agitated one.
+     *
+     * ── `shakeGain` still names it, and cannot be renamed ──────────────────
+     * The key lives in `config.menu`, under `src/game/`, which the direction
+     * freezes at diff 0. It is the carbonation bed's gain now. The floor of
+     * 0.42 and the 0.3 factor below are what turn a peak level into a bed one.
      */
-    const on = stage === STAGE.SHAKE && shake > 0.01;
     this.audio.setLoop('menu_shake', {
-      on,
-      gain: (0.35 + 0.65 * shake) * Math.max(0, this.config.shakeGain ?? 0.42),
-      rate: 0.7 + shake * 0.75,
-      fade: 0.06,
+      on: true,
+      gain: 0.3 * Math.max(0, this.config.shakeGain ?? 0.42),
+      rate: 0.72,
+      fade: 0.4,
     });
   }
 

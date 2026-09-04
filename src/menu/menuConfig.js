@@ -20,39 +20,160 @@ export const MENU_CONFIG = {
     /** Left of centre, so the menu column has the right half to itself. */
     originX: -7.4,
     originY: 1.2,
-    floorY: -11.4,
+    /**
+     * How far below the bottle the soft shadow sits.
+     *
+     * ── this was `floorY`, and there is no floor ──────────────────────────
+     * §6.2 takes the ground away: the bottle floats in space, so there is
+     * nothing for it to stand on and no contact shadow to cast. What is left is
+     * the one very soft, very faint shape §7 still asks for, and its only job is
+     * to say "this object is above something" — so it is far below, it never
+     * touches, and it does not sharpen as the bottle descends.
+     *
+     * The name changed with the meaning. A `floorY` that no longer marks a floor
+     * is the kind of constant somebody reinstates a contact shadow against.
+     */
+    shadowDrop: -11.4,
 
     // ── the lean ───────────────────────────────────────────────────────────
-    /** The main tilt, in the screen plane. The brief asks for 15–25. */
-    leanZ: 19,
+    /**
+     * The resting tilt, in the screen plane.
+     *
+     * ── 19 was a bottle STANDING at a jaunty angle ─────────────────────────
+     * The old note said "the brief asks for 15–25", and that brief wanted a
+     * bottle on a surface. §7 of this one asks for the opposite pose: tilted
+     * toward the horizontal, floating gently in space. At 19 the bottle reads as
+     * standing up whatever the floor is doing, because that is the angle a
+     * bottle stands at.
+     *
+     * 62 reads as floating. Measured against the liquid model rather than
+     * guessed: `docs/bottle-preview.html` reports the drink's overflow in
+     * millimetres, and the sweep at fill 112 gives 0.000 mm at every step from
+     * 19 to 82 degrees. The axis-crossing level rises as the surface tilts
+     * (112.0 at 19, 112.8 at 55, 115.6 at 65, 126.8 at 75) because the neck is
+     * above and the wedge added on the high side is narrower than the one taken
+     * from the low — which is exactly the effect `_levelFor` exists to solve.
+     *
+     * Past about 80 the level runs into the bracket `_levelFor` searches and the
+     * bracket has been widened to suit, but the pose stops working before the
+     * arithmetic does: a bottle lying flat has no silhouette left.
+     */
+    leanZ: 62,
     /** A little away from the camera, so it reads as an object and not a decal. */
-    leanX: 5,
+    leanX: 9,
     /** Turns the label to the front. Fixed; the bottle never spins. */
     faceYaw: 0,
 
-    // ── the float ──────────────────────────────────────────────────────────
-    floatAmplitude: 0.36,
-    floatSpeed: 0.85,
+    // ── the drift ──────────────────────────────────────────────────────────
+    /**
+     * §6.2: 아주 느린 부유. 위아래 미세 진폭 + 아주 느린 회전.
+     *
+     * Slower and smaller than the old float, which was a bottle bobbing over a
+     * floor. An object with nothing under it has no reason to bob at a walking
+     * pace; the slower it moves, the more it reads as weightless.
+     */
+    floatAmplitude: 0.28,
+    floatSpeed: 0.34,
+    /**
+     * The slow turn, in degrees, and how long one cycle takes.
+     *
+     * ── the rotation is what makes the liquid legible ──────────────────────
+     * The drink's surface is solved level in the WORLD (`_slosh`), so a bottle
+     * that never moves shows a surface that never moves either, and the fact
+     * that it is horizontal rather than square to the bottle is invisible. Turn
+     * the bottle slowly and the surface visibly stays put — which is §7's
+     * "natural liquid behavior", and it costs one sine.
+     *
+     * Two axes at different periods so the pose never repeats exactly. Small:
+     * this is a drift, not a tumble.
+     */
+    driftTiltZ: 5.5,
+    driftTiltX: 3.5,
+    driftPeriodZ: 23,
+    driftPeriodX: 17,
 
-    // ── the shake ──────────────────────────────────────────────────────────
-    /** Cycles per second along the bottle's own axis. High on purpose. */
-    shakeFrequency: 17,
-    shakeAmplitude: 0.5,
-    /** How hard the envelope ramps up over stage 1. 1 is linear. */
-    shakeCurve: 1.6,
+    // ── the pointer ────────────────────────────────────────────────────────
+    /**
+     * §6.3: 접근 시 미세 패럴랙스 · 물리적으로 그럴듯한 아주 작은 회전.
+     *
+     * All three are small on purpose. The brief bans `hover = scale up` as a
+     * preset, and the way a preset gives itself away is not its size — it is
+     * that it arrives instantly and leaves instantly. What makes this read as an
+     * object is the spring in `Bottle.update`, not the amplitude, so the
+     * amplitude can stay under the drift's own and still be felt.
+     */
+    /**
+     * How far the bottle drifts toward the pointer, in world units.
+     *
+     * Measured rather than picked: the camera sits 62 units back at a 30-degree
+     * field, so the visible height is 2·62·tan15° ≈ 33 units across 750 CSS px —
+     * about 23 px per unit. At 0.55 a full pull moved the bottle 0.18 units,
+     * which is four pixels, and four pixels of parallax is a number rather than
+     * an effect. 1.1 puts it at eight, which is where it starts to register
+     * without becoming a control that follows the mouse.
+     */
+    pullTravel: 1.1,
+    /**
+     * How far it tips toward the pointer, in degrees, at full pull.
+     *
+     * Same arithmetic: at 1.5 a full pull was 0.59 degrees, which on a
+     * twelve-unit bottle moves its ends by three pixels. 3.5 gives 1.4 degrees
+     * and seven — still well under the drift's own 5.5, which is the constraint
+     * that keeps the response from reading as the bottle turning to face you.
+     */
+    pullTilt: 3.5,
+    /**
+     * The cap's lag, in degrees per unit of difference between the two springs.
+     *
+     * Larger than `pullTilt` because it multiplies a DIFFERENCE, which is small:
+     * the two springs agree except while the pointer is actually moving, so this
+     * is only ever visible during the motion — which is exactly when secondary
+     * motion is supposed to be visible.
+     */
+    capLagTilt: 7,
+
+    // ── the carbonation's floor ────────────────────────────────────────────
+    /**
+     * How much fizz there is when nothing is happening.
+     *
+     * §6.1 keeps `Fizz` and changes its reason for existing: it was the
+     * carbonation a shake produced, and it is now the drink's own. So there has
+     * to be a floor, and this is it — enough that the bottle is visibly a
+     * carbonated drink, low enough that the eruption still reads as an event.
+     */
+    restFizz: 0.22,
+    /** What an approaching pointer adds to that. §6.3's "탄산이 미묘하게 변함". */
+    pointerFizz: 0.16,
+
     // ── sloshing ───────────────────────────────────────────────────────────
     // The FREQUENCY is not here, and deliberately: it is derived from the
     // bottle's radius and fill depth by the cylinder slosh formula in
     // `Bottle._slosh`. These three are the parts that are not physics.
-    /** How hard the stroke drives the tilt mode, per unit of sin(lean). */
-    sloshDrive: 150,
     /**
-     * The arm's stroke, in Hz — NOT the rattle.
+     * How hard the drift drives the tilt mode, per unit of sin(lean).
      *
-     * Deliberately close to the drink's own ~4 Hz mode, because that is where a
-     * hand naturally shakes and it is why shaking works at all. See `_slosh`.
+     * ── it was 150 and a hand was doing the driving ────────────────────────
+     * The old drive was the shake's own stroke, at a frequency chosen to sit on
+     * the drink's ~4 Hz resonance because that is where a hand naturally shakes.
+     * There is no hand. What moves the drink now is the bottle's own slow turn,
+     * which is two orders of magnitude slower than the mode it is exciting — so
+     * the resonance does nothing and the surface simply follows.
+     *
+     * That is the correct behaviour for a floating bottle and it is why the
+     * value dropped rather than the mechanism being deleted: the oscillator is
+     * still what stops the surface snapping when the tilt changes direction, and
+     * a pop still kicks it (`popBurst`).
      */
-    strokeFrequency: 4.2,
+    sloshDrive: 26,
+    /**
+     * The drive's frequency, in Hz.
+     *
+     * The drift's own period, not a stroke — 1/23 s and 1/17 s are the two turn
+     * cycles, and this is the faster of them. Deliberately far BELOW the drink's
+     * ~4 Hz mode rather than on it: on resonance the surface would build up an
+     * amplitude the bottle's motion never justified.
+     */
+    strokeFrequency: 0.06,
     /** Damping ratio. Water-like liquids sit around a tenth. */
     sloshDamping: 0.11,
     /**
@@ -119,35 +240,33 @@ export const MENU_CONFIG = {
      */
     foamCeiling: 192,
     /**
-     * Foam made per second while shaking, as a VOLUME in world units cubed.
+     * Foam made per second, as a VOLUME in world units cubed.
      *
      * A volume and not a speed, because how fast the head then climbs is the
      * bottle's business — see the continuity note in `_carbonate`.
      *
-     * ── it is a FIT, and lowering `fillLevel` invalidated the old one ───────
-     * 300 was not chosen for its own sake. `_carbonate` integrates
-     * dy/dt = Q/A(y), so the number that matters is whether the head reaches
-     * `foamCeiling` by the time the cap goes — the beat the whole transition is
-     * built on, and the reason the note there calls the eruption "a bottle that
-     * has run out of room". A quick tap is `shakeSeconds` 0.38, and the ramp is
-     * `shakeCurve` 1.6, so a tap is worth 0.38/2.6 = 0.146 s of full production.
+     * ── it was a FIT against a wind-up that no longer happens ──────────────
+     * `_carbonate` integrates dy/dt = Q/A(y), and the number used to be solved
+     * against one question: does the head reach `foamCeiling` by the time the
+     * cap goes? That was the beat the whole transition was built on — "a bottle
+     * that has run out of room" — and the input was the shake envelope, worth
+     * 0.146 s of full production on a quick tap. 640 carried a 1.35x margin over
+     * the value that just made it.
      *
-     * Solved against the old fill of 150, the head just reached 192 on a tap at
-     * Q = 223; 300 shipped, i.e. the fit with a 1.35x margin on top.
+     * §6.1 removes the shake, so there is no wind-up to fit against. The head is
+     * no longer a meter of how hard the bottle was worked; it is the resting
+     * carbonation, held in balance against `foamDrain`, plus whatever the pop
+     * adds. So this is now a RATE that has to sit near the drain rather than a
+     * dose that has to reach a ceiling.
      *
-     * `fillLevel` then moved 150 -> 130 to get the surface out of the shoulder
-     * (see the long note there), and that broke the fit twice over. The head now
-     * starts in the BODY, where the cross-section is 25.6 against 7.5 at the old
-     * line — 3.4x the area to fill per millimetre — and it has 62 mm to climb
-     * instead of 42. At 300 a tap left the head at 146.6 mm, still inside the
-     * shoulder: a bottle that fizzes a bit rather than one that is about to go.
-     *
-     * Re-solved the same way: 477 puts the head at the ceiling on a tap, and 640
-     * carries the same 1.35x margin the old value had. Holding the button was
-     * never in question — it reached the ceiling at any of these.
+     * At 46 against a drain of 34 the head settles low in the body and stays
+     * there — visible as a thin bright band under the surface rather than as a
+     * column climbing the neck. The eruption is `foamPopSurge`'s job alone now,
+     * which is the honest arrangement: the bottle goes off because it is opened,
+     * not because it was agitated.
      */
-    foamProduction: 640,
-    /** Volume per second draining back. Constant, so the head falls when idle. */
+    foamProduction: 46,
+    /** Volume per second draining back. Constant, so the head settles rather than climbs. */
     foamDrain: 34,
     /** The extra production at the moment the cap goes, and how long it lasts. */
     foamPopSurge: 900,
@@ -236,23 +355,20 @@ export const MENU_CONFIG = {
     /** Above the bottle's middle, so the floor opens out. See `placeCamera`. */
     height: 5.2,
     lookAtY: 0.6,
-    /** How hard the camera shakes in stage 1. Much weaker than the bottle. */
-    shakeStrength: 0.14,
-    shakeFrequency: 21,
   },
 
   /**
    * The transition, stage by stage.
    *
-   * Summed default is 0.77s — 0.38 shaking, 0.34 closing, three frames covered —
-   * inside the brief's "1초 이내", which it had not been since the covered frame
-   * grew a wordmark. The press-and-hold makes the total variable upward anyway;
-   * this is the floor.
+   * Summed default is 0.39s — 0.34 closing, three frames covered. It was 0.77
+   * with a 0.38-second shake in front of it and no ceiling at all, because the
+   * press-and-hold made the total variable upward. §6.1 removes that stage, so
+   * the run is a fixed length for the first time, and well inside the brief's
+   * "1초 이내".
    */
   transition: {
-    shakeSeconds: 0.38,
     /**
-     * Stage 2: how long the letterbox takes to close.
+     * Stage 1: how long the frame takes to close.
      *
      * This is the stage's own length. `popSeconds` below is a shorter event
      * inside it, so raising this gives the bars a slower close without turning

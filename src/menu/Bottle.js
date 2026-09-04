@@ -56,19 +56,37 @@ import { onQualityChange, QUALITY } from '../core/quality.js';
  * most of the object. Back faces, contents, front faces — in that order, every
  * frame, with no sorting to do — is the cheap, era-appropriate fix.
  *
- * ── it does not spin ────────────────────────────────────────────────────────
- * Not at idle, not while shaking, not ever. The lean is fixed so the label
- * faces front and stays there, and the idle motion is a slow rise and fall with
- * a much smaller sideways drift — position only. A rotating hero object is the
- * default thing to build and it is explicitly not what this is.
+ * ── it FLOATS, and that changed three things at once ────────────────────────
+ * §6.2 of the direction takes the floor away: the bottle hangs in space, tilted
+ * well off vertical, drifting. So —
  *
- * ── the shake runs along the bottle's OWN axis ──────────────────────────────
- * `_localUp` is the tilt quaternion applied to (0, 1, 0), so it points up
- * through the bottle rather than up through the world. The shake is a scalar
- * along that vector added to the root's position. Nothing touches the
- * quaternion, which is what keeps the lean constant while the thing is being
- * shaken — and what makes it read as someone shaking a bottle to build the
- * pressure up rather than as the bottle bouncing on a floor.
+ *   the POSE   `leanZ` went 19 -> 62. At 19 a bottle reads as standing at a
+ *              jaunty angle whatever is or is not under it, because that is the
+ *              angle a bottle stands at.
+ *   the FLOOR  `floorY` is `shadowDrop` and the contact shadow is a soft shape
+ *              far below that never touches. There is nothing to make contact
+ *              with.
+ *   the SHAKE  gone. It rattled along `_localUp` — the bottle's own axis, so
+ *              the lean stayed constant and it read as someone working the
+ *              pressure up. There is no hand in this picture, and a floating
+ *              object that rattles reads as a physics glitch.
+ *
+ * ── it still does not spin, and now it turns ────────────────────────────────
+ * Those are different things. A hero object rotating on a turntable is the
+ * default thing to build and it is explicitly not what this is. What it does
+ * instead is DRIFT: a few degrees on two axes at two long periods, so the pose
+ * never repeats and the label never leaves the front.
+ *
+ * The drift earns its place rather than decorating: the drink's surface is
+ * solved level in the WORLD, so a bottle that never moves shows a surface whose
+ * horizontality is invisible. Turn it slowly and the surface visibly stays put.
+ *
+ * ── the pointer ─────────────────────────────────────────────────────────────
+ * §6.3 asks for a glass object that reacts to being approached — parallax, the
+ * highlight moving, a small physically plausible rotation, the carbonation
+ * changing, secondary motion on the cap. `_lookAt` is that, as one critically
+ * damped spring per axis with the cap's own spring running a beat behind. The
+ * inertia is the point: `hover = scale up` is the preset the direction bans.
  */
 
 /**
@@ -157,7 +175,7 @@ export class Bottle {
      */
     this._surfacePlane = new Plane(new Vector3(0, 1, 0), 0);
 
-    /** Moved by the float and the shake. Never rotated. */
+    /** Moved by the float and the pointer's pull. Never rotated — see `lean`. */
     this.root = new Group();
     /** Carries the lean, and nothing else ever writes to it. */
     this.lean = new Group();
@@ -354,9 +372,9 @@ export class Bottle {
     );
 
     // ── the shadow ───────────────────────────────────────────────────────────
-    // In the SCENE, not under the lean: a shadow lies on the floor whatever the
-    // thing above it is doing, and parenting it to the bottle would tip it over
-    // with the bottle and slide it about with the shake.
+    // In the SCENE, not under the lean: parenting it to the bottle would tip it
+    // over with the bottle and slide it about with the drift, and a shadow is
+    // not attached to the thing that casts it.
     this.shadow = new Mesh(
       new PlaneGeometry(1, 1),
       createSpriteMaterial(retro, { map: this.shadowMap, opacity: 0.85 }),
@@ -390,7 +408,18 @@ export class Bottle {
     this._q = new Quaternion();
 
     this._clock = 0;
-    this._shake = 0;
+    /**
+     * The pointer's pull, as a spring per axis, plus the cap's lagging copy.
+     *
+     * Two springs rather than one eased value because §6.3 asks for momentum
+     * and secondary motion by name: the body arrives, and then the cap arrives.
+     * A single lerp gives neither — everything moves together and stops
+     * together, which is the tell of UI motion rather than of an object.
+     */
+    this._pull = { x: 0, y: 0, vx: 0, vy: 0 };
+    this._capLag = { x: 0, y: 0, vx: 0, vy: 0 };
+    /** Where the pointer is, in -1..1 of the frame. Written by `setPointer`. */
+    this._aimAt = { x: 0, y: 0, near: 0 };
     /**
      * 액체 부피의 y(mm) 방향 누적표. `rebuild` 가 채운다.
      *
@@ -641,16 +670,28 @@ export class Bottle {
    * up in the shoulder (which the panel can still ask for) the same numbers are
    * three times bigger.
    *
-   * `_volumeBelow` is monotonic in `level`, so bisection cannot miss. Twelve
-   * passes over a 60 mm bracket lands inside 0.015 mm, well under the quarter
-   * millimetre the table itself is quantised to.
+   * `_volumeBelow` is monotonic in `level`, so bisection cannot miss.
+   *
+   * ── the bracket has to cover the tilt, and 30 mm did not ────────────────
+   * It was `fillLevel ± 30`, which was ample while the bottle leaned 19 degrees
+   * and the level moved 0.21 mm. §6.2 tilts it to 62, and the level moves with
+   * the tilt because the neck is above: measured on this profile at fill 112,
+   * 112.0 at 19 degrees, 112.8 at 55, 115.6 at 65, 126.8 at 75, and 142.0 at 82
+   * — where it is not really 142, it is the old bracket's ceiling, silently
+   * clamped. A bisection that cannot reach its answer does not fail, it returns
+   * the nearest end, and the visible result is a surface that stops responding
+   * past a tilt nobody wrote down.
+   *
+   * The bracket is the whole bottle now. It costs four more halvings to keep
+   * the same precision — sixteen passes over 190 mm lands inside 0.003 mm,
+   * against twelve over 60 mm landing inside 0.015 — and buys the guarantee
+   * that no pose can be outside it.
    */
   _levelFor(K) {
     if (K < 1e-6) return this.profile.params.fillLevel;
-    const rest = this.profile.params.fillLevel;
-    let lo = Math.max(0, rest - 30);
-    let hi = Math.min(this.profile.height, rest + 30);
-    for (let i = 0; i < 12; i++) {
+    let lo = 0;
+    let hi = this.profile.height;
+    for (let i = 0; i < 16; i++) {
       const mid = (lo + hi) * 0.5;
       if (this._volumeBelow(mid, K) < this._vol0) lo = mid;
       else hi = mid;
@@ -665,7 +706,7 @@ export class Bottle {
   }
 
   /**
-   * Re-read the lean from `tuning`, and refresh the axis the shake runs along.
+   * Re-read the lean from `tuning`, and refresh the bottle's own up-axis.
    *
    * Built by multiplying axis quaternions rather than from an `Euler`, because
    * the ORDER is the whole point and a three-letter order string is a poor way
@@ -686,10 +727,18 @@ export class Bottle {
    * the axis it was already on, which is the only way the launch reads as one
    * continuous movement.
    *
-   * It is still not a spin. It happens once, over the third of a second the
-   * carbonation takes to climb, it is driven by that same envelope, and it
-   * unwinds when the bottle settles. At rest the bottle does not rotate at all,
-   * and the SHAKE adds no rotation either — that is still pure axial travel.
+   * It is still not a spin. It happens once, over the run, it is driven by that
+   * run's own envelope, and it unwinds when the bottle settles.
+   *
+   * ── three things add to the lean, and they add in this order ─────────────
+   *   1. the AIM     a big one-off turn toward the camera, above
+   *   2. the DRIFT   a few degrees on two long periods. §6.2's "아주 느린 회전"
+   *   3. the PULL    the pointer's, a degree or two, spring-driven
+   *
+   * They are summed as ANGLES and composed once, rather than composed as three
+   * quaternions. Composing separately would make the drift's axis depend on how
+   * far the aim had already turned, so the same drift would look different at
+   * different points of a run — which reads as the drift speeding up.
    */
   applyLean(aim = this._aim) {
     const t = this.tuning;
@@ -697,8 +746,19 @@ export class Bottle {
     // Eased at both ends so the turn starts and stops rather than snapping into
     // and out of the aimed pose.
     const a = aim * aim * (3 - 2 * aim);
-    const leanZ = t.leanZ + (t.aimLeanZ - t.leanZ) * a;
-    const leanX = t.leanX + (t.aimPitch - t.leanX) * a;
+    const driftZ = Math.sin((this._clock / t.driftPeriodZ) * Math.PI * 2) * t.driftTiltZ;
+    const driftX = Math.sin((this._clock / t.driftPeriodX) * Math.PI * 2) * t.driftTiltX;
+    /**
+     * The pointer tips the bottle TOWARD the pointer, not away.
+     *
+     * Away would be the physical answer for something being pushed. Nothing is
+     * pushing it — the reading §6.3 asks for is a glass object noticing you,
+     * and an object that leans in is noticing. It is one and a half degrees at
+     * full pull, which is under the drift's own amplitude on purpose: the
+     * response has to be felt rather than seen.
+     */
+    const leanZ = t.leanZ + (t.aimLeanZ - t.leanZ) * a + driftZ - this._pull.x * t.pullTilt;
+    const leanX = t.leanX + (t.aimPitch - t.leanX) * a + driftX + this._pull.y * t.pullTilt;
 
     const qz = new Quaternion().setFromAxisAngle(new Vector3(0, 0, 1), deg(leanZ));
     const qx = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), deg(leanX));
@@ -706,18 +766,52 @@ export class Bottle {
     this.lean.quaternion.copy(qz).multiply(qx).multiply(qy);
     this._q.copy(this.lean.quaternion);
     this._localUp.set(0, 1, 0).applyQuaternion(this._q);
+
+    /**
+     * The cap carries its own rotation, one beat behind the body's.
+     *
+     * A crown cap sitting on a bottle's mouth is a separate object, and the
+     * whole of §6.3's "캡의 2차 모션" is that it does not turn at the same
+     * instant the bottle does. `_capLag` is the body's pull with a slower
+     * spring on it, so the difference between the two IS the lag — no phase
+     * offset is authored anywhere, and at rest the difference is zero and the
+     * cap sits square.
+     */
+    if (this.cap) {
+      this.cap.rotation.z = deg((this._capLag.x - this._pull.x) * t.capLagTilt);
+      this.cap.rotation.x = deg((this._pull.y - this._capLag.y) * t.capLagTilt);
+    }
   }
 
   // ── per frame ──────────────────────────────────────────────────────────────
 
   /**
+   * Where the pointer is, so the glass can react to it.
+   *
+   * ── it takes a DIRECTION and a proximity, not a hit ────────────────────────
+   * The bottle is not a control and must not behave like one: there is no
+   * hover state to enter and leave, because entering and leaving is what
+   * produces the on/off snap §6.3 calls a preset. What it gets instead is where
+   * the pointer is relative to the frame's centre and how close it has come, and
+   * everything below is continuous in both.
+   *
+   * @param {number} x  -1..1 across the frame, 0 at the centre
+   * @param {number} y  -1..1 down the frame
+   * @param {number} near  0 far away, 1 right on it
+   */
+  setPointer(x, y, near) {
+    this._aimAt.x = Math.max(-1, Math.min(1, x));
+    this._aimAt.y = Math.max(-1, Math.min(1, y));
+    this._aimAt.near = Math.max(0, Math.min(1, near));
+  }
+
+  /**
    * @param {number} dt
    * @param {object} state
-   * @param {number} state.shake  0 at rest, 1 at the peak of stage 1
    * @param {number} state.aim    1 while a run is playing out, 0 otherwise
    * @param {import('three').Camera} state.camera  for billboarding the fizz
    */
-  update(dt, { shake = 0, aim = 0, camera } = {}) {
+  update(dt, { aim = 0, camera } = {}) {
     this._clock += dt;
     const t = this.tuning;
 
@@ -734,44 +828,81 @@ export class Bottle {
     const rise = Math.sin(this._clock * t.floatSpeed) * t.floatAmplitude;
     const drift = Math.sin(this._clock * t.floatSpeed * 0.61) * t.floatAmplitude * 0.28;
 
-    // ── the shake ────────────────────────────────────────────────────────────
-    // Along `_localUp`, which is the bottle's own axis. See the header.
-    const wobble =
-      shake > 0
-        ? Math.sin(this._clock * Math.PI * 2 * t.shakeFrequency) * t.shakeAmplitude * shake
-        : 0;
-    this._shake = wobble;
+    /**
+     * ── the pointer's pull ─────────────────────────────────────────────────
+     * A critically damped spring per axis. `omega` is what makes it feel like
+     * mass rather than like a lerp: the bottle starts late, overshoots nothing,
+     * and keeps moving for a moment after the pointer stops.
+     *
+     * Critically damped rather than under-damped on purpose. A bottle that
+     * bounces back is a bottle on a spring; one that coasts to a stop is one
+     * with weight, and weight is what §6.3's "물리적으로 그럴듯한" asks for.
+     */
+    const omega = 4.6;
+    for (const [k, vk, target] of [
+      ['x', 'vx', this._aimAt.x * this._aimAt.near],
+      ['y', 'vy', this._aimAt.y * this._aimAt.near],
+    ]) {
+      const a = omega * omega * (target - this._pull[k]) - 2 * omega * this._pull[vk];
+      this._pull[vk] += a * dt;
+      this._pull[k] += this._pull[vk] * dt;
+    }
+    /**
+     * The cap's own spring, chasing the body's rather than the pointer's.
+     *
+     * Slower, so it arrives after. That one beat of delay is the whole of the
+     * secondary motion — the cap is a separate object sitting on the mouth, and
+     * a separate object does not accelerate at the same instant the thing under
+     * it does.
+     */
+    const capOmega = omega * 0.55;
+    for (const [k, vk] of [['x', 'vx'], ['y', 'vy']]) {
+      const a = capOmega * capOmega * (this._pull[k] - this._capLag[k]) - 2 * capOmega * this._capLag[vk];
+      this._capLag[vk] += a * dt;
+      this._capLag[k] += this._capLag[vk] * dt;
+    }
 
     this.root.position.set(
-      t.originX + drift + this._localUp.x * wobble,
-      t.originY + rise + this._localUp.y * wobble,
-      this._localUp.z * wobble,
+      t.originX + drift + this._pull.x * t.pullTravel,
+      t.originY + rise - this._pull.y * t.pullTravel,
+      this._pull.y * t.pullTravel * 0.5,
     );
 
     /**
-     * Under the BASE of the bottle, not under its middle.
+     * Under the bottle's MIDDLE now, not under its base.
      *
-     * The lean turns the bottle about its own centre, so a bottle leaning
-     * nineteen degrees has its base a third of its half-height off to one side
-     * — three whole units here. A shadow parked under the centre therefore sits
-     * beside the bottle rather than under it, which is exactly what the first
-     * version looked like. Asking the lean where the base actually ended up
-     * costs one vector rotation and cannot drift out of agreement with it.
+     * It was under the base, and the reasoning was sound for a bottle that
+     * stood on something: the lean turns the bottle about its own centre, so at
+     * 19 degrees the base is a third of a half-height off to one side and a
+     * shadow parked under the centre sits beside the bottle rather than under
+     * it. That argument assumes the shadow marks where the object TOUCHES.
      *
-     * It tracks the horizontal drift and not the rise, because it is on the
-     * floor. It does shrink a little as the bottle goes up, which is the whole
-     * of the height cue and costs one multiply.
+     * §6.2 removes the contact. What is left is one very soft shape a long way
+     * below a floating object, and the thing directly above it is the bottle's
+     * body — at 62 degrees the base is off to one side by most of the bottle's
+     * length, and a shadow out there reads as a second object.
+     *
+     * It does not shrink with the rise either. `shadowLift` was a height cue for
+     * something approaching a floor; a shadow that sharpens as the bottle
+     * descends is exactly the contact this pose does not have.
      */
-    this._scratch.copy(this._baseLocal).applyQuaternion(this.lean.quaternion);
-    this.shadow.position.set(this.root.position.x + this._scratch.x, t.floorY + 0.02, this._scratch.z);
-    const lift = 1 - (rise + wobble * this._localUp.y) * t.shadowLift;
-    const r = this.profile.params.bodyRadius * MM * t.shadowScale * lift;
+    this.shadow.position.set(this.root.position.x, t.shadowDrop, this.root.position.z);
+    const r = this.profile.params.bodyRadius * MM * t.shadowScale;
     this.shadow.scale.set(r, r, 1);
 
-    this._surface(dt, shake);
-    this._carbonate(dt, shake);
+    this._surface(dt);
+    this._carbonate(dt);
+    /**
+     * The carbonation is always on, and the pointer stirs it.
+     *
+     * §6.1: the fizz survives the shake's removal with a different reason for
+     * existing — it is the drink's own carbonation rather than something a
+     * gesture produced. `restFizz` is that floor. §6.3 asks for it to react to
+     * an approaching pointer, which is the `near` term, and the foam head still
+     * carries the eruption.
+     */
     this.fizz.update(dt, {
-      intensity: Math.max(shake, this._foam),
+      intensity: Math.max(t.restFizz + this._aimAt.near * t.pointerFizz, this._foam),
       camera,
       worldQuaternion: this.lean.quaternion,
     });
@@ -785,9 +916,15 @@ export class Bottle {
    * See the note on the front below: its height is integrated from a production
    * rate divided by the bottle's own cross-section, so the bottle's geometry
    * decides how fast the foam climbs at every height. Nothing here is eased by
-   * hand and nothing tracks the shake directly — a head that rose and fell with
-   * each individual wobble would read as a level meter, and shaking a bottle
-   * does not do that. It makes foam, and foam does not go back in.
+   * hand.
+   *
+   * ── it used to be a meter of how hard the bottle had been worked ────────
+   * Production was `shake * foamProduction`, so the head recorded the wind-up
+   * and the eruption was a bottle that had run out of room. With no shake the
+   * production is constant and sits just above the drain, so the head settles
+   * low in the body instead of climbing — a drink that is fizzy, not one that
+   * is about to go. The eruption is `foamPopSurge` alone now, which is the
+   * honest arrangement: the bottle goes off because it is opened.
    *
    * ── the geometry is rewritten, not rebuilt ─────────────────────────────
    * Six rings of twenty, positions only, once a frame. Each ring is placed up
@@ -799,7 +936,7 @@ export class Bottle {
    *
    * The bubbles under it are their own thing entirely — see `Fizz`.
    */
-  _carbonate(dt, shake) {
+  _carbonate(dt) {
     const t = this.tuning;
     const g = this.foam.geometry;
     const data = g.userData;
@@ -822,7 +959,7 @@ export class Bottle {
      * last stretch. Between the body and the neck the area falls by a factor of
      * six, so the front moves six times faster up there, out of one division.
      *
-     * That single line is most of what makes a shaken bottle look like a shaken
+     * That single line is most of what makes a fizzing bottle look like a fizzing
      * bottle, and no hand-authored curve was going to find it by accident.
      *
      * Production tracks entrained gas; drainage is constant, so when the
@@ -832,7 +969,7 @@ export class Bottle {
      */
     const r = Math.max(0.05, this.profile.envelopeAt(this._foamTop / MM) * inset * MM);
     const area = Math.PI * r * r;
-    const production = shake * t.foamProduction + this._pop * t.foamPopSurge;
+    const production = t.foamProduction + this._pop * t.foamPopSurge;
     this._pop = Math.max(0, this._pop - dt / Math.max(0.01, t.foamPopSeconds));
     const net = production - t.foamDrain;
 
@@ -845,8 +982,8 @@ export class Bottle {
     this.foam.visible = active;
     if (!active) return;
 
-    // Churn. Faster while it is actually being shaken.
-    this._foamScroll -= dt * t.foamScrollSpeed * (0.5 + shake);
+    // Churn. Faster while the eruption is running.
+    this._foamScroll -= dt * t.foamScrollSpeed * (0.5 + this._pop);
     if (this.foamMaterial.map) this.foamMaterial.map.offset.y = this._foamScroll;
 
     const topY = this._foamTop;
@@ -920,11 +1057,12 @@ export class Bottle {
    * The fill line, sloshing at its OWN frequency — as a PLANE.
    *
    * ── the liquid is an oscillator, not a follower ─────────────────────────
-   * The first version drove the surface directly off the shake, at the shake's
-   * frequency. That is wrong in a way you can feel: a liquid in a container has
-   * a natural sloshing frequency of its own, it responds to being driven rather
-   * than copying the drive, and it keeps going after the driving stops. Copying
-   * the drive makes the surface look welded to the bottle.
+   * The first version drove the surface directly off the bottle's own motion,
+   * at the bottle's own frequency. That is wrong in a way you can feel: a liquid
+   * in a container has a natural sloshing frequency of its own, it responds to
+   * being driven rather than copying the drive, and it keeps going after the
+   * driving stops. Copying the drive makes the surface look welded to the
+   * bottle.
    *
    * The fundamental (m = 1) mode in a cylinder is
    *
@@ -932,10 +1070,12 @@ export class Bottle {
    *
    * — eps being the first zero of J1', the derivative of the first-order Bessel
    * function. For this bottle, R about 2.9 units and h about 13, that lands at
-   * roughly 4 Hz, against a shake at seventeen. So the surface moves at a
-   * quarter of the rate the bottle does, which is exactly the lag you see when
-   * someone shakes a bottle in front of you, and it could not possibly have
-   * come out of driving it at the shake frequency.
+   * roughly 4 Hz. The bottle's drift is at a sixtieth of that, so the surface is
+   * far BELOW resonance now and simply follows the drive with almost no lag —
+   * which is the correct answer for a bottle turning slowly in space, and is why
+   * the oscillator survived the shake's removal rather than being replaced by a
+   * lerp. What it is still doing is refusing to snap when the drift reverses,
+   * and carrying the kick a pop gives it.
    *
    * It is integrated as a damped driven oscillator, sub-stepped so a slow frame
    * cannot make it explode — omega * dt already reaches 1.3 at the loop's 50 ms
@@ -953,13 +1093,13 @@ export class Bottle {
    * on `_surfacePlane`, and `buildLiquidGeometry` for what went away.
    *
    * ── and the drive comes from the LEAN ───────────────────────────────────
-   * A perfectly vertical shake excites no tilt at all — it is symmetric about
-   * the axis. This bottle is leaning, so shaking it along its own axis has a
-   * horizontal component of sin(lean), and THAT is what tips the drink. The
-   * coupling falls out of the geometry rather than being asserted, and it means
-   * standing the bottle upright would correctly calm the surface down.
+   * Motion along a perfectly upright bottle's own axis excites no tilt at all —
+   * it is symmetric about the axis. This bottle leans hard, so its axial motion
+   * has a horizontal component of sin(lean), and THAT is what tips the drink.
+   * The coupling falls out of the geometry rather than being asserted, and it
+   * means standing the bottle upright would correctly calm the surface down.
    */
-  _surface(dt, shake) {
+  _surface(dt) {
     /**
      * 이 프레임의 월드 행렬을 먼저 세운다.
      *
@@ -978,28 +1118,27 @@ export class Bottle {
     const omega = Math.sqrt(G_WORLD * k * Math.tanh(k * h));
 
     /**
-     * ── the drive is the STROKE, not the rattle ────────────────────────────
-     * Driving this at the shake's own 17 Hz produced almost nothing, and that
-     * is not a bug — it is the answer. 17 Hz is nearly seven times the drink's
-     * natural 4 Hz, and a linear oscillator driven far above resonance responds
-     * as F/omega_d^2, which here is a fiftieth of what it would give at
-     * resonance. A high-frequency rattle genuinely does not slosh a bottle.
+     * ── the drive is the DRIFT ─────────────────────────────────────────────
+     * It used to be an arm: a stroke of a few hertz with a 17 Hz rattle riding
+     * on it, and the stroke sat on the drink's own ~4 Hz mode because that is
+     * precisely why shaking a bottle works. The rattle itself did almost
+     * nothing, which was not a bug but the answer — a linear oscillator driven
+     * at seven times resonance responds as F/omega_d², a fiftieth of what it
+     * gives on resonance.
      *
-     * What sloshes a bottle is the arm. Shaking one is a stroke of a few hertz
-     * with the rattle riding on top, and a few hertz is right on top of the
-     * drink's own mode — which is precisely WHY shaking works, and why you
-     * instinctively shake at that rate rather than faster. So the drive is at
-     * `strokeFrequency`, the resonance does the amplifying, and the shake's own
-     * frequency stays what it always was: the bottle's motion, not the drink's.
+     * The arm is gone. What moves the drink is the bottle's own slow turn, far
+     * BELOW resonance, where the response is quasi-static: the surface follows
+     * the drive almost exactly and lags by almost nothing. That is right. A
+     * bottle drifting in space does not have waves in it.
      *
      * Horizontal share from the current lean: `_localUp` is the bottle's axis
      * in world space, so its horizontal length IS sin(lean). Stand the bottle
-     * upright and the drive correctly goes to zero — an axial shake of an
-     * upright cylinder is symmetric and cannot excite a tilt.
+     * upright and the drive correctly goes to zero — axial motion of an upright
+     * cylinder is symmetric and cannot excite a tilt.
      */
     const tipping = Math.hypot(this._localUp.x, this._localUp.z);
     const drive =
-      shake * t.sloshDrive * tipping * Math.sin(this._clock * Math.PI * 2 * t.strokeFrequency);
+      t.sloshDrive * tipping * Math.sin(this._clock * Math.PI * 2 * t.strokeFrequency);
 
     const steps = Math.max(1, Math.ceil(dt * 240));
     const step = dt / steps;
@@ -1145,7 +1284,7 @@ export class Bottle {
    * Fire the two-frame spray. Called once, when the cap leaves.
    *
    * It also slams the pressure to full, so the head is at the top of the neck
-   * on the frame the cap goes rather than wherever the shake happened to have
+   * on the frame the cap goes rather than wherever the drift happened to have
    * pushed it. Whatever the player skipped, the bottle erupts.
    */
   popBurst() {

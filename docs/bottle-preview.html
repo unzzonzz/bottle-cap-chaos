@@ -14,10 +14,9 @@
   #ui .bad { color: #b8231f; font-weight: 700; }
 </style>
 <div id="ui">
-  <label>lean Z <input id="lz" type="range" min="-40" max="40" step="1" value="8" /> <b id="lzv">8</b>°</label>
-  <label>lean X <input id="lx" type="range" min="-40" max="40" step="1" value="0" /> <b id="lxv">0</b>°</label>
+  <label>lean Z <input id="lz" type="range" min="-85" max="85" step="1" value="8" /> <b id="lzv">8</b>°</label>
+  <label>lean X <input id="lx" type="range" min="-85" max="85" step="1" value="0" /> <b id="lxv">0</b>°</label>
   <label>fill <input id="fill" type="range" min="40" max="185" step="1" value="150" /> <b id="fillv">150</b></label>
-  <label>shake <input id="sh" type="range" min="0" max="1" step="0.01" value="0" /> <b id="shv">0</b></label>
   <label><input id="wire" type="checkbox" /> wireframe</label>
   <label>넘침 <b id="over">0.000</b> mm <span id="overmax">(최대 0.000)</span></label>
 </div>
@@ -61,20 +60,17 @@
   scene.add(bottle.root);
 
   const $ = (id) => document.getElementById(id);
-  let shake = 0;
 
   function applyTuning() {
     cfg.bottle.leanZ = Number($('lz').value);
     cfg.bottle.aimLeanZ = Number($('lz').value);
     cfg.bottle.leanX = Number($('lx').value);
     cfg.bottle.aimPitch = Number($('lx').value);
-    shake = Number($('sh').value);
     $('lzv').textContent = $('lz').value;
     $('lxv').textContent = $('lx').value;
-    $('shv').textContent = $('sh').value;
     bottle.applyLean(0);
   }
-  for (const id of ['lz', 'lx', 'sh']) $(id).addEventListener('input', applyTuning);
+  for (const id of ['lz', 'lx']) $(id).addEventListener('input', applyTuning);
   $('fill').addEventListener('input', () => {
     cfg.bottle.profile.fillLevel = Number($('fill').value);
     $('fillv').textContent = $('fill').value;
@@ -148,7 +144,7 @@
     const now = performance.now();
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
-    bottle.update(dt, { shake, aim: 0, camera });
+    bottle.update(dt, { aim: 0, camera });
     // 매 프레임 다시 맞춘다. 기울기와 채움을 바꾸면 경계가 달라지고, 이건 도구다.
     fit();
     renderer.render(scene, camera);

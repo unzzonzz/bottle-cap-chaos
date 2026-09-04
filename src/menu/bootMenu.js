@@ -207,8 +207,8 @@ export function bootMenu(
   /**
    * How far the camera has been pulled back to hold the visible WIDTH.
    *
-   * Written by `placeCamera`, read by the per-frame shake and by
-   * `unitsPerPixel`. It has to be shared: the shake sets `camera.position`
+   * Written by `placeCamera`, read by the per-frame camera placement and by
+   * `unitsPerPixel`. It has to be shared: the frame loop sets `camera.position`
    * every frame from `cfg.camera.distance`, so a pull-back applied only in
    * `placeCamera` is undone before the first frame is drawn — which is exactly
    * why the bottle stayed enormous after the aspect was fixed.
@@ -218,7 +218,7 @@ export function bootMenu(
   const LANDSCAPE_POSE = {
     originX: cfg.bottle.originX,
     originY: cfg.bottle.originY,
-    floorY: cfg.bottle.floorY,
+    shadowDrop: cfg.bottle.shadowDrop,
     columnX: cfg.items.columnX,
     columnY: cfg.items.columnY,
     plateWidth: cfg.items.plateWidth,
@@ -270,7 +270,7 @@ export function bootMenu(
     Object.assign(cfg.bottle, {
       originX: LANDSCAPE_POSE.originX,
       originY: LANDSCAPE_POSE.originY,
-      floorY: LANDSCAPE_POSE.floorY,
+      shadowDrop: LANDSCAPE_POSE.shadowDrop,
     });
     cfg.items.columnX = Math.round(LANDSCAPE_POSE.columnX * k);
     cfg.items.columnY = Math.round(LANDSCAPE_POSE.columnY * k);
@@ -498,7 +498,7 @@ export function bootMenu(
     // makes it a smaller fraction of the view, so it grows by the same factor
     // and keeps lighting the same amount of floor around the bottle.
     floor.scale.set(30 * camWiden, 30 * camWiden, 1);
-    floor.position.set(cfg.bottle.originX, cfg.bottle.floorY, 0);
+    floor.position.set(cfg.bottle.originX, cfg.bottle.shadowDrop, 0);
   }
   placeCamera();
   // A resolution change moves what one texel is worth, so the plates have to be
@@ -614,29 +614,25 @@ export function bootMenu(
   }
 
   /**
-   * ── press to shake it up, release to open it ─────────────────────────────
-   * Holding a menu item keeps the bottle in stage 1: it goes on being shaken,
-   * the head goes on climbing, and nothing fires. Letting go opens it. A plain
-   * tap still gets the full wind-up — the minimum is a floor, not a target —
-   * so the quick way and the fun way both feel deliberate. `Transition.shakeEnd`
-   * is where that floor lives.
+   * ── press to open. That is the whole of it now ───────────────────────────
+   * There used to be a wind-up: holding a menu item kept the bottle in a shake
+   * stage — it went on being shaken, the head went on climbing, and letting go
+   * fired it. A plain tap got the full minimum, so the quick way and the fun way
+   * both felt deliberate.
    *
-   * The release is caught on the WINDOW rather than the canvas. A press that
-   * leaves the canvas before it comes up would otherwise never be released, and
-   * the bottle would shake forever with no way to fire it.
+   * §6.1 removes the shake, and the interaction goes with it: there is no hand
+   * in this picture to hold the bottle with. Choosing a menu item is one gesture
+   * again, and the run is a fixed length for the first time.
    *
-   * ── a run in flight is NOT interruptible, and that is the fix ────────────
-   * There used to be a skip here: a press during the animation jumped straight
-   * to the covered frame. It had to go, because with a press-and-hold opening
-   * it turns double-tapping into a cheat — the first tap starts the run, the
-   * second lands while the cap is still in the air and cuts the whole thing to
+   * ── a run in flight is still NOT interruptible ──────────────────────────
+   * There used to be a skip here too: a press during the animation jumped
+   * straight to the covered frame. It went because with a press-and-hold opening
+   * it turned double-tapping into a cheat — the first tap started the run, the
+   * second landed while the cap was still in the air and cut the whole thing to
    * nothing, so hammering an item entered the game with no animation at all.
    *
-   * Nothing is lost by removing it. The brief wanted the animation skippable
-   * because you see it on every single menu choice; the RELEASE is now that
-   * escape hatch, and a better one — you end the wind-up whenever you like and
-   * the only thing you cannot do is go below the minimum. Which is precisely
-   * what a skip that fires on the second tap of a double-tap was doing wrong.
+   * That reasoning survives the hold's removal, and more simply: the run is
+   * 0.39 s. There is nothing to escape from.
    */
   function onDown(e) {
     pointer.x = e.clientX;
@@ -723,7 +719,7 @@ export function bootMenu(
     const hit = items.pick(canvas, camera, e.clientX, e.clientY);
     if (hit && !hit.disabled) {
       menuAudio?.press('menu', hit);
-      run(hit.id, { held: true });
+      run(hit.id);
     }
   }
 
@@ -736,7 +732,6 @@ export function bootMenu(
   // off the canvas leaves `grabbing` on a page nothing is being dragged on.
   const endGesture = () => {
     editor?.release();
-    transition.release();
     menuAudio?.release();
     canvas.classList.remove('is-dragging');
     refreshHover();
@@ -767,14 +762,14 @@ export function bootMenu(
    * written twice to achieve it.
    *
    * @param {() => void} onSwap  runs on the first fully covered frame
-   * @param {{held?: boolean, uncover?: boolean}} [opts]
+   * @param {{uncover?: boolean}} [opts]
    *   `uncover` false leaves the bars shut when the run ends. That is the
    *   navigation case and it is not a detail: `location.assign` does not tear
    *   this document down synchronously, so a document that opened its bars on
    *   the way out would show the menu again for however long the next one takes
    *   to paint — which is exactly the flash the covered frame exists to prevent.
    */
-  function runTransition(onSwap, { held = false, uncover = true } = {}) {
+  function runTransition(onSwap, { uncover = true } = {}) {
     if (transition.running) return false;
     items.setHover(null);
     items.enabled = false;
@@ -808,7 +803,6 @@ export function bootMenu(
           cinematic.open(cfg.transition.barSeconds);
         },
       },
-      { held },
     );
     return true;
   }
@@ -846,8 +840,9 @@ export function bootMenu(
    *
    * The same transition the menu item played, so entering the game is one
    * continuous gesture across two screens rather than two different flourishes.
-   * The URL is built BEFORE it starts so the prefetch has the whole shake to
-   * work with, which is the timing `menuRoutes.prefetch` explains.
+   * The URL is built BEFORE it starts so the prefetch has the whole run to work
+   * with, which is the timing `menuRoutes.prefetch` explains — and that window
+   * got shorter when the shake stage went, so the prefetch matters more.
    */
   function launch() {
     if (!pendingMode || !opponent) return;
@@ -1252,22 +1247,48 @@ export function bootMenu(
   // ── loop ─────────────────────────────────────────────────────────────────
   let raf = 0;
   let last = 0;
-  const shakeOffset = new Vector3();
+  /** Scratch for projecting the bottle to screen space. Reused every frame. */
+  const bottleAt = new Vector3();
 
   function tick(dt) {
 
     const state = transition.update(dt);
-    const shake = Math.pow(state.shake, cfg.bottle.shakeCurve);
+
+    /**
+     * Where the pointer is, in -1..1 of the CANVAS, and how close it has come.
+     *
+     * ── it is not a hit test, deliberately ────────────────────────────────
+     * §6.3 asks the glass to react to being approached, and a raycast against
+     * the bottle answers a different question: it is inside or it is outside,
+     * which is a switch, and a switch is what produces the on/off snap the
+     * direction bans. So the bottle is handed a direction and a proximity and
+     * decides for itself — everything downstream of `setPointer` is continuous.
+     *
+     * `near` falls off over roughly a third of the canvas from the bottle's
+     * own screen position, which is close enough that walking the pointer
+     * across the menu column does not stir it.
+     */
+    if (pointer.inside) {
+      const rect = canvas.getBoundingClientRect();
+      const nx = ((pointer.x - rect.left) / Math.max(1, rect.width)) * 2 - 1;
+      const ny = ((pointer.y - rect.top) / Math.max(1, rect.height)) * 2 - 1;
+      bottleAt.copy(bottle.root.position).project(camera);
+      const d = Math.hypot(nx - bottleAt.x, ny + bottleAt.y);
+      bottle.setPointer(nx, ny, Math.max(0, 1 - d / 0.9));
+    } else {
+      bottle.setPointer(0, 0, 0);
+    }
 
     // The bottle turns its mouth toward the camera for the whole run and
-    // unwinds once it is over — see `Bottle.applyLean`. Driven by the STAGE
-    // rather than by the shake envelope, so it is fully aimed before the cap
-    // goes rather than only as far round as the last wobble left it.
-    bottle.update(dt, { shake, aim: transition.running ? 1 : 0, camera });
+    // unwinds once it is over — see `Bottle.applyLean`. Driven by the STAGE, so
+    // it is fully aimed before the cap goes.
+    bottle.update(dt, { aim: transition.running ? 1 : 0, camera });
     // 배경의 광점. 렌더 클럭이고 게임 상태를 읽지도 쓰지도 않는다.
     sky.update(dt, camera);
-    // The burst is a billboard and the camera is very nearly fixed, but "very
-    // nearly" is what leaves a sprite visibly edge-on when the camera shakes.
+    // The burst is a billboard. The camera is fixed now that the shake is gone,
+    // so this could be done once — it is not, because a sprite that is visibly
+    // edge-on is the failure and one quaternion copy a frame is not worth the
+    // risk of the camera ever moving again.
     bottle.burst.quaternion.copy(camera.quaternion);
 
     items.update(dt, current === 'menu' ? 1 : 0);
@@ -1281,26 +1302,17 @@ export function bootMenu(
     // The view mode's inertia lives here; nothing else in the editor moves.
     if (current === 'editor') editor?.update(dt);
 
-    // ── the camera's own shake ─────────────────────────────────────────────
-    // Same frequency family as the bottle's and a fraction of the amplitude.
-    // Position only; rotating the camera would swing the whole frame and read
-    // as an earthquake rather than as a hand shaking a bottle.
-    if (shake > 0) {
-      const c = cfg.camera;
-      const t = performance.now() * 0.001;
-      shakeOffset.set(
-        Math.sin(t * Math.PI * 2 * c.shakeFrequency) * c.shakeStrength * shake,
-        Math.sin(t * Math.PI * 2 * c.shakeFrequency * 1.31) * c.shakeStrength * shake,
-        0,
-      );
-    } else {
-      shakeOffset.set(0, 0, 0);
-    }
-    camera.position.set(
-      shakeOffset.x,
-      cfg.camera.height * camWiden + shakeOffset.y,
-      cfg.camera.distance * camWiden,
-    );
+    /**
+     * ── the camera had a shake of its own, and it has gone ────────────────
+     * Same frequency family as the bottle's at a fraction of the amplitude,
+     * position only — rotating it would have swung the whole frame and read as
+     * an earthquake rather than as a hand on a bottle. There is no hand.
+     *
+     * The camera is still written every frame rather than once in
+     * `placeCamera`, because `camWiden` moves on every resize and this is the
+     * only place that reads it per frame.
+     */
+    camera.position.set(0, cfg.camera.height * camWiden, cfg.camera.distance * camWiden);
 
     /**
      * The bars and the cap, off the one clock.
@@ -1328,10 +1340,8 @@ export function bootMenu(
     }
     cinematic.update(dt);
 
-    // The sound, after everything else has written this frame's state. The
-    // shake envelope is the curved one the bottle and the camera both use, so
-    // all three are describing the same motion.
-    menuAudio?.update(dt, { state, shake });
+    // The sound, after everything else has written this frame's state.
+    menuAudio?.update(dt, { state });
     audio?.update(dt);
 
     debug.frame(state);

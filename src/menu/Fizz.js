@@ -28,11 +28,19 @@ import { bubbleTexture } from './menuTextures.js';
  * the middle. Each bubble here belongs to a site, fixed for the life of the
  * bottle, and returns to it.
  *
- * It is also the real reason shaking makes a bottle erupt. Not "pressure builds
- * up" — the pressure barely moves. Shaking whips gas from the headspace into
- * the liquid as thousands of tiny bubbles, and every one of them is a new
- * nucleation site. So the number of ACTIVE sites here scales with the shake,
- * and that one line is the whole mechanism the eruption rests on.
+ * ── what `intensity` MEANS changed, and the physics did not ───────────────
+ * The number of ACTIVE sites scales with `intensity`, and that one line used to
+ * be the whole mechanism the eruption rested on: shaking a bottle does not
+ * build pressure — the pressure barely moves — it whips gas from the headspace
+ * into the liquid as thousands of tiny bubbles, every one of them a new
+ * nucleation site.
+ *
+ * §6.1 removes the shake. `intensity` is now the drink's own carbonation
+ * (`restFizz`), lifted a little by an approaching pointer and a lot by the
+ * eruption, and none of the arithmetic below cares which of those is feeding
+ * it. A site count driven by how much gas is coming out of solution is correct
+ * whatever is causing the gas to come out — which is why this file survived the
+ * change with its header edited and its code untouched.
  *
  * ── 2. a rising bubble grows, and growing makes it faster ───────────────────
  * It is rising through supersaturated liquid, so CO2 keeps coming out of

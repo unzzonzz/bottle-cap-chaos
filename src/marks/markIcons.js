@@ -208,9 +208,17 @@ export function badgeTexture(player, on, { width = 30, height = 20 } = {}) {
     accent: on ? PLAYER_COLORS[player] : PALETTE.ui.edgeStrong,
   });
 
+  /**
+   * `1P` / `2P`, in the one weight there is.
+   *
+   * It asked for 700, which is a weight the bundle does not carry — the browser
+   * would have synthesised it and canvas 2D would have baked the smear in. The
+   * emphasis it was buying comes from the ink and the rule instead: `selected`
+   * puts the player's own colour on both.
+   */
   applyTracking(ctx, TYPE.caption.tracking);
   ctx.save();
-  ctx.font = fontSpec({ ...TYPE.caption, weight: 700 });
+  ctx.font = fontSpec(TYPE.caption);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = on ? PALETTE.ui.text : PALETTE.ui.textMuted;
