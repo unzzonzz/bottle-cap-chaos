@@ -481,7 +481,7 @@ export class SettingsScene {
       if (item.kind === 'readout') {
         if (label !== item.label) {
           item.maps.idle?.dispose();
-          item.maps.idle = titleTexture(label, '', { ...item.size, plate: false });
+          item.maps.idle = titleTexture(label, '', { ...item.size, withPlate: false });
           item.label = label;
         }
         item.mesh.material.uniforms.uMap.value = item.maps.idle;

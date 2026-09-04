@@ -976,7 +976,7 @@ export function iconPlateTexture(icon, state = 'idle', { size = 64, scale = 1 } 
  * 있으므로 두 줄 다 `ui.text` 로 돌아간다 — 이 함수의 옛 주석이 PHASE 6 에서
  * 그렇게 될 것이라고 적어 둔 그대로다.
  */
-export function titleTexture(text, sub, { width = 256, height = 80, scale = 1, plate = true } = {}) {
+export function titleTexture(text, sub, { width = 256, height = 80, scale = 1, withPlate = true } = {}) {
   const { canvas, ctx } = makeCanvas(Math.round(width * scale), Math.round(height * scale));
   ctx.scale(scale, scale);
 
@@ -989,7 +989,7 @@ export function titleTexture(text, sub, { width = 256, height = 80, scale = 1, p
    * 있다는 말이고, 누를 수 없는 것에 그 말을 붙이는 것이 부록 B 가 없애려는
    * 바로 그 혼동이다.
    */
-  if (plate) {
+  if (withPlate) {
     panel(ctx, {
       x: 0,
       y: 0,

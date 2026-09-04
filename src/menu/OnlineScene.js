@@ -319,7 +319,7 @@ export class OnlineScene {
             width: item.size.width,
             height: item.size.height,
             scale: item.size.scale,
-            plate: false,
+            withPlate: false,
           });
           item.label = want;
         }

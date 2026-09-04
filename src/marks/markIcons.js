@@ -83,12 +83,16 @@ const cache = new Map();
  *
  * @param {string} name  `ui/icons.js` 의 ICON 키
  * @param {'idle'|'hover'|'active'|'disabled'} state
- * @param {{size?: number, scale?: number, plate?: boolean}} [opts]
+ * @param {{size?: number, scale?: number, withPlate?: boolean}} [opts]
  *   `scale` 은 이제 **텍셀 배수**다. 좌표는 프레임 픽셀 그대로 두고 캔버스만 키운다.
- *   `plate: false` 는 아이콘만 그린다 — 다른 것 위에 얹히는 아이콘(칸의 휴지통)용.
+ *   `withPlate: false` 는 아이콘만 그린다 — 다른 것 위에 얹히는 아이콘(칸의
+ *   휴지통)용. 옵션 이름이 `plate` 였고, 면을 그리는 함수가 `gelButton` 에서
+ *   `plate` 로 바뀌면서 **불리언이 함수를 가렸다** — `if (plate) plate(ctx, …)` 가
+ *   "plate is not a function" 으로 죽었다. 빌드는 통과한다: 둘 다 스코프 안에
+ *   있는 유효한 식별자다.
  */
-export function iconTexture(name, state = 'idle', { size = 28, scale = 1, plate = true } = {}) {
-  const key = `${name}:${state}:${size}:${scale}:${plate}`;
+export function iconTexture(name, state = 'idle', { size = 28, scale = 1, withPlate = true } = {}) {
+  const key = `${name}:${state}:${size}:${scale}:${withPlate}`;
   const hit = cache.get(key);
   if (hit) return hit;
 
@@ -100,7 +104,7 @@ export function iconTexture(name, state = 'idle', { size = 28, scale = 1, plate 
   ctx.imageSmoothingEnabled = true;
   ctx.scale(scale, scale);
 
-  if (plate) {
+  if (withPlate) {
     plate(ctx, {
       x: 0,
       y: 0,
@@ -236,8 +240,8 @@ export function badgeTexture(player, on, { width = 30, height = 20 } = {}) {
  * this helper is deliberately not general: one line, centred, no wrapping. A
  * question that does not fit is a question that should be shorter.
  */
-export function messageTexture(text, { width = 300, height = 44, tone = 'idle', plate = true } = {}) {
-  const key = `msg:${text}:${width}x${height}:${tone}:${plate}`;
+export function messageTexture(text, { width = 300, height = 44, tone = 'idle', withPlate = true } = {}) {
+  const key = `msg:${text}:${width}x${height}:${tone}:${withPlate}`;
   const hit = cache.get(key);
   if (hit) return hit;
 
@@ -252,7 +256,7 @@ export function messageTexture(text, { width = 300, height = 44, tone = 'idle', 
    * 부록 B 의 패널 **안**에 들어가는 문장에 떠 보이는 둥근 판을 두르면, 누를
    * 수 없는 것이 누를 수 있다고 말하게 된다.
    */
-  if (plate) {
+  if (withPlate) {
     panel(ctx, {
       x: 0,
       y: 0,

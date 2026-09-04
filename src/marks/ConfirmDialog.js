@@ -256,7 +256,7 @@ export class ConfirmDialog {
 
     if (text !== this._text) {
       this._text = text;
-      const box = { width: this._box.plate.width, height: this._box.rows[0].h, plate: false };
+      const box = { width: this._box.plate.width, height: this._box.rows[0].h, withPlate: false };
       this.message.material.uniforms.uMap.value = messageTexture(text, box);
     }
     this._onConfirm = onConfirm ?? null;
