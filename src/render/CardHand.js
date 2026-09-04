@@ -939,27 +939,15 @@ export class CardHand {
     u.uOpacity.value = alpha;
 
     /**
-     * 테두리 홀로그램의 **위상**은 카드가 화면 어디에 어떤 각도로 있느냐다.
+     * ── 홀로그램에 넘기던 다섯 유니폼이 여기 있었다 ─────────────────────────
+     * 카드의 화면 위치·각도·크기·모서리 반지름과 세기. 직교 카메라에서 시야각
+     * 이리데선스가 왜 안 되는지, 그래서 왜 위상을 화면 좌표에서 만들었는지는
+     * `CardMaterial` 헤더에 기록으로 남아 있다.
      *
-     * 직교 카메라에서 시야각 이리데선스가 왜 안 되는지는 `CardMaterial` 헤더에
-     * 있다. 여기서 할 일은 그 대신 쓰는 두 값을 넘겨 주는 것뿐이고, 둘 다 바로
-     * 위에서 메시를 놓는 데 쓴 그 값이다 — 두 번째 계산 경로를 만들면 언젠가
-     * 띠가 카드에서 떨어져 나온다.
-     *
-     * 뒷면은 거의 빛나지 않는다. `cardBackTexture` 의 주석에 근거가 있다: 상대의
-     * 손패는 화면 위쪽에 늘 떠 있어서 대비를 일부러 낮춰 뒀고, 그 다섯 장이
-     * 무지개로 빛나면 판 위에서 눈이 계속 그쪽으로 간다.
-     *
-     * 무장하면 올라간다. 슬롯이 밝아지는 것과 같은 말을 카드 쪽에서 한 번 더 하는
-     * 것이고, 그 중복은 의도다 — 무장은 손이 카드를 보고 있을 때 일어난다.
+     * §8.2 가 홀로그램을 폐기했고, 그것이 하던 두 번째 일 — 무장한 카드의 테두리를
+     * 밝히는 것 — 은 드롭 가이드의 물결로 옮겼다. 무장은 카드가 슬롯에 도달한
+     * 것이지 카드가 빛나는 것이 아니다.
      */
-    u.uCardSize.value.set(sx, sy);
-    u.uCardRadius.value = radius;
-    u.uCardPos.value.set(px, c.y.value);
-    u.uCardAngle.value = c.a.value;
-    u.uHolo.value =
-      (c.texFace ? fxCfg.holoStrength : fxCfg.holoBackStrength) *
-      (c.armed ? Math.max(0, fxCfg.holoArmedBoost) : 1);
 
     /**
      * The card being turned over is exempt from every drain there is.

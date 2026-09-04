@@ -16,6 +16,7 @@ import {
 } from './paper.js';
 import { drawIcon } from './icons.js';
 import { drawNumber } from './lettering.js';
+import { hairline } from './marks.js';
 
 /**
  * Every plate the HUD draws, as a canvas texture.
@@ -326,11 +327,23 @@ export function iconButtonTexture(icon, state, { size, scale = 1, role = null })
    * 쿼드 안에서 원만 2 픽셀 작게 그려진다 — 쿼드는 같은데 눈에는 작아 보이는,
    * 가장 설명하기 어려운 종류의 어긋남이다.
    */
+  /**
+   * ── 원반도 없어졌다. 아이콘만 남는다 ────────────────────────────────────
+   * 여기에 정원이 하나 있었고, 그 원이 정원인 이유가 길게 적혀 있었다 — 반지름을
+   * 짧은 변의 절반으로 깎는 `roundRect` 의 성질을 이용한 것이었다.
+   *
+   * PHASE 4 의 감사가 그 원을 없앤다. 나가기·리센터·뒤집기는 프레임 가장자리에
+   * 셋이 흩어져 있고, 흰 원 셋은 §11 이 "조용히 앉는다" 라고 부르는 것의 반대다.
+   * 아이콘 자체가 서로 다른 모양이라 원이 구분에 기여하지 않는다.
+   *
+   * 히트 쿼드는 그대로 `SIZE.buttonIcon` 이다 — `HudLayer` 가 만들고, 그리는
+   * 것보다 크다. §8.1 이 그렇게 요구한다.
+   *
+   * `pad` 는 남는다. 아이콘이 텍스처 가장자리에 붙으면 밉맵이 그 변에서 이웃
+   * 텍셀을 못 찾아 가장자리가 흐려진다.
+   */
   const pad = 5;
   const box = size - pad * 2;
-  const frame = { x: pad, y: pad, w: box, h: box, state, radius: RADIUS.chip };
-  if (role) roleButton(ctx, { ...frame, role });
-  else plate(ctx, frame);
 
   /**
    * 아이콘은 `icons.js` 의 벡터다. 사각형으로 손으로 찍던 것을 대체했다.
@@ -411,14 +424,23 @@ export function turnPlateTexture(text, color, { width, height, scale = 1, maxWid
   const { canvas, ctx } = makeCanvas(w, h);
   ctx.scale(scale, scale);
 
+  /**
+   * ── 판도 없다. §11 이 필드를 가리는 것을 금지한다 ────────────────────────
+   * 흰 판 하나가 이 자리에 있었다. 판이 하는 일은 글자를 읽히게 하는 것인데,
+   * 이 글자는 `playerInk` 이고 그것이 실제로 놓이는 곳은 프레임의 왼쪽 아래
+   * 모서리다 — 최소 줌에서 그 자리는 필드가 아니라 바다이고, 거기서 1P 의 잉크는
+   * 3.98:1 이다. 판이 없어도 읽힌다.
+   *
+   * 판이 실제로 하던 일은 필드의 모서리를 덮는 것이었고, 축구 최소 줌에서 그것이
+   * 눈에 보였다. §11 은 "필드가 화면을 지배한다" 이고 그 문장은 위치에 대한
+   * 말이기도 하다.
+   *
+   * ── 최악의 경우는 잔디 위의 1P 이고, 2.76:1 이다 ─────────────────────────
+   * 최대 줌으로 당기면 잔디가 모서리까지 온다. 그 조건에서만 대비가 3:1 아래로
+   * 내려간다. 판을 도로 넣는 대신 **밑줄**이 그 경우를 받는다 — 이 인터페이스의
+   * 다른 모든 컨트롤이 쓰는 어휘이고, 글자가 배경에 녹아도 선은 남는다.
+   */
   const pad = 5;
-  panel(ctx, {
-    x: pad,
-    y: pad,
-    w: frameW - pad * 2,
-    h: height - pad * 2,
-    radius: RADIUS.chip,
-  });
 
   /**
    * 색 알약은 없다. 팀 색은 **글자**가 입는다.
@@ -433,15 +455,26 @@ export function turnPlateTexture(text, color, { width, height, scale = 1, maxWid
    * 판 가운데로 간다 — 뚜껑 아래 걸리는 이름표는 원래 가운데 정렬이어야 했다.
    */
   applyTracking(ctx, TYPE.label.tracking);
+  const baseline = height / 2 + fitted.size * 0.36;
   drawText(ctx, {
     text: label,
     x: frameW / 2,
-    y: height / 2 + fitted.size * 0.36,
+    y: baseline,
     font,
     color: inkFor(color),
     align: 'center',
   });
   applyTracking(ctx, 0);
+  // 라벨 폭만큼만. 슬롯 폭만큼 그으면 밑줄이 아니라 칸을 나누는 선이다.
+  hairline(
+    ctx,
+    frameW / 2 - textW / 2,
+    Math.min(height - pad, baseline + CTA.underlineGap),
+    frameW / 2 + textW / 2,
+    Math.min(height - pad, baseline + CTA.underlineGap),
+    inkFor(color),
+    RULE.thin,
+  );
 
   const tex = toTexture(canvas);
   tex.userData = { width: frameW, height };

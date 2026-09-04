@@ -1,4 +1,4 @@
-import { Mesh, PlaneGeometry, Raycaster, Scene, Vector2 } from 'three';
+import { Color, Mesh, PlaneGeometry, Raycaster, Scene, Vector2 } from 'three';
 import { FRAME, frameCamera, refitFrameCamera } from '../core/frame.js';
 import { controlScale, controlState, easeInOut, stepControl } from './motion.js';
 import { MATCH_STATE } from '../game/Match.js';
@@ -119,6 +119,23 @@ const TURN = { width: SIZE.turnPlate.w, height: SIZE.turnPlate.h };
 const ICON = TURN.height;
 /** 턴 플레이트 아래의 온라인 턴 클럭. */
 const TIMER_HEIGHT = SIZE.clockBar.h;
+
+/**
+ * The clock's two colours, as linear-ish tints for `createSolid`.
+ *
+ * They were raw RGB triples at the two call sites — `(0.88, 0.76, 0.42)` and
+ * `(1, 0.33, 0.25)`, a gold and a red that appear nowhere in the palette. A
+ * shader uniform is where a colour hides from `docs/palette-audit.mjs`: that
+ * file walks `PALETTE`, so anything set with `.set(r, g, b)` is invisible to it.
+ *
+ * Built from the palette once, at module scope, because `Color` parses a hex
+ * string into the same three floats and doing it per frame is work for nothing.
+ * `convertSRGBToLinear` because `HudMaterial` writes straight to a linear target
+ * — the textured plates go through an sRGB texture and get converted for free,
+ * and a solid tint does not.
+ */
+const CLOCK_TINT = new Color(PALETTE.cobalt).convertSRGBToLinear();
+const URGENT_TINT = new Color(PALETTE.ui.danger).convertSRGBToLinear();
 const TIMER_GAP = SPACE.xs;
 /** 이 초 아래로 내려가면 바가 깜박인다. 브리프의 5초. */
 const TIMER_URGENT_SEC = 5;
@@ -234,17 +251,21 @@ export class HudLayer {
       this.scene.add(m);
       return m;
     };
-    this.timerTrack = bar(11, 0.55);
-    this.timerFill = bar(12, 1);
     /**
-     * The track's colour, set once.
+     * ── the groove is gone, and the line is the whole clock ────────────────
+     * There were two bars: a dark track and a bright fill over it. §8.1 asks for
+     * "선 하나. 채워지는 것이 아니라 짧아지는 것", and the fill already did the
+     * shrinking — what made it read as a gauge was the groove behind it, which
+     * says "here is how much is missing".
      *
-     * `createSolid` defaults its tint to the debug hit-area green, which is the
-     * right default for the one thing it was written for and very much the wrong
-     * one here — the spent portion of the clock came out bright green, reading as
-     * a second, growing gauge rather than as an empty groove.
+     * The groove also carried the one piece of near-black left in the project.
+     * Its tint was set here as raw RGB — `(0.09, 0.11, 0.15)`, relative
+     * luminance 0.012 — which is under the palette's floor of 0.05 and is not
+     * in the palette at all. A shader uniform is exactly where a colour hides
+     * from `docs/palette-audit.mjs`, because that file walks `PALETTE` and this
+     * was never in it.
      */
-    this.timerTrack.material.uniforms.uTint.value.set(0.09, 0.11, 0.15);
+    this.timerFill = bar(12, 1);
     this.exit = plate(12);
     this.recenter = plate(12);
     this.flip = plate(12);
@@ -541,10 +562,8 @@ export class HudLayer {
      * 로컬·AI 대전에서는 아무것도 없는 자리를 위해 떠 있는 셈이 된다.
      */
     this._timerY = turnY + TURN.height / 2 + TIMER_GAP + TIMER_HEIGHT / 2;
-    this.timerTrack.scale.set(TURN.width, TIMER_HEIGHT, 1);
-    this.timerTrack.position.set(this._turnLeft + TURN.width / 2, this._timerY, 0);
     this.timerFill.scale.set(TURN.width, TIMER_HEIGHT, 1);
-    this.timerFill.position.copy(this.timerTrack.position);
+    this.timerFill.position.set(this._turnLeft + TURN.width / 2, this._timerY, 0);
 
     for (const h of this._hits) {
       const pad = Math.max(0, ui.hitMargin);
@@ -647,7 +666,6 @@ export class HudLayer {
       this.turn,
       this.exit,
       this.recenter,
-      this.timerTrack,
       this.timerFill,
       this.flip,
     ]) {
@@ -822,10 +840,6 @@ export class HudLayer {
     // The clock sits directly above the plate and is as wide as it is, so a long nickname
     // widens both together rather than leaving a bar that no longer lines up.
     this._timerWidth = w;
-    if (this._timerY !== undefined) {
-      this.timerTrack.scale.x = w;
-      this.timerTrack.position.x = this._turnLeft + w / 2;
-    }
   }
 
   /**
@@ -838,9 +852,7 @@ export class HudLayer {
    */
   _updateTimer(clock) {
     const on = !!clock && clock.total > 0 && clock.remaining !== null;
-    this.timerTrack.userData.want = on;
     this.timerFill.userData.want = on;
-    this.timerTrack.userData.base = 1;
     if (!on) return;
 
     const t = Math.max(0, Math.min(1, clock.remaining / clock.total));
@@ -854,7 +866,7 @@ export class HudLayer {
     const urgent = clock.remaining <= TIMER_URGENT_SEC;
     const tint = this.timerFill.material.uniforms.uTint.value;
     if (urgent) {
-      tint.set(1, 0.33, 0.25);
+      tint.copy(URGENT_TINT);
       /**
        * Flashing, on the clock's own value rather than on a frame counter.
        *
@@ -866,7 +878,7 @@ export class HudLayer {
       const pulse = 0.55 + 0.45 * (Math.sin(clock.remaining * Math.PI * 6) * 0.5 + 0.5);
       this.timerFill.userData.base = pulse;
     } else {
-      tint.set(0.88, 0.76, 0.42);
+      tint.copy(CLOCK_TINT);
       this.timerFill.userData.base = 1;
     }
   }
@@ -1080,7 +1092,6 @@ export class HudLayer {
       this.turn,
       this.exit,
       this.recenter,
-      this.timerTrack,
       this.timerFill,
       this.flip,
     ]) {

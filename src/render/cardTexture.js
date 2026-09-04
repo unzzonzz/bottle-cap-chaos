@@ -6,9 +6,10 @@ import {
   SRGBColorSpace,
 } from 'three';
 import { PALETTE, withAlpha } from '../core/palette.js';
-import { RADIUS, SIZE, SPACE, TYPE } from '../core/tokens.js';
+import { RADIUS, RULE, SIZE, SPACE, TYPE } from '../core/tokens.js';
 import { applyTracking, fontSpec, panel, roundRectPath } from '../ui/paper.js';
 import { drawIcon, iconForCard } from '../ui/icons.js';
+import { wave } from '../ui/marks.js';
 
 /** 카드의 세로:가로. `tokens.js` 가 정한다. */
 const CARD_RATIO = SIZE.card.h / SIZE.card.w;
@@ -637,20 +638,39 @@ function ringFalloff(ctx, rect, from, to, peak, weight, color) {
  *                         that is 0.
  * @returns {import('three').Texture} `userData` carries the padded DRAW size.
  */
-export function useGuideTexture(width, height) {
+export function useGuideTexture(width, height, armProgress = 0) {
   const sw = Math.max(24, Math.round(width));
   const sh = Math.max(24, Math.round(height));
-  const key = `guide:${sw}:${sh}`;
+  // 여섯 단. 위의 주석 참조.
+  const phase = Math.round(Math.max(0, Math.min(1, armProgress)) * 5) / 5;
+  const key = `guide:${sw}:${sh}:${phase}`;
   const hit = cache.get(key);
   if (hit) return hit;
 
   const u = sw / SIZE.card.w;
-  /** 형태를 유지하는 선. 1.5 프레임픽셀 아래로는 내려가지 않는다. */
-  const core = Math.max(1.5, 2 * u);
-  /** 글로우의 폭. 두께의 7배 — 6~8배 사이면 빛으로 읽히고 그 밖이면 띠가 된다. */
-  const glow = core * 7;
-  /** 헤일로는 그보다 넓다. 넓고 옅어야 받침이지 테두리가 아니다. */
-  const halo = glow * 1.7;
+  /**
+   * ── §8.3 이 이 그림을 세 겹으로 다시 정의한다 ─────────────────────────────
+   * 여기 있던 것은 흰 코어 하나에 안팎으로 퍼지는 글로우 둘, 그 밑에 어두운 헤일로
+   * 둘, 안쪽에 유리 필 하나였다 — 여섯 겹의 빛나는 슬롯. 지시서가 주는 것은 셋이다:
+   *
+   *   1  아주 옅은 whiteCool 필 (알파 0.08)
+   *   2  얇은 테두리 (RULE.hair, 알파 0.4)
+   *   3  물결 하나 — 카드가 다가올수록 진폭이 커진다
+   *
+   * ── 다크 헤일로는 남는다. 지시서가 남기라고 했고, 이유가 있다 ────────────
+   * 카드 씬은 블룸 밖이고 이 슬롯은 밝은 판 위에 놓인다. 알파 0.4 짜리 흰 선은
+   * 목재 위에서 국소 대비가 없어서 사라진다. 넓고 아주 옅은 어두운 받침 하나가
+   * 그 대비를 만들고, 그것이 §8.3 의 "아주 옅은 다크 헤일로가 받쳐야 한다" 다.
+   *
+   * ── 물결의 진폭은 인자다. 텍스처는 여섯 단으로만 굽는다 ──────────────────
+   * `armProgress` 는 연속값인데 텍스처는 이산이다. 여섯 단이면 손이 카드를 올리는
+   * 동안 물결이 자라는 것이 보이고, 그 이상은 캐시만 늘린다. 유니폼이 세기를 맡고
+   * 텍스처가 모양을 맡는다는 이 파일의 분업은 그대로다 — 물결은 **모양**이라
+   * 유니폼으로는 못 만든다.
+   */
+  const line = Math.max(1, RULE.hair * u);
+  /** 받침의 폭. 선의 열두 배 — 넓고 옅어야 받침이지 테두리가 아니다. */
+  const halo = Math.max(6, line * 12);
   const bleed = Math.ceil(halo);
   const w = sw + bleed * 2;
   const h = sh + bleed * 2;
@@ -659,22 +679,34 @@ export function useGuideTexture(width, height) {
   const rect = { x: bleed, y: bleed, w: sw, h: sh, radius: RADIUS.card * u };
   ctx.lineJoin = 'round';
 
-  // 1a. 넓고 아주 옅은 헤일로. 국소 대비의 대부분은 이것이 만든다.
-  ringFalloff(ctx, rect, core * 0.5, halo, 0.13, (k) => k, PALETTE.ui.shadow);
-  // 1b. 경계 바로 바깥의 좁고 진한 윤곽. 흰 선이 어느 배경에서도 끊기지 않게 한다.
-  ringFalloff(ctx, rect, core * 0.4, core * 3.2, 0.2, (k) => k * k, PALETTE.ui.shadow);
+  // 1. 받침. 국소 대비의 전부다.
+  ringFalloff(ctx, rect, line * 0.5, halo, 0.11, (k) => k, PALETTE.ui.shadow);
 
-  // 4. 안쪽 필. 유리다 — 슬롯 안쪽이 주변보다 아주 조금 밝아야 "빈 자리"로 읽힌다.
-  roundRectPath(ctx, bleed + core * 0.5, bleed + core * 0.5, sw - core, sh - core, rect.radius);
-  ctx.fillStyle = withAlpha(PALETTE.whiteCool, 0.12);
+  // 2. 안쪽 필. 슬롯 안쪽이 주변보다 아주 조금 밝아야 "빈 자리"로 읽힌다.
+  roundRectPath(ctx, bleed + line * 0.5, bleed + line * 0.5, sw - line, sh - line, rect.radius);
+  ctx.fillStyle = withAlpha(PALETTE.whiteCool, 0.08);
   ctx.fill();
 
-  // 2. 흰 글로우. 주로 안쪽으로 — 바깥으로 나가면 1 을 씻어낸다.
-  ringFalloff(ctx, rect, -core * 0.6, -glow, 0.42, (k) => k * k, PALETTE.whiteCool);
-  ringFalloff(ctx, rect, core * 0.4, core * 1.6, 0.3, (k) => k, PALETTE.whiteCool);
+  // 3. 테두리 한 겹.
+  roundRing(ctx, rect, 0, line, withAlpha(PALETTE.whiteCool, 0.4));
 
-  // 3. 흰 코어. 형태를 지키는 하나.
-  roundRing(ctx, rect, 0, core, withAlpha(PALETTE.whiteCool, 0.92));
+  /**
+   * 4. 물결. 슬롯 아래쪽 3분의 1 을 가로지른다.
+   *
+   * 아래쪽인 이유는 카드가 **위에서** 내려오기 때문이다 — 물결이 가운데 있으면
+   * 도착하는 카드가 그것을 덮는다.
+   */
+  if (phase > 0.001) {
+    wave(
+      ctx,
+      bleed + sw * 0.16,
+      bleed + sh * 0.72,
+      sw * 0.68,
+      sh * 0.06 * phase,
+      withAlpha(PALETTE.whiteCool, 0.28 + 0.42 * phase),
+      line,
+    );
+  }
 
   /**
    * 밉은 여전히 없다.

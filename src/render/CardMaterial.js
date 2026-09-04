@@ -25,20 +25,22 @@ import { PALETTE, toRgb } from '../core/palette.js';
  * 상태고 텍스처는 여섯 장이 공유하는 캐시 항목이라, 텍스처를 다시 굽는 대신 유니폼
  * 하나로 말해야 캐시가 상태 수만큼 갈라지지 않는다.
  *
- * ── 홀로그램은 시야각으로 만들 수 없다 ──────────────────────────────────────
- * 직교 카메라에서는 시선 벡터가 상수고 카드는 노멀이 일정한 평면 쿼드다. `dot(N, V)`
- * 로 만든 이리데선스는 모든 카드가 한 가지 단색으로 나온다 — 포일이 아니라 색종이다.
+ * ── 홀로그램이 있었고, §8.2 가 폐기한다 ────────────────────────────────────
+ * 카드 테두리에 무지개 띠가 돌았다. 만드는 방법이 흥미로웠다는 것을 기록해 둔다:
+ * 직교 카메라에서는 시선 벡터가 상수라 `dot(N, V)` 이리데선스가 모든 카드에 같은
+ * 단색으로 나오므로 — 포일이 아니라 색종이다 — 무지개의 위상을 카드의 **화면 위치와
+ * 각도**에서 만들었다. 부채꼴에서는 카드마다 띠가 다른 자리에 뜨고, 끌면 쓸려
+ * 지나가고, 스프링이 정착하는 동안 어른거렸다.
  *
- * 실제 포일이 어른거리는 이유는 하이라이트가 **광원 공간에 고정**되어 있고 카드가 그
- * 안을 지나가기 때문이다. 그래서 무지개의 위상을 카드의 화면 위치와 각도에서 만든다:
- * 부채꼴에서는 카드마다 각도가 달라 띠가 다른 자리에 뜨고, 끌면 띠가 쓸려 지나가고,
- * 스프링이 정착하는 동안 어른거린다. `uHoloTime` 이 아주 느린 드리프트를 얹어, 아무도
- * 손대지 않는 손패도 죽은 그림이 되지 않게 한다.
+ * 지시서 §8.2 가 "유리 패널 카드면과 홀로그램은 폐기다" 라고 적었고, 이유는 그
+ * 어휘가 카드를 **수집품**으로 만들기 때문이다. 이 카드는 종이다.
  *
- * 더하지, 섞지 않는다 — 표면 **위의 빛**이지 표면의 색이 아니다. 그리고 `uDrain` 과
- * `uFade` 를 함께 곱한다: 낼 수 없어 회색으로 빠진 카드의 테두리만 무지개면 "쓸 수
- * 있어 보이는" 오독이 생기고, 조준 중 물러나는 손패에 빛만 남으면 판 위에 이유 없는
- * 광택이 뜬다.
+ * 홀로그램이 하던 두 번째 일 — 무장한 카드의 테두리를 밝히는 것 — 은 드롭 가이드로
+ * 옮겼다. §8.3 의 물결이 그것이고, 그쪽이 원래 맞는 자리다: 무장은 카드가 **슬롯에
+ * 도달한 것**이지 카드가 빛나는 것이 아니다.
+ *
+ * `config.cardFx` 의 `holo*` 여섯 값은 남아 있다. `src/game/` 은 diff 0 이 불변이라
+ * 지울 수 없고, 읽는 곳이 없으므로 죽은 값이다.
  */
 
 const VERT = /* glsl */ `
@@ -72,15 +74,6 @@ const FRAG = /* glsl */ `
   uniform float uFade;       // the whole hand at once; see the note on shared
 
   // ── 테두리 홀로그램 ──────────────────────────────────────────────────────
-  uniform vec2  uCardSize;   // 그려지는 크기. 손 로컬 단위 (부채꼴 배율 이전)
-  uniform float uCardRadius; // 같은 단위의 모서리 반지름
-  uniform vec2  uCardPos;    // 손 로컬 좌표의 카드 중심. 광원 공간의 위상을 만든다
-  uniform float uCardAngle;  // z 회전. 같은 곳에서 온다
-  uniform float uHolo;       // 0..1 세기. 뒷면은 거의 0, 무장하면 올라간다
-  uniform float uHoloScale;  // 단위 길이당 위상
-  uniform float uHoloSat;    // 0 = 흰빛, 1 = 완전 포화. 파스텔은 중간이다
-  uniform float uHoloRim;    // 짧은 변에 대한 테두리 폭의 비율
-  uniform float uHoloTime;   // 아주 느린 드리프트
 
   varying vec2 vUv;
 
@@ -93,31 +86,6 @@ const FRAG = /* glsl */ `
     float grey = dot(tex.rgb, vec3(0.299, 0.587, 0.114));
     float drain = clamp(uDrain, 0.0, 1.0);
     vec3 c = mix(tex.rgb, vec3(grey), drain) * uTint;
-
-    float holo = uHolo * (1.0 - drain) * uFade;
-    if (holo > 0.001) {
-      vec2 local = (vUv - 0.5) * uCardSize;
-      // 반지름은 짧은 변의 절반을 넘을 수 없다. 카드는 뒤집히는 여덟 프레임 동안
-      // 가로로만 눌리고 (flipWidth), 그 사이에 반지름만 원래 크기로 남으면 SDF 가
-      // 상자가 아닌 것을 재기 시작한다. 캔버스의 roundRectPath 가 같은 자리에서
-      // 같은 죔쇠를 갖고 있다.
-      float r = min(uCardRadius, min(uCardSize.x, uCardSize.y) * 0.5);
-      float d = sdRoundBox(local, uCardSize * 0.5, r);
-      // 경계 안쪽에서 피크. 바깥은 텍스처의 알파가 이미 0 이라 잘려 있지만,
-      // 모서리의 반투명 픽셀에 띠가 걸치면 윤곽이 두꺼워 보이므로 여기서도 닫는다.
-      float rim = max(1.5, min(uCardSize.x, uCardSize.y) * uHoloRim);
-      float band = smoothstep(-rim, -rim * 0.35, d) * (1.0 - smoothstep(-rim * 0.12, 0.0, d));
-
-      // 광원 공간: 카드를 그 각도로 돌려 화면 위 자리에 놓고, 고정된 방향으로 투영한다.
-      float ca = cos(uCardAngle);
-      float sa = sin(uCardAngle);
-      vec2 p = vec2(local.x * ca - local.y * sa, local.x * sa + local.y * ca) + uCardPos;
-      float phase = dot(p, normalize(vec2(0.6, 1.0))) * uHoloScale + uHoloTime;
-
-      vec3 rainbow = cos(phase + vec3(0.0, 2.094, 4.189)) * 0.5 + 0.5;
-      // 파스텔. 완전 포화 무지개는 네온이고, 이 화면에 네온은 없다.
-      c += mix(vec3(1.0), rainbow, clamp(uHoloSat, 0.0, 1.0)) * band * holo;
-    }
 
     gl_FragColor = vec4(c, tex.a * uOpacity * uFade);
     if (gl_FragColor.a < 0.01) discard;
@@ -191,9 +159,9 @@ export class CardMaterials {
      * What uses it: drawing a shot. Everything that is not the board gets out of
      * the way while the bow is drawn.
      *
-     * 홀로그램의 셋도 여기 있다. 카드마다 다른 것은 **위상**이지 무늬의 성질이
-     * 아니므로, 폭·채도·드리프트는 손패 전체가 한 값을 봐야 한다. `uHoloTime` 은
-     * `CardLayer` 가 프레임마다 한 번 쓴다.
+     * 홀로그램의 셋도 여기 있었다. `uHoloScale` `uHoloSat` `uHoloRim` `uHoloTime`
+     * 넷이고, 카드마다 다른 것은 위상이지 무늬의 성질이 아니라는 이유였다. 무늬가
+     * 없어졌으므로(§8.2) 넷 다 없다.
      *
      * ── 해상도를 더 받지 않는다 ─────────────────────────────────────────────
      * 생성자가 `{ resolution }` 을 받았고 `setResolution` 이 그것을 `uTargetRes` 에
@@ -202,16 +170,7 @@ export class CardMaterials {
      * 같다. 아무도 읽지 않는 값을 받아 두면 다음 사람이 그것을 근거로 무언가를
      * 계산한다.
      */
-    this.shared = {
-      uFade: { value: 1 },
-      // 넷 다 `CardLayer.update` 가 `config.cardFx` 에서 프레임마다 덮어쓴다.
-      // 여기 값은 첫 프레임이 그려지기 전의 자리지킴이지 설정이 아니다 — 튜닝은
-      // config 한 곳에서만 한다.
-      uHoloScale: { value: 0 },
-      uHoloSat: { value: 0 },
-      uHoloRim: { value: 0.05 },
-      uHoloTime: { value: 0 },
-    };
+    this.shared = { uFade: { value: 1 } };
     this._materials = new Set();
   }
 
@@ -234,14 +193,6 @@ export class CardMaterials {
         uDrain: { value: 0 },
         uTint: { value: new Vector3(1, 1, 1) },
         uOpacity: { value: 1 },
-        // 카드가 아닌 쿼드 — 드롭 가이드, 거절 사유판, 자물쇠 — 도 이 재질을 쓴다.
-        // 세기가 0 이면 위의 분기가 통째로 건너뛰어지므로, 그 셋은 아무 값도 쓰지
-        // 않고 홀로그램을 갖지 않는다.
-        uHolo: { value: 0 },
-        uCardSize: { value: new Vector2(1, 1) },
-        uCardRadius: { value: 0 },
-        uCardPos: { value: new Vector2(0, 0) },
-        uCardAngle: { value: 0 },
       },
     });
     return this._track(material);

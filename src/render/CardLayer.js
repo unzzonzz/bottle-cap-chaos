@@ -452,20 +452,13 @@ export class CardLayer {
      * 채도, 테두리 폭)과 시간이고, 그 셋이 카드마다 다르면 다섯 장이 서로 다른
      * 재질로 만들어진 것으로 보인다.
      *
-     * 매 프레임 쓰는 것은 패널 때문이다. 생성자에서 한 번만 읽으면 슬라이더를
-     * 움직여도 화면이 변하지 않고, 그건 패널에 대한 거짓말이다. 재질이 유니폼
-     * 객체를 공유하므로 비용은 한 번의 대입 넷이다.
+     * ── 여기서 홀로그램의 넷을 매 프레임 밀어 넣었다 ────────────────────────
+     * 매 프레임인 것은 패널 때문이었다 — 생성자에서 한 번만 읽으면 슬라이더를
+     * 움직여도 화면이 변하지 않고, 그건 패널에 대한 거짓말이다.
      *
-     * 시간은 아주 느린 드리프트다. 아무도 손대지 않는 손패가 완전히 정지한 그림이
-     * 되지 않을 만큼만 흐른다.
+     * §8.2 가 무늬를 폐기했으므로 넷 다 없다. `config.cardFx` 의 `holo*` 값들은
+     * `src/game/` 에 남아 있고 읽는 곳이 없다 — 그 디렉터리는 diff 0 이 불변이다.
      */
-    const fxCfg = this.config.cardFx;
-    const shared = this.materials.shared;
-    shared.uHoloScale.value = fxCfg.holoScale;
-    shared.uHoloSat.value = fxCfg.holoSaturation;
-    shared.uHoloRim.value = fxCfg.holoRimWidth;
-    shared.uHoloTime.value = this._now * fxCfg.holoDriftPerSecond;
-
     this._visible = visible;
     if (!visible) {
       for (const h of this.hands) h.root.visible = false;
@@ -616,20 +609,11 @@ export class CardLayer {
      * Re-textured only when the SLOT size changes, so the border stays one texel
      * per pixel instead of being stretched off the grid.
      *
-     * 그려지는 크기는 슬롯보다 크다. 다크 헤일로와 흰 글로우가 퍼질 자리가 텍스처
-     * 안에 있어야 하고, 그 여백만큼 쿼드도 커져야 슬롯의 실제 크기가 `guideMargin`
-     * 이 정한 값 그대로 남는다 — 여백을 무시하고 슬롯 크기로 그리면 빛이 눌려
-     * 들어와 테두리가 다시 굵은 선이 된다. 텍스처가 `userData` 로 그 크기를 준다.
+     * 그려지는 크기는 슬롯보다 크다. 다크 받침이 퍼질 자리가 텍스처 안에 있어야
+     * 하고, 그 여백만큼 쿼드도 커져야 슬롯의 실제 크기가 `guideMargin` 이 정한 값
+     * 그대로 남는다 — 여백을 무시하고 슬롯 크기로 그리면 받침이 눌려 들어와
+     * 테두리가 다시 굵은 선이 된다. 텍스처가 `userData` 로 그 크기를 준다.
      */
-    const key = `${Math.round(w)}:${Math.round(h)}`;
-    if (key !== this._guideKey) {
-      this._guideKey = key;
-      const tex = useGuideTexture(w, h);
-      this.guide.material.uniforms.uMap.value = tex;
-      this.burst.material.uniforms.uMap.value = tex;
-      this._guideDraw = { w: tex.userData.width, h: tex.userData.height };
-    }
-
     /**
      * 문턱까지의 진행도. 미리보기에는 없다 — 아직 끌고 있지 않으므로.
      *
@@ -638,6 +622,24 @@ export class CardLayer {
      * 카드가 무장되는 높이는 한 픽셀도 움직이지 않는다.
      */
     const p = preview ? 0 : hand.armProgress;
+
+    /**
+     * 키에 진행도가 들어간다. §8.3 의 물결이 **모양**이기 때문이다.
+     *
+     * 이 파일의 분업은 "텍스처가 모양, 유니폼이 세기" 이고 그건 그대로다 — 물결은
+     * 세기가 아니라 진폭이 바뀌는 곡선이라 유니폼으로 만들 수 없다. 대신
+     * `useGuideTexture` 가 진행도를 여섯 단으로 죄므로, 캐시는 슬롯 크기당 여섯
+     * 장에서 멈춘다.
+     */
+    const key = `${Math.round(w)}:${Math.round(h)}:${Math.round(p * 5)}`;
+    if (key !== this._guideKey) {
+      this._guideKey = key;
+      const tex = useGuideTexture(w, h, p);
+      this.guide.material.uniforms.uMap.value = tex;
+      // 터지는 링은 무장한 순간의 것이므로 물결이 가장 큰 판을 쓴다.
+      this.burst.material.uniforms.uMap.value = useGuideTexture(w, h, 1);
+      this._guideDraw = { w: tex.userData.width, h: tex.userData.height };
+    }
 
     // Where the card's GRIP sits at the instant it arms — the identical
     // expression `_checkArmed` compares against — and the body rises from there.
