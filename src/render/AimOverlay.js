@@ -136,6 +136,18 @@ const CONE_COLOR = PALETTE.aim.cone;
 const CONE_FILL_ALPHA = 0.14;
 const CONE_FILL_REF_HALF = 0.09;
 const CONE_EDGE_ALPHA = 0.35;
+
+/**
+ * ── 이 면은 품질 티어를 읽지 않는다. 그것이 결정이다 ────────────────────────
+ * `core/quality.js` 를 임포트하는 것은 하늘·조명·재질·필드 뷰 넷이고 여기는
+ * 아니다. 콘은 §11 의 불가침 목록에 있다 — **에러 콘은 언제나 보인다.** 티어를
+ * 낮춘 기기에서 조준의 오차 범위가 사라지면 그 기기는 다른 게임을 하는 것이다.
+ *
+ * 픽셀 비용이 걱정되어 여기를 손대려는 사람을 위해: 프래그먼트에 텍스처 페치도
+ * 루프도 없고(`smoothstep` 둘, `fract` 하나, `length` 하나), 지오메트리는 화면
+ * 전체가 아니라 사거리만큼의 부채꼴이며, 조준 중이 아니면 `visible` 이 false 다.
+ * 줄일 것이 있다면 알파나 하프톤 간격이지 존재 여부가 아니다.
+ */
 const PATH_COLOR = PALETTE.aim.path;
 const RING_ARMED_COLOR = PALETTE.aim.ringArmed;
 const RING_IDLE_COLOR = PALETTE.aim.ringIdle;

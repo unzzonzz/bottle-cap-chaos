@@ -106,6 +106,32 @@ export class MetricsOverlay {
     this._lostSec = 0;
     /** Frames where the step drain hit its own ceiling. Should stay 0. */
     this._saturated = 0;
+    /**
+     * Frames in this window whose rAF callback ran while the page was NOT
+     * visible. Normally zero, and that is the point.
+     *
+     * ── an instrument that lies quietly is worse than no instrument ─────────
+     * A surface nobody is looking at is not presented: the compositor drops the
+     * work and the GPU is under no obligation to do it. Measured here — the
+     * survival board, 2134x1600 with 4x MSAA and bloom, 39 draw calls and
+     * 19412 triangles genuinely submitted — a manual tick loop ending in
+     * `gl.finish()` reported **0.154 ms a frame** while `document.hidden` was
+     * true. That is not a fast machine, it is a frame that was never drawn.
+     *
+     * Most of the time rAF simply stops when a page hides, so no frame ever
+     * reaches `beginFrame` and this stays at 0. It is not always so: an
+     * embedded or nested browser surface can keep the callback running behind a
+     * pane that is no longer presenting, and then `fps` and `frameMs` keep
+     * producing perfectly plausible numbers about nothing. Nothing here can fix
+     * that and nothing should try — the loop has to keep running for the sake
+     * of everything else. What it can do is SAY SO, so a number quoted out of
+     * `snapshot()` carries the one fact that invalidates it.
+     *
+     * `beginFrame` already discards the multi-second interval a page returning
+     * from the background produces. This is the other half: the frames before
+     * that gap, which the interval filter cannot see.
+     */
+    this._hiddenFrames = 0;
 
     this._steps = 0;
     this._stepPeak = 0;
@@ -203,6 +229,12 @@ export class MetricsOverlay {
           this._dropped++;
           this._lostSec += (raw - CLAMP_MS) / 1000;
         }
+        // Counted against the same window as `_frames`, and only for intervals
+        // that window actually took — so the share below is a share of what was
+        // measured rather than of everything that ever happened.
+        if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+          this._hiddenFrames++;
+        }
       }
     }
     this._lastNow = now;
@@ -269,6 +301,10 @@ export class MetricsOverlay {
     this._frames.length = 0;
     this._ticks.length = 0;
     this._phys.length = 0;
+    // This one does NOT survive, unlike `_dropped` and `_saturated`. It is a
+    // statement about the frames in the window, so it has to be reset with them
+    // or it describes a window that is gone.
+    this._hiddenFrames = 0;
   }
 
   /** Everything the report needs, as plain data. Also what a console dump reads. */
@@ -292,6 +328,15 @@ export class MetricsOverlay {
       dropped: this._dropped,
       lostSec: this._lostSec,
       saturated: this._saturated,
+      /**
+       * How many of the frames above were drawn to a surface nobody was
+       * looking at, and what share of the window that is. Anything above zero
+       * means `fps`, `frameMs` and `frameP99` are not measurements of drawing
+       * cost — see the field's own note. `tickMs` and `physicsMs` survive it,
+       * because they are CPU either way.
+       */
+      hiddenFrames: this._hiddenFrames,
+      hiddenShare: f.length ? this._hiddenFrames / f.length : 0,
       aiPeakMs: this._aiPeak,
       aiTurnMs: this._aiLastTurnMs ?? 0,
       aiTurns: this._aiTurns,
@@ -347,6 +392,9 @@ export class MetricsOverlay {
       `acc   ${pad(s.backlogMs.toFixed(2), 6)} ms leftover`,
       `drop  ${pad(String(s.dropped), 6)}  lost ${s.lostSec.toFixed(2)} s`,
       `sat   ${s.saturated}`,
+      ...(s.hiddenFrames
+        ? [`hid   ${pad(String(s.hiddenFrames), 6)}  ${(s.hiddenShare * 100).toFixed(0)}% of window — fps/frame invalid`]
+        : []),
       '',
       `ai    ${s.aiTurnMs ? `${s.aiTurnMs.toFixed(0)} ms/turn` : '—'}  peak ${s.aiPeakMs.toFixed(1)} ms/frame`,
       `mem   ${heap}`,

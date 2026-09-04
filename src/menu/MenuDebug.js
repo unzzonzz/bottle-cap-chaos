@@ -274,12 +274,14 @@ export function bootMenuDebug(ctx) {
   };
   const qualityStats = { resolved: '' };
   const qualityRow = quality.add(qualityProxy, 'tier', [...TIER_NAMES]).name('티어');
-  const qualityResolved = quality.add(qualityStats, 'resolved').name('유리 · 분할 · 기포 · 보케').disable();
+  // 마지막 칸의 이름이 '보케' 가 아니라 '구름' 인 것은 그 값이 지금 무엇을 세는지가
+  // 바뀌었기 때문이다. 키 이름(`QUALITY.bokeh`)은 그대로다 — 이유는 `core/sky.js`.
+  const qualityResolved = quality.add(qualityStats, 'resolved').name('유리 · 분할 · 기포 · 구름').disable();
   if (!ctx.graphicsSettings) qualityRow.disable();
   function refreshQuality() {
     qualityStats.resolved =
       `${QUALITY.glass ? '투과' : '가짜'}  ·  ${QUALITY.bottleColumns}열  ·  ` +
-      `x${QUALITY.fizzScale.toFixed(2)}  ·  ${QUALITY.bokeh}점`;
+      `x${QUALITY.fizzScale.toFixed(2)}  ·  ${QUALITY.bokeh}장`;
     qualityRow.updateDisplay();
     qualityResolved.updateDisplay();
   }
