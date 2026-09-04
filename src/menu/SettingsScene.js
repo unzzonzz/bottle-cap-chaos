@@ -133,6 +133,18 @@ const ROWS = [
    * 있다 — 티어는 측정이 고쳐도 되는 값이고 이건 사람만 고칠 수 있는 값이다.
    */
   { id: 'track', kind: 'toggle' },
+  /**
+   * 조준 보조. §5.3.
+   *
+   * 카메라 추적과 같은 문서, 같은 `toggle`, 같은 분류다 — 이 사람이 무엇을 보고
+   * 싶은가에 대한 답이고 아무것도 자동으로 그것을 바꾸지 않는다.
+   *
+   * **기본 끔**이다. 그리고 무엇이 꺼지는지가 이 줄의 요점이다: 당김 선과 클램프
+   * 바뿐이고, 오차 콘은 이 스위치와 무관하게 언제나 그려진다. 콘은 가이드가 아니라
+   * 게임 상태이고 — 강타가 파는 상품이 "콘이 두 배로 벌어진다" 이다 — 그걸 끄면
+   * 카드 두 장이 파는 것이 화면에서 사라진다.
+   */
+  { id: 'assist', kind: 'toggle' },
   { id: 'nickname', kind: 'action' },
   /**
    * 서버 주소는 `?debug=1` 뒤로 접었다 (PHASE 5 승인 항목 3).
@@ -230,7 +242,7 @@ export class SettingsScene {
       // The audio rows need a model behind them; 닉네임 and the two links do not.
       if (def.id === 'graphics') {
         if (!graphicsSettings) continue;
-      } else if (def.id === 'track') {
+      } else if (def.id === 'track' || def.id === 'assist') {
         if (!viewSettings) continue;
       } else if (!audioSettings && def.kind !== 'link' && def.kind !== 'action') continue;
       // Both profile rows need a model behind them, the same way the audio rows
@@ -433,6 +445,8 @@ export class SettingsScene {
        */
       case 'track':
         return `카메라 추적   ${this.viewSettings?.trackCamera ? '켬' : '끔'}`;
+      case 'assist':
+        return `조준 보조   ${this.viewSettings?.aimAssist ? '켬' : '끔'}`;
       case 'nickname':
         // '없음' rather than a blank: an empty right-hand column reads as a
         // broken row, and "you have not chosen one" is the thing worth saying.
@@ -609,6 +623,11 @@ export class SettingsScene {
     // 끌 수 있어야 한다.
     if (id === 'track' && this.viewSettings) {
       this.viewSettings.toggleTrackCamera();
+      return true;
+    }
+
+    if (id === 'assist' && this.viewSettings) {
+      this.viewSettings.toggleAimAssist();
       return true;
     }
 

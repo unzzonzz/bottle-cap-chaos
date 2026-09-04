@@ -1,9 +1,13 @@
 import {
   BufferAttribute,
   BufferGeometry,
+  Color,
+  DoubleSide,
   Group,
   LineBasicMaterial,
   LineSegments,
+  Mesh,
+  ShaderMaterial,
 } from 'three';
 import { rotateY, shotSpread } from '../game/shot.js';
 import { PALETTE } from '../core/palette.js';
@@ -32,11 +36,23 @@ import { PALETTE } from '../core/palette.js';
  * bug, so it is drawn dim while the pull is inside it and bright once the shot
  * is armed.
  *
- * ── the error cone is not optional ───────────────────────────────────────────
+ * ── the error cone is not optional, and it is an AREA ───────────────────────
  * A shot that goes somewhere other than where it was aimed, with no warning, is
  * indistinguishable from a bug. So the cone is drawn to the exact half-angle the
  * seeded draw is taken from — draw it narrower than it is and it is worse than
  * not drawing it, because now the game has lied.
+ *
+ * §5.2 makes it a filled region rather than an outline: "선이 아니라 면". Two
+ * flanks and an arc describe the same set and read as a diagram of it; a wash
+ * reads as the ground the cap might land on. The outline stays as the region's
+ * EDGE at a third of the fill's presence, which is what §5.2 means by
+ * "면의 경계만 암시".
+ *
+ * ── and it stays on when the aim assist is off ──────────────────────────────
+ * §5.1: the cone is not a guide, it is a game STATE. 강타 sells "the cone opens
+ * to twice the width" and 궤적 sells "the cone is gone for this turn"; with no
+ * cone on screen neither card is selling anything. What the setting hides is the
+ * pull line and the clamp crossbar — the gesture, not the consequence.
  *
  * ── and under chaos it is all taken away ─────────────────────────────────────
  * The one exception to the paragraph above, and it comes from the same place.
@@ -106,6 +122,20 @@ const SMASH_PULL_COLOR = PALETTE.aim.smashPull;
 const SMASH_CONE_COLOR = PALETTE.aim.smashCone;
 const PULL_CLAMP_COLOR = PALETTE.aim.clamp;
 const CONE_COLOR = PALETTE.aim.cone;
+/**
+ * §5.2 의 두 알파. 채움 0.10~0.14, 가장자리 0.35.
+ *
+ * 채움은 **각도로 나뉜다** — `CONE_FILL_ALPHA` 는 기준 반각에서의 값이고, 콘이
+ * 넓어지면 그만큼 내려간다(`_writeCone`). 강타가 반각을 두 배로 벌리므로, 나누지
+ * 않으면 면적이 두 배인 워시가 두 배로 진해진다.
+ *
+ * 기준 반각은 라디안 0.09 다. 이 게임의 보통 발사가 그 근처이고, 그때 알파가
+ * 지시서가 준 범위의 위쪽(0.14)에 오도록 잡았다 — 콘은 언제나 보이는 것이므로
+ * 범위의 아래쪽에서 시작하면 평소에 사실상 없다.
+ */
+const CONE_FILL_ALPHA = 0.14;
+const CONE_FILL_REF_HALF = 0.09;
+const CONE_EDGE_ALPHA = 0.35;
 const PATH_COLOR = PALETTE.aim.path;
 const RING_ARMED_COLOR = PALETTE.aim.ringArmed;
 const RING_IDLE_COLOR = PALETTE.aim.ringIdle;
@@ -200,10 +230,92 @@ export class AimOverlay {
     // as a segment list, because a LineLoop cannot do the two straight flanks and
     // the arc without doubling back.
     this.coneGeo = lineGeometry((CONE_ARC_SEGMENTS + 4) * MAX_RIBS * 2);
-    this.coneMaterial = new LineBasicMaterial({ color: CONE_COLOR, fog: false });
+    this.coneMaterial = new LineBasicMaterial({
+      color: CONE_COLOR,
+      fog: false,
+      transparent: true,
+      // §5.2: 가장자리는 면의 경계만 암시한다.
+      opacity: CONE_EDGE_ALPHA,
+    });
     this.cone = new LineSegments(this.coneGeo, this.coneMaterial);
     this.cone.frustumCulled = false;
     this.root.add(this.cone);
+
+    /**
+     * The cone's FILL. A fan from the apex to the far arc.
+     *
+     * ── the alpha is not a constant, and §5.2 says why ────────────────────
+     * "넓어질 때 알파를 낮춰라. 강타로 콘이 두 배가 되는데 같은 알파면 면적이 두
+     * 배라 두 배로 진해진다. 정보가 아니라 소음이 된다." So `uAlpha` is handed
+     * the base alpha divided by how wide the cone has opened, and the whole
+     * region gets quieter exactly as it gets bigger — the SHAPE carries the
+     * warning and the wash never competes with the board.
+     *
+     * The other two terms are per-vertex and live in the shader: a radial fade
+     * so the far end dissolves instead of being cut off (§5.2's "끝단"), and a
+     * halftone so the region reads as a texture rather than as a pane of glass
+     * (§5.2's "질감", and `ui/marks.halftone` is the same pattern in 2D).
+     */
+    this.coneFillGeo = new BufferGeometry();
+    const fanVerts = CONE_ARC_SEGMENTS + 2;
+    this.coneFillGeo.setAttribute(
+      'position',
+      new BufferAttribute(new Float32Array(fanVerts * 3), 3),
+    );
+    this.coneFillGeo.setAttribute('aT', new BufferAttribute(new Float32Array(fanVerts), 1));
+    this.coneFillGeo.setIndex(
+      Array.from({ length: CONE_ARC_SEGMENTS * 3 }, (_, k) => {
+        const i = Math.floor(k / 3);
+        return [0, i + 1, i + 2][k % 3];
+      }),
+    );
+    this.coneFillMaterial = new ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      side: DoubleSide,
+      fog: false,
+      uniforms: {
+        uColor: { value: new Color(CONE_COLOR) },
+        uAlpha: { value: 0 },
+        uDotScale: { value: 0.55 },
+      },
+      vertexShader: /* glsl */ `
+        attribute float aT;
+        varying float vT;
+        varying vec3 vWorld;
+        void main() {
+          vT = aT;
+          vec4 world = modelMatrix * vec4(position, 1.0);
+          vWorld = world.xyz;
+          gl_Position = projectionMatrix * viewMatrix * world;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform vec3  uColor;
+        uniform float uAlpha;
+        uniform float uDotScale;
+        varying float vT;
+        varying vec3  vWorld;
+        void main() {
+          // 끝단은 자르지 않고 사라진다. 마지막 30% 에서 0 으로.
+          float fade = 1.0 - smoothstep(0.7, 1.0, vT);
+          // 하프톤. 보드 평면의 월드 좌표로 찍으므로 카메라가 돌아도 점이
+          // 화면에서 헤엄치지 않는다 — 면에 인쇄된 것으로 읽혀야 한다.
+          vec2 g = vWorld.xz / uDotScale;
+          vec2 f = abs(fract(g) - 0.5);
+          float dot2 = 1.0 - smoothstep(0.18, 0.34, length(f));
+          // 점만 그리면 성기고, 점 없이 그리면 유리다. 바탕 위에 점을 얹는다.
+          float a = uAlpha * fade * (0.72 + 0.28 * dot2);
+          if (a < 0.002) discard;
+          gl_FragColor = vec4(uColor, a);
+        }
+      `,
+    });
+    this.coneFill = new Mesh(this.coneFillGeo, this.coneFillMaterial);
+    this.coneFill.frustumCulled = false;
+    // 아래에 깔린다. 활도 당김 선도 이 면 위에 그려져야 한다.
+    this.coneFill.renderOrder = -1;
+    this.root.add(this.coneFill);
 
     this.aimGeo = lineGeometry(4 * MAX_RIBS * 2);
     this.aimMaterial = new LineBasicMaterial({ color: AIM_COLOR, fog: false });
@@ -338,9 +450,17 @@ export class AimOverlay {
    */
   setVisible(on) {
     for (const child of this.root.children) {
-      if (child === this.hover) continue;
+      /**
+       * 둘은 이 루프가 건드리지 않는다.
+       *
+       * `hover` 는 원래 그랬다 — 당김이 없을 때만 나오므로 오버레이 전체의
+       * 표시와 다른 조건을 갖는다. `coneFill` 도 같다: 궤적 카드와 혼란이 콘만
+       * 따로 끄고, 여기서 무조건 켜면 그 둘이 한 프레임씩 새어 나온다.
+       */
+      if (child === this.hover || child === this.coneFill) continue;
       child.visible = on;
     }
+    if (!on) this.coneFill.visible = false;
   }
 
   /**
@@ -387,6 +507,7 @@ export class AimOverlay {
     // says two different things about one drag.
     this.aimMaterial.color.set(smash ? SMASH_AIM_COLOR : AIM_COLOR);
     this.coneMaterial.color.set(smash ? SMASH_CONE_COLOR : CONE_COLOR);
+    this.coneFillMaterial.uniforms.uColor.value.set(smash ? SMASH_CONE_COLOR : CONE_COLOR);
 
     // Both buffers are emptied when blind rather than just hidden. A geometry
     // left holding the last frame's points is a ghost waiting for something to
@@ -400,9 +521,22 @@ export class AimOverlay {
     this.path.visible = !blind && !dashed;
     this.dash.visible = dashed;
 
-    // The gesture, which is drawn under chaos exactly as it is drawn without it.
+    /**
+     * The gesture, which is drawn under chaos exactly as it is drawn without it.
+     *
+     * ── and which the aim-assist setting can take away ────────────────────
+     * §5.3: the pull line and the clamp crossbar are what the switch hides. The
+     * deadzone RING stays — it is not a guide either, it is the radius inside
+     * which a release fires nothing, and "I let go and nothing happened" has to
+     * read as a rule rather than as a bug however the setting is left.
+     *
+     * Emptied rather than hidden, for the reason the blind branch above gives:
+     * a geometry holding the last frame's points is a ghost waiting for
+     * something to make it visible again.
+     */
     this._writeRing(s.com, s.armed);
-    this._writePull(s.com, s.pullX, s.pullZ, s.clampedDistance, s.atClamp, smash);
+    if (s.assist === false) this.pullGeo.setDrawRange(0, 0);
+    else this._writePull(s.com, s.pullX, s.pullZ, s.clampedDistance, s.atClamp, smash);
 
     // The cone and the aim line reach as far as the shot does. A fixed length
     // would say the same thing about a nudge as about a full draw, when the whole
@@ -417,8 +551,12 @@ export class AimOverlay {
     // Chaos takes it away for the opposite reason: the cone is symmetric about
     // the heading, so its bisector IS the deviated aim, drawn slightly less
     // legibly. Hiding the arrow and keeping the cone would leak the same number.
-    if (blind || s.hideCone) this.coneGeo.setDrawRange(0, 0);
-    else this._writeCone(s.com, s.dirX, s.dirZ, s.power, reach, s.spreadMul ?? 1, s.impulseMul ?? 1);
+    if (blind || s.hideCone) {
+      this.coneGeo.setDrawRange(0, 0);
+      this.coneFill.visible = false;
+    } else {
+      this._writeCone(s.com, s.dirX, s.dirZ, s.power, reach, s.spreadMul ?? 1, s.impulseMul ?? 1);
+    }
 
     if (blind) this.aimGeo.setDrawRange(0, 0);
     else this._writeAim(s.com, s.dirX, s.dirZ, reach);
@@ -534,8 +672,10 @@ export class AimOverlay {
 
     if (half <= 1e-5) {
       this.coneGeo.setDrawRange(0, 0);
+      this.coneFill.visible = false;
       return;
     }
+    this._writeConeFill(com, dx, dz, reach, half);
 
     const edge = (sign) => {
       const d = rotateY(dx, dz, sign * half);
@@ -562,6 +702,41 @@ export class AimOverlay {
 
     attr.needsUpdate = true;
     this.coneGeo.setDrawRange(0, w / 3);
+  }
+
+  /**
+   * The filled region, as a fan from the apex.
+   *
+   * `aT` is 0 at the apex and 1 on the arc, which is what the shader fades over.
+   * The fan is written every frame because the cone moves with the cap and
+   * changes shape with the draw — there is nothing here worth caching.
+   */
+  _writeConeFill(com, dx, dz, reach, half) {
+    const pos = this.coneFillGeo.getAttribute('position');
+    const t = this.coneFillGeo.getAttribute('aT');
+    const a = pos.array;
+
+    a[0] = com.x;
+    a[1] = DECK;
+    a[2] = com.z;
+    t.array[0] = 0;
+
+    for (let i = 0; i <= CONE_ARC_SEGMENTS; i++) {
+      const ang = -half + (i / CONE_ARC_SEGMENTS) * half * 2;
+      const d = rotateY(dx, dz, ang);
+      const j = (i + 1) * 3;
+      a[j] = com.x + d.x * reach;
+      a[j + 1] = DECK;
+      a[j + 2] = com.z + d.z * reach;
+      t.array[i + 1] = 1;
+    }
+    pos.needsUpdate = true;
+    t.needsUpdate = true;
+
+    // 넓어질수록 옅어진다. 위의 `CONE_FILL_ALPHA` 주석 참조.
+    this.coneFillMaterial.uniforms.uAlpha.value =
+      CONE_FILL_ALPHA * Math.min(1, CONE_FILL_REF_HALF / Math.max(1e-4, half));
+    this.coneFill.visible = true;
   }
 
   _writeAim(com, dx, dz, reach) {

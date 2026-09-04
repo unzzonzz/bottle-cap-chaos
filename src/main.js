@@ -3017,6 +3017,18 @@ async function boot(canvas) {
       // The cone follows the delivered impulse now, so the boost has to reach
       // the drawing as well as the draw. See `shotSpread`.
       impulseMul: p.impulseMul,
+      /**
+       * 조준 보조. **당김 선과 클램프 바만** 이것에 걸린다.
+       *
+       * §5.3 이고, 무엇이 걸리지 않는지가 요점이다: 오차 콘은 게임 상태라 언제나
+       * 보이고(§5.1), 활은 당기는 세기를 보여주는 유일한 수단이라 언제나 보이고,
+       * 데드존 링은 "놓았는데 아무 일도 안 일어났다" 를 규칙으로 읽히게 하는
+       * 것이라 언제나 보인다.
+       *
+       * 매 프레임 책에서 읽는다. 구독으로 캐시하면 설정 화면에서 토글한 것이
+       * 다음 경기까지 안 보이고, 이 값은 불리언 하나다.
+       */
+      assist: viewSettings.aimAssist,
     });
   }
 

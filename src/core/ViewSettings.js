@@ -19,23 +19,37 @@
  * 화면이 내놓는 한 가지 — 켰는가 껐는가 — 뿐이다.
  */
 
-/** 저장 스키마 버전. 저장하는 모양이 바뀌면 올린다. */
+/**
+ * 저장 스키마 버전. 저장하는 모양이 바뀌면 올린다.
+ *
+ * `aimAssist` 가 붙었는데 **올리지 않았다.** 아래 `sanitise` 가 필드별로 검사하고
+ * 없는 필드는 기본값으로 채우므로, 필드가 하나인 문서도 그대로 읽힌다 — 버전은
+ * 읽을 수 없게 되었을 때 올리는 것이고 이것은 그런 변경이 아니다. 그 성질이
+ * 여기 있는 이유가 `sanitise` 의 주석에 적혀 있다.
+ */
 const VERSION = 1;
 const KEY = 'msa.view.v1';
 
 /**
  * @typedef {object} ViewSettingsData
  * @property {boolean} trackCamera  발사한 뚜껑을 카메라가 따라가는가
+ * @property {boolean} aimAssist    당김 선과 클램프 바를 그리는가
  */
 
 /**
  * 저장한 적 없는 기기의 기본값.
  *
- * 켬이다. 추적은 이 게임의 기본 연출이고 — 뚜껑이 판 끝으로 날아가 떨어지는
- * 것이 서바이벌의 사건 그 자체다 — 끄는 쪽이 선택이어야 한다.
+ * 추적은 켬이다. 이 게임의 기본 연출이고 — 뚜껑이 판 끝으로 날아가 떨어지는 것이
+ * 서바이벌의 사건 그 자체다 — 끄는 쪽이 선택이어야 한다.
+ *
+ * 조준 보조는 **끔**이다. §5.3 이 그렇게 정했고, 무엇이 꺼지는지가 중요하다:
+ * 당김 선과 클램프 바뿐이다. 오차 콘과 활은 이 스위치와 무관하게 언제나 그려진다 —
+ * 콘은 가이드가 아니라 **게임 상태**이고(§5.1), 활은 당기는 세기를 보여주는 유일한
+ * 수단이다. 강타 카드가 파는 상품이 "콘이 두 배로 벌어진다" 이므로, 콘이 없으면
+ * 그 카드가 파는 것이 화면에 없다.
  */
 export function defaultViewSettings() {
-  return { trackCamera: true };
+  return { trackCamera: true, aimAssist: false };
 }
 
 function sanitise(raw) {
@@ -44,6 +58,7 @@ function sanitise(raw) {
   // 필드별로 타입을 본다. 전체 형태 검사는 하지 않는다 — 필드가 하나인 빌드가
   // 쓴 문서도, 둘인 빌드가 쓴 문서도 버려지는 대신 쓸 수 있게 돌아온다.
   if (typeof raw.trackCamera === 'boolean') out.trackCamera = raw.trackCamera;
+  if (typeof raw.aimAssist === 'boolean') out.aimAssist = raw.aimAssist;
   return out;
 }
 
@@ -173,6 +188,20 @@ export class ViewSettingsBook {
 
   toggleTrackCamera() {
     return this.setTrackCamera(!this._data.trackCamera);
+  }
+
+  get aimAssist() {
+    return this._data.aimAssist;
+  }
+
+  /** @returns {boolean} 실제로 내려앉았는가 */
+  setAimAssist(on) {
+    this._data.aimAssist = !!on;
+    return this._commit();
+  }
+
+  toggleAimAssist() {
+    return this.setAimAssist(!this._data.aimAssist);
   }
 
   /**
