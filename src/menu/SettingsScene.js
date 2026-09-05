@@ -442,7 +442,16 @@ export class SettingsScene {
        * 볼륨의 눈금과 그래픽의 눈금이 같은 재료(선 하나)가 된 지금, 높이가
        * 다르면 두 줄의 선이 다른 굵기로 보인다. 같은 것은 같아 보여야 한다.
        */
-      const size = { width: cw, height: Math.round(L.chip.height * kc), gap: cg };
+      /**
+       * 그리는 높이는 **누를 수 있는 높이**다. 배치가 쓴 선 두께가 아니다.
+       *
+       * `stackRows` 가 이 줄을 선 하나로 쳐서 이름 밑에 붙여 놓았고(`row.h` 가
+       * 2 다), 그 값으로 쿼드를 만들면 2 픽셀짜리 과녁이 된다. `hitH` 가
+       * 원래 높이를 들고 있으므로 그것으로 그린다 — 선은 그 상자의 한가운데에
+       * 그려지고, 상자의 중심이 곧 배치가 정한 선의 자리다.
+       */
+      const hit = Math.round((row.hitH ?? row.h) * kc);
+      const size = { width: cw, height: hit, gap: cg };
       this._chipSize.set(def.id, size);
       let i = 0;
       for (const chip of this.chips) {

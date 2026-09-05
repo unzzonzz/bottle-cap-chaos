@@ -309,11 +309,24 @@ export function stackRows(box, isTight = (id) => String(id).startsWith('#chips:'
   const tight = Math.round(ROW_TIGHT * k);
   const top = box.rows.length ? box.rows[0].y + box.rows[0].h / 2 : 0;
 
+  /**
+   * 눈금 줄의 **배치 높이는 선 두께**다. 상자 높이가 아니다.
+   *
+   * 눈금 상자는 22 이고 선은 그 한가운데에 그려진다. 그 상자를 그대로 쌓으면
+   * 이름의 밑변에서 선까지가 7 이 아니라 7 + 11 이 되고, 시안에서 붙어 있던 두
+   * 줄이 다른 줄들과 비슷한 거리로 벌어진다 — 붙인 이유가 사라진다.
+   *
+   * 그래서 배치는 선 하나로 치고, 누를 수 있는 높이는 `hitH` 로 따로 넘긴다.
+   * 위아래 글자와 히트 영역이 몇 픽셀 겹치는 것은 상관없다: 겹치는 쪽은 글자의
+   * 여백이고, 눈금은 그 여백을 눌러도 되는 유일한 것이다.
+   */
+  const LINE = 2;
   let edge = top;
   for (const r of box.rows) {
-    // 눈금 줄은 자기 높이를 지킨다 — 누를 수 있는 것이라 손가락만 한 높이가 필요하다.
-    const h = isTight(r.id) ? r.h : row;
-    if (r !== box.rows[0]) edge -= isTight(r.id) ? tight : gap;
+    const isChip = isTight(r.id);
+    const h = isChip ? LINE : row;
+    if (r !== box.rows[0]) edge -= isChip ? tight : gap;
+    if (isChip) r.hitH = r.h;
     r.h = h;
     r.y = edge - h / 2;
     edge = r.y - h / 2;
