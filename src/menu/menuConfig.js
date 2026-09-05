@@ -17,16 +17,15 @@ export const MENU_CONFIG = {
     profile: { ...BOTTLE_DEFAULTS },
 
     // ── where it sits ──────────────────────────────────────────────────────
-    /** Left of centre, so the menu column has the right half to itself. */
     /**
-     * 병이 앉는 자리. C 시안의 좌표를 화면에서 역산한 값이다.
+     * 병이 앉는 자리. C 시안의 좌표를 출발점으로 화면에서 다시 맞춘 값이다.
      *
-     * 시안은 병을 오른쪽 위(`right: 62; top: 42`, 112x314)에 거의 수직으로 세운다.
-     * 화면에 투영한 상자를 재서 맞췄다 — 위 192.9 / 아래 −117.7 대 시안의
-     * 198 / −116 이다. 가로가 시안보다 넓은 것은 3D 모델이 그 그림의 병보다
-     * 통통하기 때문이고, 그건 이 작업의 범위 밖이다.
+     * C 시안의 18.7 에서는 병과 PLAY 사이가 화면에서 92px 벌어져 둘이 별개의
+     * 요소로 보였다. 15.4 는 병을 72px 안쪽으로 당겨 PLAY 화살표의 진행 방향과
+     * 병의 몸통을 같은 축에 놓는다. 크기와 카메라는 그대로라 모델의 인상은 변하지
+     * 않고, 제목 → 병 → PLAY의 시선만 이어진다(1280x720 실측).
      */
-    originX: 18.7,
+    originX: 15.4,
     originY: 3.2,
     /**
      * How far below the bottle the soft shadow sits.

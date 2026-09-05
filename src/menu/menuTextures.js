@@ -806,33 +806,44 @@ export function menuPlateTexture(label, state, { width = 256, height = 52, scale
       }
     : null;
 
-  roleButton(ctx, {
+  /**
+   * ── 판이 아니라 **글자만** 그린다 ────────────────────────────────────────
+   *
+   * 여기 `roleButton` 이 있었다 — 둥근 알약에 잉크와 워시와 테두리. 하위 화면
+   * 넷이 전부 그 알약을 흰 카드 위에 쌓고 있었고, 홈 화면은 물 위에 흰 활자만
+   * 있다. 두 화면을 나란히 놓으면 다른 앱이었다.
+   *
+   * 그래서 판을 걷어내고 홈의 언어를 그대로 가져온다: 하나의 잉크(순백), 판
+   * 없음, 테두리 없음, 왼쪽 정렬, 상태는 **밝기**로만 말한다. 호버의 밑줄은
+   * 여기서 굽지 않는다 — 자라야 하므로 쿼드가 맡는다(`MenuItems` 와 같은 이유).
+   *
+   * 대비는 물을 어둡게 해서 얻는다. `depth.js` 가 그 장치이고, 왜 카드가 아니라
+   * 그쪽인지는 거기 머리말에 실측과 함께 있다.
+   */
+  const size = Math.max(11, Math.round(height * 0.30));
+  const dim = skinState === 'disabled' || spec.state === 'dimmed';
+  applyTracking(ctx, size * 0.06);
+  drawText(ctx, {
+    text: label,
     x: 0,
-    y: 0,
-    w: width,
-    h: height,
-    radius: RADIUS.chip,
-    role,
-    state: skinState,
-    skin: waterSkin,
-    selected,
-    label,
-    // 도장이 오른쪽을 먹으므로 라벨은 남은 왼쪽에서 가운데를 잡는다.
-    labelWidth: width - stampW,
-    /**
-     * ── 여기에 그림자가 있었고, 두 번 없어졌다 ─────────────────────────────
-     * 처음에는 이 판이 10 픽셀 번지고 3 픽셀 내려가는 그림자를 지고 있었는데,
-     * 캔버스가 판에 딱 맞으므로 그 번짐이 네 변에서 직선으로 잘렸다 — 둥근 판
-     * 주위에 사각형 자국이 남았고 화면에서 제일 눈에 띄는 결함이었다. 캔버스를
-     * 키우는 것이 다른 답이고, 그러려면 판 쿼드도 같이 커져 슬롯 밖으로 나간다.
-     *
-     * 그래서 이 판만 그림자를 뺐다. 두 번째로 없어진 것은 그림자라는 개념
-     * 자체이고(§19 · §24), 그때 판도 같이 없어졌다 — 지금 여기 있는 것은 글자와
-     * 밑줄이다. 이 주석이 남는 이유는 캔버스를 판에 딱 맞추는 규칙이 그대로이고,
-     * 무엇이든 판 밖으로 번지는 것을 다시 넣으면 같은 사각형 자국이 돌아오기
-     * 때문이다.
-     */
+    // 캡 높이의 절반을 베이스라인 보정으로 쓴다. 행 상자 한가운데에 앉는다.
+    y: height / 2 + size * 0.36,
+    font: `400 ${size}px ${FONT_FAMILY}`,
+    color: dim ? withAlpha(PALETTE.water.ink, 0.42) : PALETTE.water.ink,
+    align: 'left',
   });
+  /**
+   * 고른 줄에는 앞에 짧은 선을 둔다.
+   *
+   * 색으로 말할 수 없다 — 잉크가 하나이기 때문이다. 크기로도 말할 수 없다 —
+   * 목록의 줄들은 같은 크기여야 읽힌다. 남은 것이 자리이고, 글자 앞의 빈칸에
+   * 놓인 선은 목록을 흩뜨리지 않으면서 어느 줄인지 말한다.
+   */
+  if (selected) {
+    ctx.fillStyle = PALETTE.water.ink;
+    ctx.fillRect(-size * 0.9, height / 2 - 1, size * 0.55, 1.5);
+  }
+  applyTracking(ctx, 0);
 
   if (stamp) {
     applyTracking(ctx, TYPE.caption.tracking);
@@ -871,7 +882,45 @@ export function panelTexture(o) {
   const texH = tabHeight + h;
   const { canvas, ctx } = makeCanvas(Math.round(w * scale), Math.round(texH * scale));
   ctx.scale(scale, scale);
-  dialogPanel(ctx, { w, h, title, caption, tabHeight, footerHeight, padTop, padX, divider });
+  /**
+   * ── 판이 없다. 머리글만 남는다 ──────────────────────────────────────────
+   *
+   * 여기 `dialogPanel` 이 있었다 — 흰 종이, 둥근 모서리, 탭, 구분선, 그림자.
+   * 하위 화면 넷이 전부 그 카드를 물 위에 띄우고 있었고 홈은 활자만 있었다.
+   * 카드를 걷어내면 남는 것은 화면의 이름 하나이고, 그것이 있어야 할 전부다.
+   *
+   * 이름은 홈의 내비와 같은 목소리로 쓴다 — 작고, 자간이 넓고, 순백이고,
+   * 왼쪽 위에 붙는다. 신문의 난외 표제(running head)이지 제목이 아니다:
+   * 이 화면에서 큰 활자는 게임의 이름 하나뿐이고 그것은 홈에 있다.
+   *
+   * 대비는 물을 어둡게 해서 얻는다 — `depth.js`.
+   */
+  if (title) {
+    const size = 11;
+    applyTracking(ctx, size * 0.24);
+    drawText(ctx, {
+      text: title.toUpperCase(),
+      x: 0,
+      y: size,
+      font: `400 ${size}px ${FONT_FAMILY}`,
+      color: PALETTE.water.ink,
+      align: 'left',
+    });
+    applyTracking(ctx, 0);
+  }
+  if (caption) {
+    const size = 10;
+    applyTracking(ctx, size * 0.1);
+    drawText(ctx, {
+      text: caption,
+      x: 0,
+      y: (title ? 11 : 0) + size + 8,
+      font: `400 ${size}px ${FONT_FAMILY}`,
+      color: withAlpha(PALETTE.water.ink, 0.55),
+      align: 'left',
+    });
+    applyTracking(ctx, 0);
+  }
   const tex = toTexture(canvas);
   tex.userData = { width: w, height: texH };
   return tex;
@@ -974,27 +1023,60 @@ export function ruleTexture() {
  * 상자를 글자에 맞춰 재서 `userData` 로 돌려준다. 가로줄로 늘어놓으려면 각
  * 항목의 실제 폭이 필요하고, 고정 폭 판으로는 자간이 제멋대로가 된다.
  */
-export function navLabelTexture(label, { size = 12, color = PALETTE.water.ink, tracking = 0, scale = 2 } = {}) {
+export function navLabelTexture(label, {
+  size = 12,
+  color = PALETTE.water.ink,
+  tracking = 0,
+  scale = 2,
+  eyebrow = '',
+  eyebrowTracking = 1.2,
+  display = false,
+} = {}) {
+  const family = display ? DISPLAY_FAMILY : FONT_FAMILY;
   const probe = makeCanvas(8, 8);
-  probe.ctx.font = `400 ${size}px ${FONT_FAMILY}`;
+  probe.ctx.font = `400 ${size}px ${family}`;
   applyTracking(probe.ctx, tracking);
   // 마지막 글자 뒤의 자간은 상자에 넣지 않는다. 넣으면 오른쪽 정렬이 어긋난다.
   const inkW = Math.max(1, probe.ctx.measureText(label).width - tracking);
+
+  const microSize = 8;
+  const microProbe = makeCanvas(8, 8);
+  microProbe.ctx.font = `400 ${microSize}px ${FONT_FAMILY}`;
+  applyTracking(microProbe.ctx, eyebrowTracking);
+  const eyebrowW = eyebrow
+    ? Math.max(1, microProbe.ctx.measureText(eyebrow).width - eyebrowTracking)
+    : 0;
   const pad = Math.round(size * 0.5);
-  const width = Math.round(inkW + pad * 2);
-  const height = Math.round(size * 2.2);
+  const width = Math.round(Math.max(inkW, eyebrowW) + pad * 2);
+  const height = eyebrow ? Math.round(size * 2.35) : Math.round(size * 2.2);
 
   const { canvas, ctx } = makeCanvas(Math.round(width * scale), Math.round(height * scale));
   ctx.scale(scale, scale);
-  ctx.font = `400 ${size}px ${FONT_FAMILY}`;
+  if (eyebrow) {
+    ctx.font = `400 ${microSize}px ${FONT_FAMILY}`;
+    applyTracking(ctx, eyebrowTracking);
+    ctx.fillStyle = color;
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';
+    ctx.fillText(eyebrow, pad, microSize + 2);
+  }
+
+  ctx.font = `400 ${size}px ${family}`;
   applyTracking(ctx, tracking);
   ctx.fillStyle = color;
-  ctx.textBaseline = 'middle';
+  ctx.textBaseline = eyebrow ? 'alphabetic' : 'middle';
   ctx.textAlign = 'left';
-  ctx.fillText(label, pad, height / 2);
+  const mainY = eyebrow ? height - Math.round(size * 0.35) : height / 2;
+  ctx.fillText(label, pad, mainY);
 
   const tex = toTexture(canvas);
-  tex.userData = { width, height, inkW, pad };
+  /**
+   * `anchorLift` 는 주 글자의 시각 중심이 하단 기준선에서 size/2 위에 오게 하는 값.
+   * 영문 설명 때문에 캔버스가 위로 커져도 PLAY와 모드명의 기준선은 움직이지 않는다.
+   */
+  const mainCenterY = eyebrow ? mainY - size * 0.43 : height / 2;
+  const anchorLift = size * 0.5 + mainCenterY - height / 2;
+  tex.userData = { width, height, inkW, pad, anchorLift };
   return tex;
 }
 
@@ -1086,16 +1168,16 @@ export function titleTexture(text, sub, { width = 256, height = 80, scale = 1, w
    * 있다는 말이고, 누를 수 없는 것에 그 말을 붙이는 것이 부록 B 가 없애려는
    * 바로 그 혼동이다.
    */
-  if (withPlate) {
-    panel(ctx, {
-      x: 0,
-      y: 0,
-      w: width,
-      h: height,
-      radius: RADIUS.panel,
-      accent: PALETTE.cobalt,
-    });
-  }
+  /**
+   * 판은 없다. `withPlate` 는 남기지만 아무것도 그리지 않는다.
+   *
+   * 예전에는 하늘 배경 위에서 대비가 모자라 판이 필요했다. 지금 배경은 물이고,
+   * 대비는 `depth.js` 가 물을 어둡게 해서 만든다 — 글자 뒤에 종이를 깔지 않는다.
+   * 인자를 지우지 않는 것은 호출부가 넷이고 그 중 둘이 "판 없음"을 명시적으로
+   * 요구하고 있어서다: 지금은 둘 다 같은 그림이지만, 그 구분이 있었다는 사실이
+   * 다음 사람에게 왜 여기 판이 없는지 말해 준다.
+   */
+  void withPlate;
 
   /**
    * 머리글은 줄이기 전에 **접는다**.

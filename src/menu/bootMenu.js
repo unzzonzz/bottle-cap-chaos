@@ -4,6 +4,7 @@ import { GlossMaterials } from '../core/GlossMaterial.js';
 import { createEnvironment } from '../core/environment.js';
 import { createLightRig } from '../core/lighting.js';
 import { createWater } from './water.js';
+import { createDepth } from './depth.js';
 import { SubmergedTitle } from './SubmergedTitle.js';
 import { setTextureRenderer } from '../core/textures.js';
 import { DISPLAY_ASPECT, Viewport } from '../core/Viewport.js';
@@ -180,6 +181,11 @@ export function bootMenu(
    * 인터페이스가 같아서 되돌리는 것은 이 한 줄이다.
    */
   const water = createWater(scene);
+  /**
+   * 하위 화면에서 물이 깊어진다. 흰 카드를 대신하는 장치다 — `depth.js` 참조.
+   */
+  const depth = createDepth();
+  scene.add(depth.mesh);
   /**
    * 조명은 남고, **그림자는 없다.**
    *
@@ -548,6 +554,8 @@ export function bootMenu(
     applyArrangement(u);
     items.layout(u);
     title.layout(u);
+    // 화면을 넉넉히 덮는다. 레터박스가 있어도 가장자리가 비지 않도록 1.6 배.
+    depth.layout(FRAME.width * u * 1.6, FRAME.height * u * 1.6);
     /**
      * 하위 화면들도 다시 배치한다.
      *
@@ -1456,6 +1464,24 @@ export function bootMenu(
     // 병은 전환이 도는 동안 주둥이를 카메라로 돌리고 끝나면 되돈다.
     bottle.update(dt, { aim: transition.running ? 1 : 0, camera });
     bottle.burst.quaternion.copy(camera.quaternion);
+    /**
+     * 물의 깊이. 홈이면 맑고, 하위 화면이면 잠긴다.
+     *
+     * 마크 편집기는 더 깊다 — 거기서는 뚜껑 하나만 보면 되고, 물은 완전히
+     * 배경으로 물러나야 한다.
+     */
+    /**
+     * 0.90 은 실측으로 정한 값이다.
+     *
+     * 흰 글자가 AA 본문 4.5:1 을 넘으려면 배경의 선형 휘도가 0.1833 이하여야
+     * 한다. 이 물에서 가장 밝은 커스틱이 0.9 근처인데,
+     *
+     *   결과 = a * 0.0949 + (1 - a) * 0.9        (0.0949 는 코발트의 선형 휘도)
+     *
+     * 를 0.1833 이하로 만드는 a 가 0.90 이다. 0.85 면 0.203 이라 4.1:1 로 모자란다.
+     */
+    depth.setDepth(current === 'menu' ? 0 : current === 'editor' ? 0.95 : 0.9);
+    depth.update(dt);
     // 배경의 물. 렌더 클럭이고 게임 상태를 읽지도 쓰지도 않는다.
     // 젓는 세기를 돌려받아 제목에 그대로 넘긴다 — 둘이 같은 물이어야 한다.
     water.update(dt, viewport.resolution);

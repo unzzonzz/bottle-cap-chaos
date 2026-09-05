@@ -65,27 +65,34 @@ const PLATE_TEXEL_SCALE = 2;
  */
 const PAGES = {
   home: [
-    { id: 'play', label: 'PLAY' },
+    { id: 'play', label: 'PLAY →', eyebrow: 'BOTTLE-CAP GAME', action: true },
     { id: 'collection', label: 'COLLECTION' },
     { id: 'settings', label: 'SETTINGS' },
   ],
   play: [
-    { id: 'knockout', label: '서바이벌' },
-    { id: 'football', label: '축구' },
-    { id: 'curling', label: '컬링' },
-    { id: 'home', label: '뒤로', role: ROLE.RETREAT },
+    { id: 'knockout', label: '서바이벌', eyebrow: 'SUMMER TABLE', mode: true },
+    { id: 'football', label: '축구', eyebrow: 'SUMMER LAWN', mode: true },
+    { id: 'curling', label: '컬링', eyebrow: 'SUMMER SLIDE', mode: true },
+    { id: 'home', label: '← 뒤로', role: ROLE.RETREAT },
   ],
 };
 
-/* ── 내비의 값. 전부 C 시안에서 그대로 옮긴 것이다 (프레임 853x480 기준) ──── */
-/** 첫 항목. 이 화면의 주된 행동이라 한 단계 크다. */
-const NAV_LEAD = 12;
+/* ── 내비의 값. 프레임 853x480 기준 ─────────────────────────────────────── */
+/** 홈의 주 행동. 12px 일 때 보조 내비와 실루엣이 같아져 22px 로 분리했다. */
+const NAV_LEAD = 22;
 /** 나머지. */
 const NAV_SIZE = 10;
+/** 모드명은 화면 제목 다음의 두 번째 디스플레이 계층이다. */
+const MODE_SIZE = 26;
 /** 자간, em 배수. 시안의 `letter-spacing: .2em`. */
 const NAV_TRACKING = 0.2;
 /** 항목 사이. 시안의 `gap: 24px`. */
 const NAV_GAP = 24;
+/** 홈 PLAY의 시작점부터 오른쪽 끝까지. 폭이 4:3으로 줄어도 보조 내비와 안 겹친다. */
+const HOME_ACTION_RIGHT_SPAN = 353;
+/** 모드 그룹의 시작점부터 오른쪽 끝까지. 화면 폭이 아니라 우측 가장자리에 묶는다. */
+const MODE_GROUP_RIGHT_SPAN = 423;
+const MODE_GAP = 38;
 /** 오른쪽·아래 여백. 시안의 `right: 30; bottom: 28`. */
 const NAV_RIGHT = 30;
 const NAV_BOTTOM = 28;
@@ -116,6 +123,9 @@ export class MenuItems {
     /** Which page the column is showing. `setPage` swaps it. */
     this.page = 'home';
 
+    /** 모든 항목이 나눠 쓰는 1px 밑줄. 메시보다 먼저 만들어 머티리얼에 건다. */
+    this._ruleMap = ruleTexture();
+
     /**
      * 두 페이지 중 **긴 쪽**만큼 메시를 만들어 두고 재사용한다.
      *
@@ -134,7 +144,8 @@ export class MenuItems {
       rule.renderOrder = 11;
       this.root.add(rule);
       return {
-        id: null, label: '', role: null, mesh, material, map: null,
+        id: null, label: '', eyebrow: '', role: null, mesh, material, map: null,
+        action: false, mode: false,
         rule, ruleMat, hovered: false, shift: 0, grow: { x: 0, v: 0 },
       };
     });
@@ -146,8 +157,6 @@ export class MenuItems {
      * 오른쪽으로 늘어나고, 손을 떼면 같은 방향으로 줄어든다 — 두 상태 사이에
      * 실제로 무슨 일이 일어나는지가 보여야 상호작용이 된다.
      */
-    this._ruleMap = ruleTexture();
-
     /**
      * 좌하단의 숫자. 눌리지 않으므로 `_picks` 에 넣지 않는다.
      *
@@ -205,10 +214,13 @@ export class MenuItems {
       const def = defs[i] ?? null;
       item.id = def?.id ?? null;
       item.label = def?.label ?? '';
+      item.eyebrow = def?.eyebrow ?? '';
       item.role = def?.role ?? null;
+      item.action = def?.action ?? false;
+      item.mode = def?.mode ?? false;
       item.disabled = def?.disabled ?? false;
       item.hovered = false;
-      item.lead = i === 0;
+      item.lead = item.action;
       item.mesh.visible = !!def;
       if (item.rule) item.rule.visible = !!def;
     });
@@ -234,20 +246,35 @@ export class MenuItems {
   /**
    * 한 항목의 텍스처. **글자만**, 자기 폭에 맞춰.
    *
-   * C 시안의 값이다: 첫 항목 12px 차가운 흰색, 나머지 10px 옅은 파랑, 자간
-   * 0.2em. 첫 항목이 큰 것은 그것이 이 화면의 주된 행동이기 때문이고, 그
-   * 위계를 굵기가 아니라 **크기와 색**으로 만드는 것이 단일 웨이트 서체의 규칙이다.
+   * 홈의 PLAY는 22px 산세리프, 모드명은 26px 명조, 보조 내비는 10px 산세리프다.
+   * 모두 같은 흰색이므로 계층은 서체 역할과 크기 차이만으로 만든다. 작은 영문
+   * 설명은 버튼 밖의 장식이 아니라 같은 텍스처 안에서 기준선을 공유한다.
    *
    * 상태별 텍스처가 없다. 호버는 밑줄과 불투명도가 맡고, 둘 다 매 프레임 움직이는
    * 값이라 구울 수 없다.
    */
-  _bake(label, lead) {
-    const size = lead ? NAV_LEAD : NAV_SIZE;
-    return navLabelTexture(label, {
+  _bake(item) {
+    if (item.mode) {
+      return navLabelTexture(item.label, {
+        size: MODE_SIZE,
+        color: PALETTE.water.ink,
+        // 큰 한글에는 촘촘한 명조, 영문 설명에는 성긴 산세리프를 쓴다.
+        tracking: MODE_SIZE * -0.025,
+        eyebrow: item.eyebrow,
+        eyebrowTracking: 1.35,
+        display: true,
+        scale: PLATE_TEXEL_SCALE,
+      });
+    }
+
+    const size = item.action ? NAV_LEAD : NAV_SIZE;
+    return navLabelTexture(item.label, {
       size,
       // 색은 하나다. 위계는 크기가 만든다 — `PALETTE.water.ink` 의 주석 참조.
       color: PALETTE.water.ink,
-      tracking: size * NAV_TRACKING,
+      tracking: size * (item.action ? 0.11 : NAV_TRACKING),
+      eyebrow: item.eyebrow,
+      eyebrowTracking: 1.35,
       scale: PLATE_TEXEL_SCALE,
     });
   }
@@ -256,7 +283,7 @@ export class MenuItems {
    * 항목 텍스처를 다시 굽는다.
    *
    * 예전에는 판 크기가 프레임에 비례해 바뀌므로 크기를 키로 삼았다. 지금 항목은
-   * 저술 크기(12/10px)로 굽고 배치할 때 `frameScale()` 로 줄이므로, 다시 구울
+   * 저술 크기(22/26/10px)로 굽고 배치할 때 `frameScale()` 로 줄이므로, 다시 구울
    * 이유는 **페이지가 바뀌어 라벨이 달라졌을 때**뿐이다.
    */
   /**
@@ -276,7 +303,9 @@ export class MenuItems {
   }
 
   _rebakeIfResized() {
-    const key = this.items.map((i) => i.label).join('|');
+    const key = this.items
+      .map((i) => `${i.label}/${i.eyebrow}/${i.action ? 'a' : ''}/${i.mode ? 'm' : ''}`)
+      .join('|');
     if (key === this._plateKey) return;
     this._plateKey = key;
     this.items.forEach((item, i) => {
@@ -285,7 +314,7 @@ export class MenuItems {
         item.map = null;
         return;
       }
-      item.map = this._bake(item.label, i === 0);
+      item.map = this._bake(item);
       item.material.uniforms.uMap.value = item.map;
     });
   }
@@ -297,41 +326,56 @@ export class MenuItems {
     const live = this.items.filter((i) => i.id);
     const k = frameScale();
 
-    /**
-     * 오른쪽 아래에서 **왼쪽으로** 쌓는 가로줄. C 시안의 배치다.
-     *
-     * 마지막 항목의 오른쪽 끝이 프레임 오른쪽에서 30, 글자 밑선이 아래에서 28.
-     * 항목 사이는 24. 전부 시안의 CSS px 이고, 프레임이 작아지면 `frameScale()`
-     * 이 함께 줄인다 — 저술값을 쓰는 이 프로젝트의 모든 것과 같은 규칙이다.
-     */
     const right = FRAME.width / 2 - NAV_RIGHT * k;
     const baseline = -FRAME.height / 2 + NAV_BOTTOM * k;
 
     /**
-     * 오른쪽에서 왼쪽으로 커서를 옮기며 놓는다.
+     * 텍스처 상자가 아니라 **주 글자의 잉크**를 기준으로 놓는다.
      *
-     * 상자에는 좌우로 `pad` 가 있고 글자는 그 안에 가운데로 앉는다. 그래서
-     * **잉크 폭**으로 전진하고 상자는 잉크 중심에 맞춰 씌운다 — 상자 폭으로
-     * 전진하면 여백이 두 번 들어가 간격이 시안의 24 보다 넓어지고, 처음에
-     * 그렇게 짜서 세 항목이 서로 겹쳤다.
+     * 위의 영문 설명이 주 글자보다 길 수 있으므로 캔버스 중심과 잉크 중심은
+     * 같지 않다. `pad` 와 `inkW` 로 캔버스 중심을 역산해야 PLAY의 시작선과
+     * 모드 사이 간격이 실제 화면에서도 저술값과 일치한다.
      */
-    let cursor = right;
-    for (let i = live.length - 1; i >= 0; i--) {
-      const item = live[i];
+    const placeLeft = (item, left) => {
       const box = item.map?.userData ?? { width: 40, height: 22, inkW: 30, pad: 5 };
       const ink = box.inkW * k;
-      const cx = cursor - ink / 2;
-      const size = (item.lead ? NAV_LEAD : NAV_SIZE) * k;
+      const cx = left + (box.width / 2 - box.pad) * k;
+      const lift = (box.anchorLift ?? (item.lead ? NAV_LEAD : NAV_SIZE) * 0.5) * k;
 
-      item.home = { x: cx * u, y: (baseline + size * 0.5) * u };
+      item.home = { x: cx * u, y: (baseline + lift) * u };
       item.mesh.scale.set(box.width * k * u, box.height * k * u, 1);
       item.mesh.position.set(item.home.x, item.home.y, 0);
 
       item.inkW = ink * u;
-      item.ruleLeft = (cx - ink / 2) * u;
+      item.ruleLeft = left * u;
       item.ruleY = (baseline - NAV_RULE_DROP * k) * u;
+      return left + ink;
+    };
 
-      cursor -= ink + NAV_GAP * k;
+    const placeRight = (item, edge) => {
+      const box = item.map?.userData ?? { inkW: 30 };
+      const left = edge - box.inkW * k;
+      placeLeft(item, left);
+      return left;
+    };
+
+    if (this.page === 'home') {
+      // PLAY를 병 바로 왼쪽에 독립시켜 시선이 제목 → 병 → 행동으로 이어진다.
+      placeLeft(live[0], FRAME.width / 2 - HOME_ACTION_RIGHT_SPAN * k);
+
+      // 컬렉션과 설정은 여전히 오른쪽 아래의 작은 편집 정보다.
+      let cursor = right;
+      for (let i = live.length - 1; i >= 1; i--) {
+        cursor = placeRight(live[i], cursor);
+        cursor -= NAV_GAP * k;
+      }
+    } else {
+      // 모드는 카드가 아니라 한 줄의 큰 제목들이다. 한글과 작은 영문이 한 쌍이다.
+      let cursor = FRAME.width / 2 - MODE_GROUP_RIGHT_SPAN * k;
+      for (const item of live) {
+        cursor = placeLeft(item, cursor);
+        cursor += MODE_GAP * k;
+      }
     }
 
     /** 날짜 도장: 왼쪽 30 / 아래 26. 시안 그대로. */
@@ -373,7 +417,14 @@ export class MenuItems {
       item.dim = approach(item.dim ?? 1, any && !item.hovered ? 0.45 : 1, dt, MOTION.hover);
       spring(item.grow, item.hovered ? 1 : 0, 12);
 
-      item.mesh.position.set(item.home.x, item.home.y + item.shift * -1.5 * (this._unitsPerPixel ?? 1), 0);
+      const u = this._unitsPerPixel ?? 1;
+      // 주 행동과 모드만 오른쪽으로 두 픽셀 흐른다. 크기 변화 없이 방향을 알린다.
+      const travel = item.action || item.mode ? 2 : 0;
+      item.mesh.position.set(
+        item.home.x + item.shift * travel * u,
+        item.home.y + item.shift * -1.5 * u,
+        0,
+      );
       item.material.uniforms.uOpacity.value = fade * item.dim;
 
       // 밑줄: 왼쪽 끝을 고정하고 폭만 자란다
