@@ -718,6 +718,7 @@ export function navLabelTexture(label, {
   eyebrow = '',
   eyebrowTracking = 1.2,
   display = false,
+  icon = null,
 } = {}) {
   const family = display ? DISPLAY_FAMILY : FONT_FAMILY;
   const probe = makeCanvas(8, 8);
@@ -733,8 +734,19 @@ export function navLabelTexture(label, {
   const eyebrowW = eyebrow
     ? Math.max(1, microProbe.ctx.measureText(eyebrow).width - eyebrowTracking)
     : 0;
+  /**
+   * 아이콘이 붙는 자리. 글자 뒤에 한 칸 띄고 삼각형 하나.
+   *
+   * 크기가 글자의 0.78 인 것은 대문자 높이에 맞추기 위해서다 — 삼각형의 폭이
+   * 아니라 **높이**가 글자와 같아야 한 줄로 읽힌다. 폭은 정삼각형에 가깝게
+   * 높이의 0.86 으로 두는데, 정확한 정삼각형은 재생 아이콘으로는 뭉툭해 보인다.
+   */
+  const iconH = icon ? size * 0.78 : 0;
+  const iconW = icon ? iconH * 0.86 : 0;
+  const iconGap = icon ? Math.round(size * 0.62) : 0;
+
   const pad = Math.round(size * 0.5);
-  const width = Math.round(Math.max(inkW, eyebrowW) + pad * 2);
+  const width = Math.round(Math.max(inkW + iconGap + iconW, eyebrowW) + pad * 2);
   const height = eyebrow ? Math.round(size * 2.35) : Math.round(size * 2.2);
 
   const { canvas, ctx } = makeCanvas(Math.round(width * scale), Math.round(height * scale));
@@ -756,6 +768,42 @@ export function navLabelTexture(label, {
   const mainY = eyebrow ? height - Math.round(size * 0.35) : height / 2;
   ctx.fillText(label, pad, mainY);
 
+  /**
+   * ── 화살표가 아니라 **재생 삼각형** ─────────────────────────────────────
+   *
+   * `PLAY →` 였다. 화살표는 "이쪽으로 간다" 를 말하는 기호이고 그건 뒤로 가는
+   * 줄에도 붙는다 — 이 화면에서 `← MENU` 가 이미 쓰고 있어서, 같은 기호가 반대
+   * 방향으로 두 번 나오면 방향만 다른 같은 동작으로 읽힌다.
+   *
+   * 삼각형은 다르다. 그것은 **시작한다**는 뜻이고 이 화면에서 그것 하나뿐이다.
+   * 꼭짓점만 살짝 둥글려서 활자 옆에서 날카롭게 튀지 않게 한다 — 자간이 넓은
+   * 작은 활자 옆의 뾰족한 도형은 그것만 다른 재료로 보인다.
+   */
+  if (icon === 'play') {
+    const x = pad + inkW + iconGap;
+    const cy = mainY - (eyebrow ? size * 0.43 : 0);
+    const top = cy - iconH / 2;
+    const r = Math.max(0.5, iconH * 0.1);
+    ctx.save();
+    ctx.fillStyle = color;
+    // strokeStyle 도 같이 정한다. 기본값이 검정이라 안 정하면 흰 삼각형에
+    // 검은 테두리가 둘린다 — 실제로 한 번 그렇게 나왔다.
+    ctx.strokeStyle = color;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.lineWidth = r * 2;
+    ctx.beginPath();
+    // 안쪽으로 반지름만큼 줄인 삼각형을 굵은 선으로 그리면 모서리가 둥근
+    // 삼각형이 된다. 경로를 직접 둥글리는 것보다 짧고, 세 꼭짓점이 같은 반지름을 받는다.
+    ctx.moveTo(x + r, top + r);
+    ctx.lineTo(x + iconW - r * 1.2, cy);
+    ctx.lineTo(x + r, top + iconH - r);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.fill();
+    ctx.restore();
+  }
+
   const tex = toTexture(canvas);
   /**
    * `anchorLift` 는 주 글자의 시각 중심이 하단 기준선에서 size/2 위에 오게 하는 값.
@@ -763,7 +811,8 @@ export function navLabelTexture(label, {
    */
   const mainCenterY = eyebrow ? mainY - size * 0.43 : height / 2;
   const anchorLift = size * 0.5 + mainCenterY - height / 2;
-  tex.userData = { width, height, inkW, pad, anchorLift };
+  // 아이콘도 잉크다 — 오른쪽 정렬과 커서 판정이 이 폭을 쓴다.
+  tex.userData = { width, height, inkW: inkW + iconGap + iconW, pad, anchorLift };
   return tex;
 }
 

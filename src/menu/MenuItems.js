@@ -1,9 +1,9 @@
 import { Group, Mesh, PlaneGeometry, Raycaster, Vector2 } from 'three';
 import { PALETTE } from '../core/palette.js';
 import { createSpriteMaterial } from './menuMaterials.js';
-import { dateStampTexture, navLabelTexture, ruleTexture } from './menuTextures.js';
+import { dateStampTexture, navLabelTexture } from './menuTextures.js';
 import { FRAME, frameScale, texelScale } from '../core/frame.js';
-import { ROLE, RULE } from '../core/tokens.js';
+import { ROLE } from '../core/tokens.js';
 
 /**
  * The four items, as flat plates standing in the scene.
@@ -70,7 +70,7 @@ const plateScale = () => texelScale();
  */
 const PAGES = {
   home: [
-    { id: 'play', label: 'PLAY →', action: true },
+    { id: 'play', label: 'PLAY', icon: 'play', action: true },
     { id: 'collection', label: 'COLLECTION' },
     { id: 'settings', label: 'SETTINGS' },
   ],
@@ -101,8 +101,6 @@ const MODE_GAP = 38;
 /** 오른쪽·아래 여백. 시안의 `right: 30; bottom: 28`. */
 const NAV_RIGHT = 30;
 const NAV_BOTTOM = 28;
-/** 밑줄이 글자 아래로 떨어지는 거리. 시안의 `bottom: -6px`. */
-const NAV_RULE_DROP = 6;
 /** 좌하단 숫자. 시안의 `left: 30; bottom: 26`. */
 const STAMP_LEFT = 30;
 const STAMP_BOTTOM = 26;
@@ -129,7 +127,6 @@ export class MenuItems {
     this.page = 'home';
 
     /** 모든 항목이 나눠 쓰는 1px 밑줄. 메시보다 먼저 만들어 머티리얼에 건다. */
-    this._ruleMap = ruleTexture();
 
     /**
      * 두 페이지 중 **긴 쪽**만큼 메시를 만들어 두고 재사용한다.
@@ -144,14 +141,10 @@ export class MenuItems {
       const mesh = new Mesh(new PlaneGeometry(1, 1), material);
       mesh.renderOrder = 10;
       this.root.add(mesh);
-      const ruleMat = createSpriteMaterial(retro, { map: this._ruleMap, opacity: 0 });
-      const rule = new Mesh(new PlaneGeometry(1, 1), ruleMat);
-      rule.renderOrder = 11;
-      this.root.add(rule);
       return {
-        id: null, label: '', role: null, mesh, material, map: null,
+        id: null, label: '', icon: null, role: null, mesh, material, map: null,
         action: false, mode: false,
-        rule, ruleMat, hovered: false, grow: { x: 0, v: 0 },
+        hovered: false,
       };
     });
 
@@ -219,6 +212,7 @@ export class MenuItems {
       const def = defs[i] ?? null;
       item.id = def?.id ?? null;
       item.label = def?.label ?? '';
+      item.icon = def?.icon ?? null;
       item.role = def?.role ?? null;
       item.action = def?.action ?? false;
       item.mode = def?.mode ?? false;
@@ -226,7 +220,6 @@ export class MenuItems {
       item.hovered = false;
       item.lead = item.action;
       item.mesh.visible = !!def;
-      if (item.rule) item.rule.visible = !!def;
     });
     this._plateKey = '';
     this._rebakeIfResized();
@@ -254,8 +247,8 @@ export class MenuItems {
    * 모두 같은 흰색이므로 계층은 서체 역할과 크기 차이만으로 만든다. 작은 영문
    * 설명은 버튼 밖의 장식이 아니라 같은 텍스처 안에서 기준선을 공유한다.
    *
-   * 상태별 텍스처가 없다. 호버는 밑줄과 불투명도가 맡고, 둘 다 매 프레임 움직이는
-   * 값이라 구울 수 없다.
+   * 상태별 텍스처가 없다. 호버가 아무것도 바꾸지 않기 때문이다 — `update` 의
+   * 주석에 왜 넷이 차례로 없어졌는지 적혀 있다.
    */
   _bake(item) {
     if (item.mode) {
@@ -276,6 +269,7 @@ export class MenuItems {
       color: PALETTE.water.ink,
       tracking: size * (item.action ? 0.11 : NAV_TRACKING),
       scale: plateScale(),
+      icon: item.icon ?? null,
     });
   }
 
@@ -345,10 +339,6 @@ export class MenuItems {
       item.home = { x: cx * u, y: (baseline + lift) * u };
       item.mesh.scale.set(box.width * k * u, box.height * k * u, 1);
       item.mesh.position.set(item.home.x, item.home.y, 0);
-
-      item.inkW = ink * u;
-      item.ruleLeft = left * u;
-      item.ruleY = (baseline - NAV_RULE_DROP * k) * u;
       return left + ink;
     };
 
@@ -386,8 +376,6 @@ export class MenuItems {
       (-FRAME.height / 2 + STAMP_BOTTOM * k + st.height * k / 2 - st.pad * k) * u,
       0,
     );
-
-    this._ruleH = RULE.thin * k * u;
     this._unitsPerPixel = u;
   }
 
@@ -414,32 +402,20 @@ export class MenuItems {
        * 왼쪽부터 뻗는다. 판은 여전히 아무 데도 안 간다.
        */
       /**
-       * ── 호버에 **애니메이션이 없다** ────────────────────────────────────
+       * ── 호버에 **아무것도 없다** ────────────────────────────────────────
        *
-       * 세 가지가 있었다: 항목이 2px 흐르고, 나머지가 0.45 로 흐려지고, 밑줄이
-       * 스프링으로 자랐다. 첫째는 이미 뺐고, 남은 둘도 뺀다.
+       * 넷이 차례로 없어졌다. 항목이 2px 흐르는 것, 나머지가 0.45 로 흐려지는
+       * 것, 밑줄이 스프링으로 자라는 것, 그리고 밑줄 자체.
        *
-       * 흐려지는 쪽이 특히 나빴다. 커서를 목록 위로 지나가기만 해도 세 줄이
-       * 매번 어두워졌다 밝아지는데, 읽는 동안 글자의 밝기가 변하면 그건 반응이
-       * 아니라 깜빡임이다. 밑줄의 스프링도 마찬가지로, 빠르게 훑으면 밑줄 세
-       * 개가 서로 다른 길이로 남아 어느 것을 가리키고 있는지 오히려 흐려진다.
+       * 앞의 셋은 움직임이라 소음이었다. 마지막은 움직이지 않는데도 없앤다 —
+       * 이 화면의 항목은 셋뿐이고 전부 한 줄에 나란히 있어서, 커서가 무엇 위에
+       * 있는지는 커서가 이미 말하고 있다. 그 위에 선을 하나 더 그으면 화면에
+       * 없던 요소가 커서를 따라다니는 것이 된다.
        *
-       * 남은 것은 밑줄 하나이고 즉시 켜지고 꺼진다. 가리킨 것에 선이 있다 —
-       * 그게 전부이고, 그 이상은 이 화면에서 소음이다.
+       * 누를 수 있다는 것은 글자가 거기 있다는 사실이 말한다. 눌리는 것은
+       * 화면이 바뀌는 것으로 말한다.
        */
-      item.grow.x = item.hovered ? 1 : 0;
-      item.grow.v = 0;
       item.material.uniforms.uOpacity.value = fade;
-
-      // 밑줄: 왼쪽 끝을 고정하고 폭만 자란다
-      const w = Math.max(0, item.grow.x) * (item.inkW ?? 0);
-      item.rule.visible = w > 0.0001 && fade > 0.004;
-      if (item.rule.visible) {
-        item.rule.scale.set(w, this._ruleH ?? 1, 1);
-        item.rule.position.set((item.ruleLeft ?? 0) + w / 2, item.ruleY ?? 0, 0);
-        item.ruleMat.uniforms.uTint.value.set(PALETTE.water.ink);
-        item.ruleMat.uniforms.uOpacity.value = fade;
-      }
     }
 
     /**
@@ -496,13 +472,10 @@ export class MenuItems {
   }
 
   dispose() {
-    this._ruleMap?.dispose();
     this.stamp.geometry.dispose();
     this.stamp.material.uniforms.uMap.value?.dispose();
     this.stamp.material.dispose();
     for (const item of this.items) {
-      item.rule?.geometry.dispose();
-      item.ruleMat?.dispose();
       item.map?.dispose();
     }
     for (const item of this.items) {
