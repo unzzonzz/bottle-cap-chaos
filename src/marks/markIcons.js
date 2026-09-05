@@ -6,6 +6,7 @@ import { applyTracking, fitText, fontSpec, plate, panel } from '../ui/paper.js';
 import { drawIcon } from '../ui/icons.js';
 
 import { registerTextureCache } from '../ui/fonts.js';
+import { deepWindow } from '../menu/menuTextures.js';
 
 /**
  * 마크 편집기의 그림들: 도구 버튼 · 칸 액자 · 배지 · 알림 · 저장 버튼.
@@ -157,15 +158,21 @@ export function tileTexture(state = 'idle', { size = 76, accent = false } = {}) 
    * 기본 로고 칸만 `selected` 로 강조색 테두리를 받는다 — 지시서가 "구분되게
    * 표시" 를 요구했고, 이 칸만 휴지통도 편집도 없기 때문이다.
    */
-  plate(ctx, {
-    x: 0,
-    y: 0,
+  /**
+   * 흰 종이가 아니라 **물 속의 창**이다.
+   *
+   * 여기 `plate` 가 있었다 — 가라앉은 흰 채우기에 헤어라인 테두리. 액자로서는
+   * 옳았지만 재료가 종이였고, 이 화면에 종이는 더 이상 없다. 채우기를 코발트로
+   * 바꾸고 선 하나만 남긴다. 호버는 선이 진해지는 것으로 말한다 — 채우기를
+   * 밝히면 안에 든 그림의 색이 달라 보이고, 마크를 고르는 화면에서 그건 치명적이다.
+   */
+  deepWindow(ctx, {
     w: size,
     h: size,
     radius: RADIUS.chip,
-    state: accent ? 'selected' : (TOOL_STATE[state] ?? 'idle'),
-    accent: accent ? PALETTE.accent.amber : PALETTE.cobalt,
-    fill: PALETTE.ui.surfaceSunken,
+    fill: state === 'hover' ? 0.66 : 0.55,
+    line: state === 'hover' ? 0.55 : 0.34,
+    accent,
   });
 
   return finishIcon(key, canvas, size);
@@ -290,21 +297,26 @@ export function saveButtonTexture(state = 'idle', { width = 108, height = 34 } =
   const hit = cache.get(key);
   if (hit) return hit;
 
-  const skin = SKINS[state] ?? SKINS.idle;
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d');
   ctx.imageSmoothingEnabled = true;
+  const skin = { ink: PALETTE.water.ink };
 
-  plate(ctx, {
-    x: 0,
-    y: 0,
+  /**
+   * 초록 젤 판이 아니라 **물 속의 창**이다. 잉크는 순백 하나.
+   *
+   * 강조색으로 "이것이 커밋이다" 를 말하고 있었는데, 이 화면의 잉크는 하나이고
+   * 색으로 위계를 만들지 않는다. 저장이 다른 줄과 다르다는 것은 아이콘과
+   * 낱말이 함께 있다는 사실이 이미 말한다 — 다른 어느 것도 그렇지 않다.
+   */
+  deepWindow(ctx, {
     w: width,
     h: height,
     radius: RADIUS.chip,
-    state: TOOL_STATE[state] ?? 'idle',
-    accent: PALETTE.accent.green,
+    fill: state === 'hover' ? 0.7 : 0.58,
+    line: state === 'hover' ? 0.62 : 0.4,
   });
 
   /**

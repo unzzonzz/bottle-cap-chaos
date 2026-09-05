@@ -4,17 +4,7 @@ import { RADIUS, ROLE, SPACE, TYPE } from '../core/tokens.js';
 import { drawIcon } from '../ui/icons.js';
 import { drawLettering } from '../ui/lettering.js';
 import { DISPLAY_FAMILY, FONT_FAMILY } from '../ui/fonts.js';
-import {
-  applyTracking,
-  dialogPanel,
-  fitText,
-  fontSpec,
-  plate,
-  panel,
-  roleButton,
-  roleSkin,
-  skinFor,
-} from '../ui/paper.js';
+import { applyTracking, dialogPanel, fitText, fontSpec, panel, plate, roleButton, roleSkin, roundRectPath, skinFor } from '../ui/paper.js';
 import { ring } from '../ui/marks.js';
 
 /**
@@ -726,6 +716,43 @@ export function burstSheet() {
   );
 
   return toTexture(canvas);
+}
+
+/**
+ * 물 속의 **창**. 흰 종이가 아니다.
+ *
+ * ── 왜 이것이 필요한가 ──────────────────────────────────────────────────────
+ * 판을 전부 걷어내고 글자만 남기는 것이 이 화면의 언어인데, 내용이 **그림**인
+ * 자리에서는 그게 안 된다. 마크의 빈 칸, 컬렉션의 카드, 색 견본은 글자로 바꿀
+ * 수 있는 것이 아니고, 바탕 없이 물 위에 놓으면 경계가 사라져 어디까지가 하나의
+ * 칸인지 읽히지 않는다.
+ *
+ * 그래서 바탕은 남기되 **재료를 바꾼다.** 흰 종이는 이 화면에 없는 물건이다 —
+ * 이 화면에 있는 것은 물이고, 물 속에서 무언가를 담는 것은 더 깊은 물이다.
+ * 채우기는 코발트를 반투명으로 얹어 한 단 가라앉히고, 경계는 순백 헤어라인
+ * 하나로만 긋는다. 그림자도 그라디언트도 없다 — 둘 다 종이의 성질이다.
+ *
+ * 헤어라인이 0.34 인 것은 실측이다. 0.6 이면 선이 내용보다 먼저 보이고
+ * (칸이 아니라 격자가 화면의 주인공이 된다), 0.2 아래면 밝은 물 위에서 사라진다.
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {object} o
+ * @param {number} o.w
+ * @param {number} o.h
+ * @param {number} [o.radius]
+ * @param {number} [o.fill]    코발트를 얹는 세기
+ * @param {number} [o.line]    헤어라인의 불투명도. 0 이면 선이 없다
+ * @param {boolean} [o.accent] 강조 칸. 선이 진해진다
+ */
+export function deepWindow(ctx, { w, h, radius = RADIUS.chip, fill = 0.55, line = 0.34, accent = false }) {
+  roundRectPath(ctx, 0.5, 0.5, w - 1, h - 1, radius);
+  ctx.fillStyle = withAlpha(PALETTE.water.deep, fill);
+  ctx.fill();
+  if (line > 0) {
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = withAlpha(PALETTE.water.ink, accent ? Math.min(1, line * 2.1) : line);
+    ctx.stroke();
+  }
 }
 
 export function menuPlateTexture(label, state, { width = 256, height = 52, scale = 1, onWater = false } = {}) {
