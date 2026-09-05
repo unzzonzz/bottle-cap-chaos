@@ -106,6 +106,28 @@ export class SubmergedTitle {
     this.layout(unitsPerPixel);
   }
 
+  /**
+   * 다음 `layout()` 에서 제목을 다시 굽게 한다.
+   *
+   * ── 왜 필요한가 ────────────────────────────────────────────────────────
+   * 제목은 캔버스 텍스처로 구워지고, 그 텍스처를 이 머티리얼의 유니폼이 쥔다.
+   * `bootMenu` 는 `whenFontsReady()` 를 기다리지 않고 부르므로(그래야 첫 프레임이
+   * 늦지 않는다) 이 객체는 디스플레이 서체가 도착하기 **전에** 만들어지고,
+   * 폴백 서체로 구워진 텍스처가 그대로 남는다. `layout()` 의 가드가
+   * `if (!uMap.value)` 라 다시 굽지도 않는다.
+   *
+   * 실측: 살아 있는 텍스처의 잉크가 43,323 픽셀, 폰트가 붙은 뒤 다시 구우면
+   * 72,115 픽셀이었다. 40% 가 사라져 있었다 — 화면에서는 명조 대신 실처럼 가는
+   * 폴백 획이 보였고, 그게 "폰트가 달라서 퀄리티가 낮다" 의 정체였다.
+   *
+   * `ui/fonts.js` 의 등록부가 이것을 부른다. 그쪽 머리말이 같은 함정을 네 개의
+   * 다른 캐시에 대해 설명하고 있다 — `menuTextures` 만 빠져 있었다.
+   */
+  invalidate() {
+    this.material.uniforms.uMap.value?.dispose();
+    this.material.uniforms.uMap.value = null;
+  }
+
   /** @param {number} unitsPerPixel */
   layout(unitsPerPixel) {
     const u = unitsPerPixel ?? this._u;
@@ -144,7 +166,23 @@ export class SubmergedTitle {
 
     this.mesh.scale.set(box.width * k * u, box.height * k * u, 1);
     this.mesh.position.set(cx * u, cy * u, 0);
-    this.mesh.rotation.z = (box.rotation * Math.PI) / 180;
+    /**
+     * 부호를 **뒤집는다.** CSS 와 three 의 회전 방향이 반대다.
+     *
+     * `box.rotation` 은 시안의 CSS 값 그대로 −7 이다. CSS 의 rotate() 는 y 가
+     * 아래로 가는 좌표계에서 양수가 시계 방향이므로 −7deg 는 **반시계** 7 도다.
+     * three 는 y 가 위로 가고 rotation.z 양수가 반시계이므로, 같은 그림을 얻는
+     * 값은 +7 이다. 그대로 넣으면 제목이 정확히 반대로 기운다.
+     *
+     * 저술값 쪽을 +7 로 바꾸지 않는 이유는 그것이 시안에서 온 숫자이기 때문이다 —
+     * 출처가 CSS 인 값은 CSS 의 부호로 남기고, 변환은 쓰는 자리에서 한다.
+     *
+     * 실측(제목만 렌더해서 시안 기하학과 겹친 IoU):
+     *   z = −7  →  0.202,  주축 16.76도
+     *   z = +7  →  0.601,  주축  6.93도   (시안 6.88도)
+     * 남은 0.4 는 굴절이 획을 밀어서 생기는 차이다 — 시안 기준판에는 굴절이 없다.
+     */
+    this.mesh.rotation.z = (-box.rotation * Math.PI) / 180;
   }
 
   /**

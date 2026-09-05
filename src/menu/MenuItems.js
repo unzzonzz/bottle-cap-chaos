@@ -311,6 +311,22 @@ export class MenuItems {
    * 저술 크기(12/10px)로 굽고 배치할 때 `frameScale()` 로 줄이므로, 다시 구울
    * 이유는 **페이지가 바뀌어 라벨이 달라졌을 때**뿐이다.
    */
+  /**
+   * 다음 `layout()` 에서 글자를 전부 다시 굽게 한다.
+   *
+   * 폰트가 늦게 도착했을 때 `ui/fonts.js` 의 등록부가 부른다. 자세한 것은
+   * `SubmergedTitle.invalidate` 의 머리말 — 같은 함정이고 같은 원인이다.
+   *
+   * 라벨 키를 지우는 것으로 충분한 이유는 `_rebakeIfResized` 가 그 키로만 다시
+   * 굽기를 결정하기 때문이다. 날짜 도장은 그 경로에 없으므로 여기서 직접 굽는다.
+   */
+  invalidate() {
+    this._plateKey = null;
+    const map = this.stamp.material.uniforms.uMap;
+    map.value?.dispose();
+    map.value = dateStampTexture();
+  }
+
   _rebakeIfResized() {
     const key = this.items.map((i) => i.label).join('|');
     if (key === this._plateKey) return;

@@ -16,7 +16,7 @@ import { SceneComposer } from '../core/Composer.js';
 import { FRAME, MIN_FRAME_ASPECT, frameScale } from '../core/frame.js';
 import { aimedLaunchDirection, Bottle } from './Bottle.js';
 import { PALETTE, withAlpha } from '../core/palette.js';
-import { whenFontsReady } from '../ui/fonts.js';
+import { registerTextureCache, whenFontsReady } from '../ui/fonts.js';
 import { clearLegacyStorage } from '../core/legacyStorage.js';
 import { CapWipe, WIPE_FRAME } from '../core/CapWipe.js';
 import { MenuItems } from './MenuItems.js';
@@ -352,6 +352,35 @@ export function bootMenu(
    * 종이에 인쇄된 것이 되고, 이 화면에서 병은 물 속의 물건이다.
    */
   const title = new SubmergedTitle({ unitsPerPixel: unitsPerPixel() });
+
+  /**
+   * 폰트가 늦게 오면 제목과 내비를 **다시 굽는다.**
+   *
+   * ── 이 화면의 글자가 명조가 아니었던 이유 ──────────────────────────────
+   * 위쪽에서 `whenFontsReady()` 를 기다리지 않고 부른다 — 그래야 첫 프레임이
+   * 서체를 기다리지 않는다. 그 대신 `ui/fonts.js` 가 등록부를 두고, 서체가
+   * 도착하면 구워 둔 텍스처를 버리게 한다. `hudTextures` `markIcons`
+   * `fxTextures` `cardTexture` 넷이 거기에 등록돼 있는데 이번 재설계에서 새로
+   * 만든 `menuTextures` 만 빠져 있었다. 그래서 제목과 내비가 폴백 서체로 구워진
+   * 채 영영 남았다.
+   *
+   * 실측: 제목 텍스처의 잉크가 43,323 픽셀이었고 서체가 붙은 뒤 다시 구우니
+   * 72,115 픽셀이었다. 화면에서는 획 대비가 큰 명조 대신 실처럼 가는 폴백이
+   * 보였다. C 시안과 나란히 놓고 겹쳐 보고서야 잡혔다 — 크기도 위치도 회전도
+   * 맞는데 그림이 달랐고, 다른 것은 서체 하나였다.
+   *
+   * `menuTextures` 에 캐시가 없으므로 등록부에 거는 것은 "캐시를 비워라" 가
+   * 아니라 "다시 그려라" 다. 텍스처를 쥐고 있는 것이 두 객체의 유니폼이라
+   * 그쪽에 `invalidate()` 를 두고 여기서 배치까지 한 번에 돌린다.
+   *
+   * 서체가 이미 와 있으면 등록부는 이 콜백을 부르지 않는다 — 그때는 처음 구운
+   * 것이 이미 맞는 서체라 다시 구울 이유가 없다.
+   */
+  registerTextureCache(() => {
+    title.invalidate();
+    items.invalidate();
+    placeCamera();
+  });
   /** 지난 프레임의 정규화 포인터. 물을 젓는 것은 그 차이다. */
   const lastPointerN = { x: 0, y: 0 };
   /**
