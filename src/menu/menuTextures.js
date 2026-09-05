@@ -924,6 +924,37 @@ export function submergedTitleTexture({ scale = 1 } = {}) {
 
   ctx.fillText('한여름', PAD_L, base1);
 
+  /**
+   * ── 둘째 줄이 첫째 줄을 **파낸다** ──────────────────────────────────────
+   *
+   * 행간이 0.78 이라 두 줄이 세로로 겹친다 — 그것이 이 제목의 형태이고 의도다.
+   * 그런데 둘 다 같은 흰색이라 겹치는 자리에서 획이 **붙어 버린다**: 름 과 까,
+   * 여 와 알 이 한 덩어리가 되어 어느 줄의 획인지 읽히지 않는다.
+   *
+   * 그래서 둘째 줄을 그리기 전에 그 실루엣을 굵게 부풀려 **지운다**
+   * (destination-out). 색을 칠하는 것이 아니라 알파를 깎으므로 그 자리에는
+   * 아무것도 남지 않고 뒤의 물이 그대로 보인다 — 두 줄 사이에 물빛 틈이 생기고
+   * 둘째 줄이 첫째 줄 **앞으로** 나온다.
+   *
+   * 틈의 두께는 획 크기의 8% 다. 더 얇으면 붙은 것과 구별이 안 되고, 더 두꺼우면
+   * 틈이 하나의 형태가 되어 글자 사이에 선이 지나가는 것으로 보인다.
+   *
+   * lineJoin 이 round 인 것은 miter 면 획이 만나는 뾰족한 곳에서 틈이 길게
+   * 튀어나오기 때문이다.
+   *
+   * 이것은 텍스처 **안**의 일이다. 화면의 다른 요소와 겹치는 것은 깊이 마스크가
+   * 맡는다 — `submergedTitleMaskTexture`. 두 줄이 한 텍스처에 있으므로 마스크로는
+   * 서로를 파낼 수 없어서 두 장치가 따로 필요하다.
+   */
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = SIZE * 0.08;
+  ctx.strokeText('알까기', PAD_L + INDENT, base1 + LINE);
+  ctx.fillText('알까기', PAD_L + INDENT, base1 + LINE);
+  ctx.restore();
+
   ctx.fillText('알까기', PAD_L + INDENT, base1 + LINE);
 
   const tex = toTexture(canvas);
