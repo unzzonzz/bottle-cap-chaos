@@ -5,7 +5,7 @@ import { MarkTextures } from '../marks/markTextures.js';
 import { PLAYER_COLORS } from '../render/playerColors.js';
 import { PALETTE } from '../core/palette.js';
 import { ROLE } from '../core/tokens.js';
-import { anchorHead, anchorTopLeft, solvePanel } from './panelLayout.js';
+import { ROW, anchorHead, anchorTopLeft, solvePanel, stackRows } from './panelLayout.js';
 
 /**
  * 상대 선택 — two caps facing each other, and who is behind the far one.
@@ -211,6 +211,8 @@ export class OpponentScene {
       rows: [{ id: '#caps', h: L.capRow }, ...L.rows.map((r) => ({ id: r.id }))],
       footer: L.footer.length,
     });
+    // 모든 목록 화면이 같은 리듬을 쓴다 — `panelLayout.stackRows`.
+    stackRows(box);
     this._box = box;
     const at = (id) => box.rows.find((r) => r.id === id);
 
@@ -273,7 +275,8 @@ export class OpponentScene {
       item.mesh.position.set(0, row.y * u, 0);
     }
 
-    const fb = box.footer.button;
+    // 푸터도 목록과 같은 줄 높이 — `SettingsScene` 의 같은 자리 주석 참조.
+    const fb = { w: box.footer.button.w, h: Math.round(ROW * box.ky) };
     for (const item of this.footer) {
       item.size = { width: fb.w, height: fb.h, scale: box.scale };
       item.mesh.scale.set(fb.w * u, fb.h * u, 1);

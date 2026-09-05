@@ -267,3 +267,56 @@ export function anchorFooter(mesh, size, root, unitsPerPixel) {
   const wantY = (-FRAME.height / 2 + 28 * k + size.h / 2) * u;
   mesh.position.set(wantX - root.position.x, wantY - root.position.y, 0);
 }
+
+/**
+ * 목록의 리듬. **모든 목록 화면이 같은 값을 쓴다.**
+ *
+ * ── 왜 솔버의 줄 높이를 쓰지 않는가 ─────────────────────────────────────────
+ * `solvePanel` 은 남는 세로를 줄들에 나눠 주므로 줄 높이가 화면마다, 항목 수마다
+ * 다르다. 판이 있을 때는 그게 맞았다 — 판을 꽉 채우는 것이 목적이었으니까.
+ *
+ * 판이 없어진 지금 줄 높이는 **글자가 정하는 값**이다. 그리고 그 값이 화면마다
+ * 다르면 설정에서 컬렉션으로 넘어갈 때 같은 크기의 글자가 다른 간격으로 서고,
+ * 그건 두 화면이 다른 표라는 뜻으로 읽힌다.
+ *
+ * 시안에서 정한 값이다(853x480 기준):
+ *
+ *   ROW      22   13px 글자의 상자. 글자 크기는 이 값의 0.59 로 나온다
+ *   GAP      26   줄과 줄 사이
+ *   TIGHT     7   한 덩어리 안 — 이름과 그 눈금 사이
+ *
+ * 줄 높이에 간격을 **더한** 것이 시안과 어긋난 원인이었다: 시안의 26 은 글자
+ * 상자 사이의 거리인데, 구현이 솔버의 큰 줄 높이에 26 을 얹어 실제 간격이
+ * 시안의 두 배 가까이 됐다.
+ */
+export const ROW = 22;
+export const ROW_GAP = 26;
+export const ROW_TIGHT = 7;
+
+/**
+ * 푼 배치의 줄 높이와 자리를 리듬에 맞춰 다시 쓴다.
+ *
+ * 솔버는 계속 쓴다 — 폭, 여백, 푸터, 세로 축소율(`ky`)은 그쪽이 아는 값이다.
+ * 여기서 바꾸는 것은 줄의 높이와 세로 위치뿐이다.
+ *
+ * @param {{rows: {id: string, y: number, h: number}[], ky: number}} box
+ * @param {(id: string) => boolean} [isTight]  위 줄에 붙일 줄인가
+ */
+export function stackRows(box, isTight = (id) => String(id).startsWith('#chips:')) {
+  const k = box.ky;
+  const row = Math.round(ROW * k);
+  const gap = Math.round(ROW_GAP * k);
+  const tight = Math.round(ROW_TIGHT * k);
+  const top = box.rows.length ? box.rows[0].y + box.rows[0].h / 2 : 0;
+
+  let edge = top;
+  for (const r of box.rows) {
+    // 눈금 줄은 자기 높이를 지킨다 — 누를 수 있는 것이라 손가락만 한 높이가 필요하다.
+    const h = isTight(r.id) ? r.h : row;
+    if (r !== box.rows[0]) edge -= isTight(r.id) ? tight : gap;
+    r.h = h;
+    r.y = edge - h / 2;
+    edge = r.y - h / 2;
+  }
+  return box;
+}

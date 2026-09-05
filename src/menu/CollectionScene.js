@@ -3,7 +3,7 @@ import { CARDS } from '../game/cards/cardCatalog.js';
 import { ROLE } from '../core/tokens.js';
 import { createSpriteMaterial } from './menuMaterials.js';
 import { collectionRowTexture, menuPlateTexture, panelTexture } from './menuTextures.js';
-import { anchorHead, anchorTopLeft, solvePanel } from './panelLayout.js';
+import { ROW, anchorHead, anchorTopLeft, solvePanel, stackRows } from './panelLayout.js';
 
 /**
  * 컬렉션 — 카드 일곱 장의 카탈로그.
@@ -101,6 +101,8 @@ export class CollectionScene {
       rows: this.cards.map((entry) => ({ id: entry.card.id })),
       footer: 1,
     });
+    // 모든 목록 화면이 같은 리듬을 쓴다 — `panelLayout.stackRows`.
+    stackRows(box);
 
     const key = `${Math.round(box.panel.w)}x${Math.round(box.panel.texH)}`;
     if (key !== this._panelKey) {
@@ -134,7 +136,8 @@ export class CollectionScene {
       entry.mesh.position.set(0, row.y * u, 0);
     });
 
-    const fb = box.footer.button;
+    // 푸터도 목록과 같은 줄 높이 — `SettingsScene` 의 같은 자리 주석 참조.
+    const fb = { w: box.footer.button.w, h: Math.round(ROW * box.ky) };
     const bk = `${Math.round(fb.w)}x${Math.round(fb.h)}`;
     if (bk !== this._backKey) {
       this._backKey = bk;

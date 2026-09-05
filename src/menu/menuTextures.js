@@ -511,7 +511,14 @@ export function menuPlateTexture(label, state, { width = 256, height = 52, scale
   const name = tab >= 0 ? label.slice(0, tab) : label;
   const value = tab >= 0 ? label.slice(tab + 1) : '';
 
-  const size = Math.max(11, Math.round(height * 0.30));
+  /**
+   * 글자 크기는 줄 높이의 0.59 다. 0.30 이었다.
+   *
+   * 시안이 22 높이의 상자에 13px 글자를 놓았다 — 22 * 0.59 = 13. 0.30 은 판이
+   * 있던 시절 알약 높이(52)에 맞춘 값이라, 줄 높이를 시안대로 낮추자 글자가
+   * 하한 11 에 걸려 시안보다 작아졌다.
+   */
+  const size = Math.max(10, Math.round(height * 0.59));
   applyTracking(ctx, size * 0.06);
   if (value) {
     drawText(ctx, {
@@ -627,7 +634,9 @@ export function panelTexture(o) {
       x: 0,
       y: (title ? 11 : 0) + size + 8,
       font: `400 ${size}px ${FONT_FAMILY}`,
-      color: withAlpha(PALETTE.water.ink, 0.55),
+      // 캡션도 순백. 물 위에서 알파를 내리면 자리마다 다른 밝기로 읽힌다 —
+      // `menuPlateTexture` 의 같은 주석 참조.
+      color: PALETTE.water.ink,
       align: 'left',
     });
     applyTracking(ctx, 0);
@@ -1165,7 +1174,15 @@ export function titleTexture(text, sub, { width = 256, height = 80, scale = 1, w
       x: 0,
       y,
       font: lines.font,
-      color: PALETTE.ui.text,
+      /**
+       * 물빛 잉크다. `ui.text` 가 아니다.
+       *
+       * 이 함수는 종이 판 위의 제목을 그리던 것이라 종이용 어두운 잉크를 썼다.
+       * 판이 없어지고 배경이 물이 된 지금 그 잉크는 배경보다 어두워서 탁하게
+       * 가라앉는다 — 설정의 `마스터 볼륨` 과 `그래픽` 이 다른 줄들보다 흐려
+       * 보이던 것이 이것이다. 화면의 모든 글자가 같은 잉크를 쓴다.
+       */
+      color: PALETTE.water.ink,
       align: 'left',
     });
     y += headSize + gap;
@@ -1180,7 +1197,8 @@ export function titleTexture(text, sub, { width = 256, height = 80, scale = 1, w
       x: 0,
       y: y - gap + SPACE.xs,
       font: line.font,
-      color: PALETTE.ui.textMuted,
+      // 부제도 같은 잉크. 위계는 크기가 만든다 — 이 화면의 규칙이다.
+      color: PALETTE.water.ink,
       align: 'left',
     });
     applyTracking(ctx, 0);

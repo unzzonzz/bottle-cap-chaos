@@ -5,7 +5,7 @@ import { OnlineSession, SESSION_PHASE } from '../net/OnlineSession.js';
 import { defaultServerUrl } from '../net/Transport.js';
 import { ERR, isValidCode, normaliseCode } from '../net/protocol.js';
 import { ROLE } from '../core/tokens.js';
-import { anchorHead, anchorTopLeft, solvePanel } from './panelLayout.js';
+import { anchorHead, anchorTopLeft, solvePanel, stackRows } from './panelLayout.js';
 
 /**
  * Finding somebody to play.
@@ -164,6 +164,8 @@ export class OnlineScene {
       rows: L.rows.map((r) => ({ id: r.id, h: r.kind === 'readout' ? L.readoutHeight : undefined })),
       footer: L.footer.length,
     });
+    // 모든 목록 화면이 같은 리듬을 쓴다 — `panelLayout.stackRows`.
+    stackRows(box);
     this._box = box;
     const at = (id) => box.rows.find((r) => r.id === id);
 

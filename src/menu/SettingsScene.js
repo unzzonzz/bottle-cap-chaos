@@ -4,7 +4,7 @@ import { menuPlateTexture, panelTexture, titleTexture } from './menuTextures.js'
 import { toMarkTexture } from '../marks/markTextures.js';
 import { PALETTE, withAlpha } from '../core/palette.js';
 import { RADIUS, ROLE, RULE } from '../core/tokens.js';
-import { anchorFooter, anchorHead, anchorTopLeft, solvePanel } from './panelLayout.js';
+import { ROW, anchorFooter, anchorHead, anchorTopLeft, solvePanel, stackRows } from './panelLayout.js';
 import { TIER_COUNT, TIER_NAMES } from '../core/quality.js';
 import { plate, roundRectPath } from '../ui/paper.js';
 import { dot, hairline } from '../ui/marks.js';
@@ -400,40 +400,10 @@ export class SettingsScene {
     const at = (id) => box.rows.find((r) => r.id === id);
 
     /**
-     * ── 간격이 **두 종류**다. 균일한 한 종류가 아니라 ──────────────────────
-     *
-     * `solvePanel` 은 모든 줄을 같은 간격으로 쌓는다. 세로로 쌓이는 컨트롤에는
-     * 그게 맞지만, 이 화면에는 **한 덩어리인 두 줄**이 있다: 마스터 볼륨과 그
-     * 눈금, 그래픽과 그 눈금. 같은 간격으로 두면 눈금이 자기 이름에서 떨어져
-     * 다음 줄과 같은 거리에 놓이고, 어느 값의 눈금인지 붙여 읽어야 안다.
-     *
-     * 그래서 푼 결과의 y 만 다시 잡는다. 줄의 **높이**는 솔버가 프레임에 맞춰
-     * 정한 값이라 그대로 쓰고, 사이의 거리만 두 종류로 나눈다:
-     *
-     *   덩어리 안 (이름 → 눈금)   7
-     *   그 밖의 모든 줄 사이      26
-     *
-     * 세로 총합이 지금과 4 픽셀 차이라(328 대 332) 프레임에 그대로 들어간다.
-     * 세 번째 간격(묶음 소제목)은 넣지 않았다 — 항목이 여덟 줄이라 아직 필요
-     * 없고, 화면에 없던 활자 등급을 하나 늘리게 된다.
+     * 줄 높이와 간격은 `stackRows` 가 정한다 — 모든 목록 화면이 같은 리듬이다.
+     * 눈금 줄만 위 줄에 붙는다: 그것은 다음 항목이 아니라 위 줄의 **값**이다.
      */
-    const GAP_TIGHT = Math.round(7 * box.ky);
-    const GAP_LOOSE = Math.round(26 * box.ky);
-    /**
-     * 굴러가는 것은 **줄들뿐**이다. 난외 표제와 나가는 문은 제자리에 있는다.
-     *
-     * 처음에는 루트를 통째로 밀었는데, 그러면 나가는 문이 목록과 함께 올라가
-     * 닉네임 줄과 겹쳤다. 화면에서 나가는 길이 목록의 일부가 되면 안 된다 —
-     * 그것은 목록이 얼마나 길든 같은 자리에 있어야 하는 것이다.
-     */
-    // 첫 줄의 자리는 솔버가 정한 것을 그대로 쓰고, 그 아래만 다시 쌓는다.
-    box.rows.forEach((row, i) => {
-      if (i === 0) return;
-      const prev = box.rows[i - 1];
-      // 칩 줄은 바로 위 줄의 **값**이다. 그 둘만 붙인다.
-      const tight = String(row.id).startsWith('#chips:');
-      row.y = prev.y - prev.h / 2 - (tight ? GAP_TIGHT : GAP_LOOSE) - row.h / 2;
-    });
+    stackRows(box);
 
     this.panel.scale.set(box.panel.w * u, box.panel.texH * u, 1);
     // 난외 표제의 자리는 아래 `anchorHead` 가 정한다 — 프레임의 여백에 직접 붙는다.
@@ -514,7 +484,14 @@ export class SettingsScene {
      * 오른쪽 항목(COMMIT)은 열의 오른쪽 끝에 붙는다. 나가는 문과 실행하는 것이
      * 같은 자리에 있으면 안 된다.
      */
-    const fb = box.footer.button;
+    /**
+     * 푸터도 목록과 **같은 줄 높이**를 쓴다.
+     *
+     * 솔버의 푸터 버튼 높이는 알약 시절의 값이라 목록보다 한참 크다. 글자
+     * 크기가 줄 높이에서 나오므로(`menuPlateTexture`), 그대로 두면 나가는 문만
+     * 목록의 두 배 크기로 선다.
+     */
+    const fb = { w: box.footer.button.w, h: Math.round(ROW * box.ky) };
     for (const item of this.footer) {
       item.size = { width: fb.w, height: fb.h, scale: box.scale };
       item.mesh.scale.set(fb.w * u, fb.h * u, 1);
@@ -653,9 +630,20 @@ export class SettingsScene {
        * `OnlineScene` 의 상태 줄이 같은 이유로 같은 것을 한다.
        */
       if (item.kind === 'readout') {
+        /**
+         * 읽는 줄도 **같은 함수**로 굽는다. `titleTexture` 가 아니라.
+         *
+         * 그쪽을 쓴 이유는 눌리지 않는 것에 알약을 입히지 않기 위해서였다.
+         * 지금은 눌리는 줄도 알약이 없으므로 두 함수가 그리는 것이 같아졌고,
+         * 다른 것은 `titleTexture` 가 판 높이에 맞춰 글자를 **줄인다**는 점뿐이다
+         * — 줄 높이를 시안대로 22 로 낮추자 그 줄들만 작아졌다.
+         *
+         * 눌리지 않는다는 것은 `pick` 이 건너뛰는 것으로 말한다. 모양으로 말할
+         * 필요가 없다: 이 화면에는 누를 수 있다고 주장하는 모양이 하나도 없다.
+         */
         if (label !== item.label) {
           item.maps.idle?.dispose();
-          item.maps.idle = titleTexture(label, '', { ...item.size, withPlate: false });
+          item.maps.idle = menuPlateTexture(label, { state: 'idle' }, { ...item.size, onWater: true });
           item.label = label;
         }
         item.mesh.material.uniforms.uMap.value = item.maps.idle;
