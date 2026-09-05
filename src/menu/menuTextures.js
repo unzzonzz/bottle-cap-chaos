@@ -6,7 +6,7 @@ import { drawLettering } from '../ui/lettering.js';
 import { DISPLAY_FAMILY, FONT_FAMILY } from '../ui/fonts.js';
 import { applyTracking, fitText, fontSpec, roleSkin, roundRectPath } from '../ui/paper.js';
 import { ring } from '../ui/marks.js';
-import { accentOf, drawArtMotif } from '../render/cardTexture.js';
+import { accentOf } from '../render/cardTexture.js';
 import { texelScale } from '../core/frame.js';
 
 /**
@@ -985,109 +985,79 @@ export function titleTexture(text, sub, { width = 256, height = 80, scale = 1, w
 }
 
 /**
- * 컬렉션의 카드 한 장. **메뉴 전용으로 따로 굽는다.**
+ * 컬렉션의 한 줄. **카드가 아니라 목록의 줄이다.**
  *
- * ── 왜 게임의 `cardFaceTexture` 를 그대로 쓰지 않는가 ───────────────────────
- * 그건 흰 유리판이고, 판 위에서는 그게 맞다 — 손에 쥐고 부채꼴로 펼치는 물건이라
- * 밝아야 하고, 여섯 장이 겹쳐도 갈려야 한다. 그런데 컬렉션은 판이 아니라 물
- * 속이다. 이 화면에서 흰 종이는 유일하게 남은 다른 재료였고, 다섯 화면을 물 위의
- * 활자로 바꾸고 나니 그 여섯 장만 다른 앱에서 온 것처럼 남았다.
+ * ── 세로 카드를 왜 버렸는가 ─────────────────────────────────────────────────
+ * 처음에는 게임의 카드 얼굴을 메뉴 재료로 다시 구웠다 — 흰 유리판이 물 속의
+ * 창이 되고 잉크가 순백이 되는 식으로. 재료는 맞았지만 **형태**가 틀렸다:
+ * 세로로 긴 판에 이름·그림·설명이 3단으로 쌓인 것은 손에 쥐고 부채꼴로 펼치는
+ * 물건의 형태다. 컬렉션에서 하는 일은 쥐는 것이 아니라 훑는 것이다.
  *
- * ── 그런데 카드는 알아볼 수 있어야 한다 ─────────────────────────────────────
- * 그래서 바꾸는 것은 **재료**뿐이다. 흰 유리판이 물 속의 창이 되고, 잉크가
- * 순백이 된다. 카드를 카드로 만드는 것 — 이름, 강조색, 절차적 무늬, 아이콘,
- * 설명 — 은 전부 게임의 것을 그대로 부른다(`drawArtMotif`, `iconForCard`).
- * 컬렉션에서 본 그림과 판에서 집는 그림이 다르면 그건 같은 카드가 아니다.
+ * 그래서 줄로 눕힌다. 설정 화면의 줄들과 같은 구조 — 왼쪽에서 시작하고, 한 줄에
+ * 한 가지이고, 눈이 세로로만 움직인다. 이 화면이 목록이라는 사실을 형태가 말한다.
  *
- * 강조색은 살린다. 이 화면에서 색을 갖는 것은 카드뿐이고, 그것이 카드가 여섯
- * 종류라는 사실을 말하는 유일한 장치다 — 나머지는 전부 한 잉크다.
+ * ── 그림은 남는다 ──────────────────────────────────────────────────────────
+ * 아이콘과 강조색은 게임의 것을 그대로 쓴다(`iconForCard`, `accentOf`). 이
+ * 화면에서 색을 갖는 것은 카드뿐이고, 그것이 카드가 여섯 종류라는 사실을 말하는
+ * 유일한 장치다 — 나머지는 전부 한 잉크다. 절차적 무늬는 뺐다: 24px 아이콘 뒤에
+ * 깔면 무늬가 아니라 얼룩이고, 그 크기에서 여섯 장을 가르는 것은 아이콘 모양이다.
  *
- * @param {object} card  `cardCatalog` 의 정의
- * @param {number} width
- * @param {object} [o]
- * @param {boolean} [o.locked]  아직 못 얻은 카드
+ * @param {object} card
+ * @param {object} o
+ * @param {number} o.width   줄의 폭, 저술 픽셀
+ * @param {number} o.height  줄의 높이, 저술 픽셀
  */
-export function collectionCardTexture(card, width, { locked = false } = {}) {
-  const w = Math.max(48, Math.round(width));
-  const h = Math.round(w * (SIZE.card.h / SIZE.card.w));
-  /**
-   * 텍셀은 화면이 정한다. `w` 는 저술 픽셀이라 그대로 구우면 레티나에서 흐리다.
-   */
+export function collectionRowTexture(card, { width, height }) {
   const scale = texelScale();
-  const key = `collect:${card.id}:${w}:${locked}:${scale}`;
+  const key = `crow:${card.id}:${Math.round(width)}x${Math.round(height)}:${scale}`;
   const hit = cardCache.get(key);
   if (hit) return hit;
 
+  const w = Math.round(width);
+  const h = Math.round(height);
   const { canvas, ctx } = makeCanvas(Math.round(w * scale), Math.round(h * scale));
-  const fw = SIZE.card.w;
-  const fh = SIZE.card.h;
-  ctx.scale((w * scale) / fw, (h * scale) / fh);
+  ctx.scale(scale, scale);
 
   const accent = accentOf(card);
   const ink = PALETTE.water.ink;
-  // 못 얻은 카드는 전체가 한 단 물러난다. 숨기지 않는 이유는 무엇을 아직 못
-  // 얻었는지가 컬렉션이 말해야 하는 것의 절반이기 때문이다.
-  const fade = locked ? 0.4 : 1;
+  const mid = h / 2;
 
-  deepWindow(ctx, { w: fw, h: fh, radius: RADIUS.card, fill: 0.62, line: locked ? 0.18 : 0.34 });
+  // 아이콘. 줄 높이에 비례하고 강조색이다.
+  const icon = iconForCard(card);
+  const iconSize = Math.round(h * 0.56);
+  if (icon) drawIcon(ctx, icon, { x: 0, y: mid - iconSize / 2, size: iconSize, color: accent });
 
-  const nameY = SPACE.sm + SPACE.md;
-  applyTracking(ctx, TYPE.label.tracking);
+  /**
+   * 이름과 설명이 **고정된 두 열**에 선다.
+   *
+   * 설명을 이름 바로 뒤에 붙이면 이름 길이에 따라 설명의 시작점이 줄마다
+   * 달라진다. 여섯 줄이 세로로 쌓이는 화면에서 그건 오른쪽 가장자리가 톱니가
+   * 되는 것과 같다 — 열이 둘이면 둘 다 세로선을 가져야 한다.
+   */
+  const nameX = Math.round(h * 1.05);
+  const textX = Math.round(w * 0.34);
+  const size = Math.max(11, Math.round(h * 0.34));
+
+  applyTracking(ctx, size * 0.04);
   drawText(ctx, {
     text: card.name,
-    x: fw / 2,
-    y: nameY,
-    font: fontSpec(TYPE.label),
-    color: withAlpha(ink, fade),
-    align: 'center',
+    x: nameX,
+    y: mid + size * 0.36,
+    font: `400 ${size}px ${FONT_FAMILY}`,
+    color: ink,
+    align: 'left',
+  });
+  const sub = Math.max(10, Math.round(size * 0.84));
+  drawText(ctx, {
+    text: card.text,
+    x: textX,
+    y: mid + sub * 0.36,
+    font: `400 ${sub}px ${FONT_FAMILY}`,
+    // 설명은 이름보다 한 단 물러난다. 위계는 크기가 아니라 밝기로 — 이 화면의 규칙.
+    color: withAlpha(ink, 0.66),
+    align: 'left',
   });
   applyTracking(ctx, 0);
-
-  /**
-   * 아트 칸. 게임 카드와 같은 비율, 같은 무늬, 같은 아이콘.
-   *
-   * 바탕만 강조색의 옅은 물이 아니라 **한 단 더 깊은 물**이다 — 창 안의 창.
-   */
-  const artX = SPACE.md;
-  const artY = nameY + SPACE.md;
-  const artW = fw - SPACE.md * 2;
-  const artH = Math.round(fh * 0.42);
-  deepWindow(ctx, { w: fw, h: fh, radius: RADIUS.card, fill: 0, line: 0 });
-  ctx.save();
-  ctx.translate(artX, artY);
-  deepWindow(ctx, { w: artW, h: artH, radius: RADIUS.chip, fill: 0.5, line: 0.16 });
-  ctx.restore();
-
-  ctx.save();
-  ctx.globalAlpha = fade;
-  drawArtMotif(ctx, card.id, { x: artX, y: artY, w: artW, h: artH, accent });
-  const icon = iconForCard(card);
-  if (icon) {
-    const size = Math.round(artH * 0.52);
-    drawIcon(ctx, icon, { x: (fw - size) / 2, y: artY + (artH - size) / 2, size, color: accent });
-  }
-  ctx.restore();
-
-  /**
-   * 설명. 흰 잉크의 62% — 흐린 줄과 같은 값이다.
-   *
-   * 이름과 같은 밝기로 두면 카드마다 글자 덩어리가 두 개가 되어 격자가
-   * 시끄러워진다. 위계는 크기가 아니라 밝기로 만든다 — 이 화면의 규칙이다.
-   */
-  const bodyFont = fontSpec(TYPE.caption);
-  const lines = wrapCardText(ctx, card.text, fw - SPACE.md * 2, bodyFont);
-  let ty = artY + artH + SPACE.md + TYPE.caption.size;
-  for (const line of lines) {
-    drawText(ctx, {
-      text: line,
-      x: fw / 2,
-      y: ty,
-      font: bodyFont,
-      color: withAlpha(ink, 0.62 * fade),
-      align: 'center',
-    });
-    ty += TYPE.caption.size * 1.45;
-  }
 
   const tex = toTexture(canvas);
   tex.userData = { width: w, height: h };
@@ -1095,22 +1065,3 @@ export function collectionCardTexture(card, width, { locked = false } = {}) {
   return tex;
 }
 
-/** 카드 설명을 단어 경계에서 접는다. `cardTexture` 의 같은 함수와 같은 규칙. */
-function wrapCardText(ctx, text, width, font) {
-  ctx.save();
-  ctx.font = font;
-  const out = [];
-  let line = '';
-  for (const word of String(text ?? '').split(/\s+/).filter(Boolean)) {
-    const next = line ? `${line} ${word}` : word;
-    if (line && ctx.measureText(next).width > width) {
-      out.push(line);
-      line = word;
-    } else {
-      line = next;
-    }
-  }
-  if (line) out.push(line);
-  ctx.restore();
-  return out;
-}

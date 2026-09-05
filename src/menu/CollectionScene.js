@@ -1,8 +1,8 @@
 import { Group, Mesh, PlaneGeometry, Raycaster, Vector2 } from 'three';
 import { CARDS } from '../game/cards/cardCatalog.js';
-import { ROLE, SIZE, SPACE } from '../core/tokens.js';
+import { ROLE } from '../core/tokens.js';
 import { createSpriteMaterial } from './menuMaterials.js';
-import { collectionCardTexture, menuPlateTexture, panelTexture } from './menuTextures.js';
+import { collectionRowTexture, menuPlateTexture, panelTexture } from './menuTextures.js';
 import { anchorTopLeft, solvePanel } from './panelLayout.js';
 
 /**
@@ -29,19 +29,6 @@ import { anchorTopLeft, solvePanel } from './panelLayout.js';
  * `cardFaceTexture` 는 경기 중 손패가 쓰는 바로 그 함수다. 카탈로그용 그림을 따로
  * 그리면 카드가 바뀔 때 두 곳이 갈리고, 갈린 쪽은 언제나 아무도 안 보는 쪽이다.
  */
-
-/**
- * 격자의 열 수. 카드 **수에서** 나온다.
- *
- * ── 처음에 4 로 고정하고 캡션에 "일곱 장" 이라고 적었다. 여섯이었다 ─────────
- * `CARDS` 는 여섯이고 스왑은 `SHELVED` 에 있다 — 카탈로그에 되돌릴 수 있게 남겨
- * 둔 것이지 오늘의 카드가 아니다. 4열이면 4+2 로 앉아 두 번째 줄이 반쯤 비고,
- * 캡션은 있지도 않은 일곱 번째를 약속한다.
- *
- * 그래서 둘 다 세어서 만든다. 스왑이 돌아오면 일곱이 되고 4열이 되며 캡션도
- * 따라온다 — 고칠 곳이 없다.
- */
-const COLS = CARDS.length <= 6 ? 3 : 4;
 
 export class CollectionScene {
   /**
@@ -98,26 +85,22 @@ export class CollectionScene {
     this._u = u;
 
     /**
-     * 카드 격자는 `solvePanel` 의 행이 아니라 **한 덩어리**다.
+     * 격자가 아니라 **목록**이다. 한 줄에 카드 하나.
      *
-     * 행 솔버는 세로로 쌓이는 컨트롤을 위한 것이고 여기 있는 것은 격자다. 격자의
-     * 높이는 폭에서 나오므로(카드 비율이 고정), 슬롯 하나를 요청하고 그 안을 직접
-     * 나눈다 — 그리고 그 슬롯의 높이를 격자가 실제로 필요로 하는 값으로 준다.
+     * 3 x 2 격자에 세로 카드를 놓고 있었다. 카드는 손에 쥐고 부채꼴로 펼치는
+     * 물건의 형태이고, 컬렉션에서 하는 일은 쥐는 것이 아니라 훑는 것이다.
+     * 줄로 눕히면 설정 화면과 같은 구조가 된다 — 왼쪽에서 시작하고, 한 줄에
+     * 한 가지이고, 눈이 세로로만 움직인다.
+     *
+     * 그래서 격자를 직접 나누던 코드가 통째로 없어지고 행 솔버를 그대로 쓴다.
+     * 카드 수가 늘면 줄이 늘어나고 `solvePanel` 이 알아서 눌러 준다.
      */
-    const rows = Math.ceil(this.cards.length / COLS);
-    const probe = solvePanel({ title: true, caption: true, rows: [{ id: '#grid' }], footer: 1 });
-    const gap = Math.round(SPACE.sm * probe.ky);
-    const cellW = Math.floor((probe.plate.width - gap * (COLS - 1)) / COLS);
-    const cellH = Math.round(cellW * (SIZE.card.h / SIZE.card.w));
-    const gridH = cellH * rows + gap * (rows - 1);
-
     const box = solvePanel({
       title: true,
       caption: true,
-      rows: [{ id: '#grid', h: gridH }],
+      rows: this.cards.map((entry) => ({ id: entry.card.id })),
       footer: 1,
     });
-    const grid = box.rows[0];
 
     const key = `${Math.round(box.panel.w)}x${Math.round(box.panel.texH)}`;
     if (key !== this._panelKey) {
@@ -133,46 +116,22 @@ export class CollectionScene {
         padTop: box.pad.top,
         padX: box.pad.x,
         scale: box.scale,
-        divider: true,
       });
     }
     this.panel.scale.set(box.panel.w * u, box.panel.texH * u, 1);
-    // `panelTexture` 는 탭까지 포함한 캔버스를 만들고, 그 캔버스의 세로 한가운데는
-    // 몸통의 한가운데보다 탭 높이의 절반만큼 위다. 메시는 캔버스를 그리므로 그 만큼
-    // 올려 놓아야 몸통이 `solvePanel` 이 푼 자리에 온다.
     this.panel.position.set(0, (box.panel.tabHeight / 2) * u, 0);
 
-    const left = -box.plate.width / 2 + cellW / 2;
-    const top = grid.y + grid.h / 2 - cellH / 2;
     this.cards.forEach((entry, i) => {
-      const cx = left + (i % COLS) * (cellW + gap);
-      const cy = top - Math.floor(i / COLS) * (cellH + gap);
-      if (entry.width !== cellW) {
-        /**
-         * **버리지 않는다.** `cardFaceTexture` 는 폭으로 캐시된다.
-         *
-         * 경기 화면의 손패가 같은 캐시를 쓰므로, 여기서 dispose 하면 다음에 그
-         * 폭을 요청하는 쪽이 이미 버려진 GL 텍스처를 받는다. 창을 끌면 폭이
-         * 계속 바뀌므로 이 코드는 자주 돈다.
-         */
-        /**
-         * 게임의 `cardFaceTexture` 가 아니라 메뉴 전용으로 굽는다.
-         *
-         * 그건 흰 유리판이고 판 위에서는 그게 맞다. 컬렉션은 판이 아니라 물
-         * 속이고, 이 화면에서 흰 종이는 유일하게 남은 다른 재료였다.
-         * 바뀌는 것은 재료뿐이다 — 이름·강조색·무늬·아이콘은 게임의 것을
-         * 그대로 부른다. 자세한 것은 `collectionCardTexture` 머리말.
-         *
-         * `locked` 는 아직 false 고정이다 — 이 화면에는 소유 개념이 없다.
-         * 카탈로그의 여섯 장이 전부 보이고, 잠금은 카드 자신의 설명이 말한다.
-         * 인자를 미리 둔 것은 그 개념이 생겼을 때 여기 한 줄이면 되게 하려는 것이다.
-         */
-        entry.map = collectionCardTexture(entry.card, cellW, { locked: false });
-        entry.width = cellW;
-        entry.mesh.material.uniforms.uMap.value = entry.map;
+      const row = box.rows[i];
+      const size = { width: box.plate.width, height: row.h };
+      const rk = `${Math.round(size.width)}x${Math.round(size.height)}`;
+      if (entry.rowKey !== rk) {
+        entry.rowKey = rk;
+        entry.mesh.material.uniforms.uMap.value?.dispose();
+        entry.mesh.material.uniforms.uMap.value = collectionRowTexture(entry.card, size);
       }
-      entry.mesh.scale.set(cellW * u, cellH * u, 1);
-      entry.mesh.position.set(cx * u, cy * u, 0);
+      entry.mesh.scale.set(size.width * u, size.height * u, 1);
+      entry.mesh.position.set(0, row.y * u, 0);
     });
 
     const fb = box.footer.button;

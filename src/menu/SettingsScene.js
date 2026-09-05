@@ -829,16 +829,21 @@ function chipTexture(filled, state, size = L.chip, kind = 'step') {
     hairline(ctx, 0, h / 2, w, h / 2,
       filled ? PALETTE.water.ink : withAlpha(PALETTE.water.ink, 0.3), RULE.thin);
   } else {
-    const inset = RULE.thin;
-    roundRectPath(ctx, inset, inset, w - inset * 2, h - inset * 2, RADIUS.chip);
-    if (filled) {
-      ctx.fillStyle = PALETTE.menu.meterOn;
-      ctx.fill();
-    } else {
-      ctx.strokeStyle = state === 'hover' ? PALETTE.cobalt : PALETTE.ui.edgeStrong;
-      ctx.lineWidth = RULE.thin;
-      ctx.stroke();
-    }
+    /**
+     * 티어 칸도 **선**이다. 채운 알약이 아니다.
+     *
+     * 고른 칸을 짙은 코발트로 채우고 있었다. 물 위에서 짙은 파랑을 채우면 그건
+     * 강조가 아니라 구멍이고 — 배경보다 어두우니까 — 다섯 개가 나란히 있으면
+     * 판 위의 버튼처럼 보인다. 이 화면에 판은 없다.
+     *
+     * 고른 칸은 **두꺼운 선**, 나머지는 흐린 선. 볼륨 눈금과 같은 재료이고,
+     * 다른 것은 볼륨이 왼쪽부터 차오르는 데 비해 여기는 하나만 켜진다는 점이다.
+     * 그 차이는 그림이 아니라 값이 말한다.
+     */
+    const y = h - RULE.thin * 2;
+    hairline(ctx, 0, y, w, y,
+      filled ? PALETTE.water.ink : withAlpha(PALETTE.water.ink, state === 'hover' ? 0.62 : 0.28),
+      filled ? RULE.thin * 2 : RULE.thin);
   }
 
   const tex = toMarkTexture(canvas);

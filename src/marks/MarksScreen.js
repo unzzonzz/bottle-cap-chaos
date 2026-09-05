@@ -99,7 +99,7 @@ export class MarksScreen {
 
     /** @type {Array<ReturnType<MarksScreen['_buildTile']>>} */
     this.tiles = [];
-    // The logo, alone above the row it is not part of.
+    // 기본 마크. 지금은 같은 줄의 첫 칸이고, 강조 테두리로만 구분한다.
     this.tiles.push(this._buildTile(retro, { ref: DEFAULT_MARK, accent: true }));
     for (let i = 0; i < SLOT_COUNT; i++) {
       this.tiles.push(this._buildTile(retro, { ref: i, accent: false }));
@@ -179,9 +179,20 @@ export class MarksScreen {
     const u = unitsPerPixel ?? this._u;
     this._u = u;
 
+    /**
+     * 칸이 **한 줄**이다. 기본 칸이 자기 줄을 갖던 것을 합쳤다.
+     *
+     * `#logo` 와 `#slots` 두 줄이었고, 기본 마크가 위에 크게 혼자 앉고 빈 칸
+     * 다섯이 아래에 작게 놓였다. 위계를 크기와 줄로 만든 배치인데, 여섯 칸은
+     * 전부 같은 것이다 — 하나는 이미 그려진 마크이고 다섯은 아직 빈 자리일 뿐,
+     * 종류가 다른 것이 아니다. 크기가 다르면 "저건 다른 종류" 라고 말한다.
+     *
+     * 한 줄로 합치면 그 말이 없어지고, 기본 칸이 어느 것인지는 강조 테두리가
+     * 말한다(`tileTexture` 의 `accent`). 화면도 한 단 낮아져 목록 하나에
+     * 제목 하나인 다른 화면들과 같은 구조가 된다.
+     */
     const box = solveColumn([
       { id: '#title', h: L.titleHeight },
-      { id: '#logo', h: L.tile + L.badgeDrop + L.badge.h },
       { id: '#slots', h: L.tile + L.badgeDrop + L.badge.h },
       { id: '#back' },
     ]);
@@ -191,7 +202,9 @@ export class MarksScreen {
     // 칸 한 변: 줄 높이가 허락하는 것과 프레임 폭이 허락하는 것 중 작은 쪽.
     const rowH = at('#slots').h;
     const gap = Math.round(L.gap * box.k);
-    const wide = (FRAME.width - SPACE.md * 2 - (SLOT_COUNT - 1) * gap) / SLOT_COUNT;
+    // 여섯 칸이 한 줄에 들어가야 한다. 기본 칸까지 세므로 SLOT_COUNT + 1 이다.
+    const cells = SLOT_COUNT + 1;
+    const wide = (FRAME.width - SPACE.md * 2 - (cells - 1) * gap) / cells;
     const badgeH = Math.round(L.badge.h * box.k);
     const drop = Math.round(L.badgeDrop * box.k);
     const tile = Math.max(24, Math.min(wide, rowH - drop - badgeH));
@@ -211,8 +224,7 @@ export class MarksScreen {
 
     const span = SLOT_COUNT * tile + (SLOT_COUNT - 1) * gap;
     this.tiles.forEach((t, i) => {
-      const logo = i === 0;
-      const row = at(logo ? '#logo' : '#slots');
+      const row = at('#slots');
       // 칸의 중심은 배지 줄만큼 위로 올라간다 — 슬롯의 높이에는 배지가 포함된다.
       const cy = row.y + (drop + badge.h) / 2;
       /**
@@ -222,8 +234,8 @@ export class MarksScreen {
        * 있을 때는 그것이 판의 가운데와 같았다. 판이 없어진 지금 기준은 목록의
        * 왼쪽 선이다 — `anchorTopLeft` 가 루트를 거기 갖다 놓는다.
        */
-      const left = -box.plate.width / 2;
-      const x = logo ? left + tile / 2 : left + tile / 2 + (i - 1) * (tile + gap);
+      // 여섯 칸이 왼쪽에서부터 같은 간격으로. 기본 칸이 첫 번째다.
+      const x = -box.plate.width / 2 + tile / 2 + i * (tile + gap);
       t.x = x;
       t.y = cy;
       t.plate.scale.set(tile * u, tile * u, 1);
