@@ -359,7 +359,7 @@ export function bootMenu(
    * `renderOrder` 20 은 내비(10)와 날짜 도장(10)보다 크다. 같은 패스 안에서
    * 순서를 정하는 것이 이 값이다.
    */
-  title.mesh.renderOrder = 20;
+  title.mesh.renderOrder = 20;   // 마스크는 5 —  참조
   menuRoot.add(asUiLayer(title.root), asUiLayer(items.root));
   scene.add(menuRoot);
 

@@ -783,6 +783,80 @@ export function navLabelTexture(label, {
  * 잉크는 흰색으로 굽는다. 화면에 나가는 실제 색은 `SubmergedTitle` 의 셰이더가
  * 정하고, 셰이더는 여기서 알파만 읽는다.
  */
+/**
+ * 제목 둘째 줄의 **가림 마스크**. 색이 없다.
+ *
+ * ── 무엇을 하는 물건인가 ────────────────────────────────────────────────────
+ * `알까기` 의 획을 굵게 부풀린 실루엣이다. 화면에는 아무것도 그리지 않고
+ * **깊이 버퍼에만** 쓴다(`SubmergedTitle` 이 `colorWrite: false` 로 그린다).
+ * 그 뒤에 그려지는 것들이 깊이 검사에서 걸러지므로, 제목 아래를 지나는 것이
+ * 그 자리에서 사라지고 **물이 그대로 보인다.**
+ *
+ * 색을 칠해서 가리는 것과 다르다. 물빛으로 테를 두르면 그 테가 하나의 그림이
+ * 되어 제목이 오려 붙인 스티커가 되고, 물이 움직이는데 테만 안 움직여서
+ * 어긋난다. 파내면 뒤에 있던 물이 그대로 드러나므로 아무것도 덧그려지지 않는다.
+ *
+ * 획을 두 번 그리는 이유는 stroke 가 윤곽선만 굵히기 때문이다 — fill 을 같이
+ * 해야 속이 찬 실루엣이 된다. `lineJoin: 'round'` 인 것은 miter 면 획이 만나는
+ * 뾰족한 곳에서 마스크가 길게 튀어나오기 때문이다.
+ *
+ * 첫 줄은 마스크가 없다. 프레임 위쪽이라 지나갈 것이 없고, 둘 다 가리면 제목
+ * 전체가 구멍이 되어 이름이 떠오르는 것이 아니라 뚫린 것으로 보인다.
+ */
+export function submergedTitleMaskTexture({ scale = 1 } = {}) {
+  const m = TITLE_METRICS;
+  const { canvas, ctx } = makeCanvas(Math.round(m.width * scale), Math.round(m.height * scale));
+  ctx.scale(scale, scale);
+  ctx.font = `400 ${m.size}px ${DISPLAY_FAMILY}`;
+  applyTracking(ctx, m.track);
+  ctx.textBaseline = 'alphabetic';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#fff';
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = m.size * 0.17;
+  const x = m.padL + m.indent;
+  const y = m.base1 + m.line;
+  ctx.strokeText('알까기', x, y);
+  ctx.fillText('알까기', x, y);
+  applyTracking(ctx, 0);
+  const tex = toTexture(canvas);
+  tex.userData = { width: m.width, height: m.height };
+  return tex;
+}
+
+/**
+ * 제목의 저술값 한 벌. 본문과 마스크가 **같은 값**을 써야 한다.
+ *
+ * 두 함수가 각자 상수를 갖고 있으면 언젠가 하나만 고쳐지고, 그때 마스크가
+ * 글자와 어긋난 자리를 파낸다 — 화면에는 이유 없이 잘린 물체로 보인다.
+ * 그래서 한 곳에서 계산해 둘 다 읽는다.
+ *
+ * 값의 근거는 아래 `submergedTitleTexture` 의 주석에 있다.
+ */
+const TITLE_METRICS = (() => {
+  const size = 112;
+  const line = size * 0.78;
+  const contentH = Math.round(line * 2);
+  const padY = Math.round(size * 0.3);
+  // 어센트는 서체가 알려 주는 값이지만 모듈 로드 시점에는 잴 수 없다. 0.8em 은
+  // 실측값이고, `submergedTitleTexture` 가 서체가 붙은 뒤 다시 재서 덮어쓴다.
+  const ascent = size * 0.8;
+  return {
+    size,
+    line,
+    track: -size * 0.035,
+    indent: Math.round(size * (176 / 206)),
+    padL: Math.round(30 + size * 0.021),
+    width: 853,
+    contentH,
+    padY,
+    height: contentH + padY * 2,
+    base1: padY + (line - size) / 2 + ascent,
+  };
+})();
+
 export function submergedTitleTexture({ scale = 1 } = {}) {
   /**
    * ── 시안의 206 이 아니라 **112** 다. 그리고 프레임 안에 든다 ──────────────
@@ -850,31 +924,6 @@ export function submergedTitleTexture({ scale = 1 } = {}) {
 
   ctx.fillText('한여름', PAD_L, base1);
 
-  /**
-   * ── 둘째 줄은 뒤를 **가린다** ───────────────────────────────────────────
-   *
-   * 글자 둘레에 물빛으로 굵은 테를 두르고 그 위에 흰 획을 얹는다. 이 테가
-   * 불투명하므로, 제목 아래를 지나는 것이 무엇이든 그 자리에서 끊긴다 —
-   * 획과 획 사이의 좁은 틈까지 포함해서.
-   *
-   * 왜 둘째 줄만인가: 첫 줄은 프레임의 위쪽에 있어 지나갈 것이 없고, 둘째 줄은
-   * 들여쓰기 때문에 화면 가운데로 들어와 무엇과든 만난다. 두 줄 다 두르면 제목
-   * 전체가 스티커처럼 오려 붙인 것이 되고, 한 줄만 두르면 그 줄이 앞으로
-   * 나온다 — 이름이 물 속에서 **한 겹 위로** 떠오르는 것으로 읽힌다.
-   *
-   * 테 두께가 자간을 먹지 않는 이유는 `lineJoin='round'` 로 바깥으로만 자라기
-   * 때문이다. `miter` 면 획이 만나는 뾰족한 곳에서 테가 길게 튀어나온다.
-   *
-   * 이 텍스처가 알파만이 아니라 **색**을 갖게 되는 것이 여기서부터다.
-   * `SubmergedTitle` 의 셰이더가 `uTint` 대신 텍셀의 rgb 를 쓰는 이유다.
-   */
-  ctx.save();
-  ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
-  ctx.strokeStyle = PALETTE.water.deep;
-  ctx.lineWidth = SIZE * 0.16;
-  ctx.strokeText('알까기', PAD_L + INDENT, base1 + LINE);
-  ctx.restore();
   ctx.fillText('알까기', PAD_L + INDENT, base1 + LINE);
 
   const tex = toTexture(canvas);

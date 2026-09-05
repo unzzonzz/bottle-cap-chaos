@@ -1,7 +1,7 @@
-import { Color, Mesh, PlaneGeometry, ShaderMaterial } from 'three';
+import { Color, Group, Mesh, PlaneGeometry, ShaderMaterial } from 'three';
 import { FRAME, frameScale, texelScale } from '../core/frame.js';
 import { PALETTE } from '../core/palette.js';
-import { submergedTitleTexture } from './menuTextures.js';
+import { submergedTitleMaskTexture, submergedTitleTexture } from './menuTextures.js';
 import { WATER_NOISE_GLSL } from './water.js';
 
 /**
@@ -82,18 +82,25 @@ const FRAG = /* glsl */ `
      * 변하면 내비와도 같지 않고 자기 자신과도 같지 않다. 깊이는 굴절이 말한다.
      */
     /**
-     * 색은 **텍스처가 갖고 있다.** uTint 를 곱하지 않는다.
-     * (이 주석에 백틱을 쓰지 마라. 템플릿 리터럴 안이라 문자열이 거기서 끊긴다.)
+     * 색은 **위에서 온다.** 텍스처는 알파만 갖는다.
      *
-     * 예전에는 텍스처가 알파만 있고 색은 이 유니폼 하나였다 — 화면의 모든
-     * 글자가 같은 잉크라는 규칙을 셰이더에서 강제하는 방식이었다. 둘째 줄이
-     * 뒤를 가리는 테를 얻으면서 그 방식이 안 된다: 테는 물빛이고 획은 흰색이라
-     * 한 텍스처 안에 두 색이 있다.
-     *
-     * 규칙은 그대로다. 두 색 다 팔레트에서 오고, 흰 획은 다른 글자들과 같은
-     * water.ink 다 — 강제하는 자리가 셰이더에서 굽는 쪽으로 옮겨갔을 뿐이다.
+     * 화면의 모든 글자가 같은 잉크라는 규칙을 셰이더에서 강제하는 방식이다.
+     * 둘째 줄의 가림 마스크는 색을 칠하지 않으므로(깊이만 쓴다) 이 규칙이
+     * 깨지지 않는다 — 자세한 것은 아래 mask 머티리얼.
      */
-    gl_FragColor = vec4(texel.rgb, texel.a * uOpacity);
+    gl_FragColor = vec4(uTint, texel.a * uOpacity);
+  }
+`;
+
+const MASK_FRAG = /* glsl */ `
+  uniform sampler2D uMap;
+  uniform float uOpacity;
+  varying vec2  vUv;
+  void main() {
+    // 알파가 반을 넘는 곳에서만 깊이를 쓴다. 등장 중에는 아무것도 파지 않는다.
+    float a = texture2D(uMap, vUv).a * uOpacity;
+    if (a < 0.5) discard;
+    gl_FragColor = vec4(0.0);
   }
 `;
 
@@ -141,10 +148,60 @@ export class SubmergedTitle {
       },
     });
 
+    /**
+     * 가림 마스크. **아무것도 그리지 않고 깊이만 쓴다.**
+     *
+     * ── 색으로 가리지 않는 이유 ────────────────────────────────────────────
+     * 둘째 줄 둘레에 물빛으로 굵은 테를 둘러 가려 봤다. 가려지긴 하는데 그 테가
+     * 하나의 그림이 되어 제목이 오려 붙인 스티커가 되고, 물은 계속 움직이는데
+     * 테만 안 움직여서 어긋난다.
+     *
+     * 여기서 하는 것은 파내는 것이다. `colorWrite: false` 라 화면에는 아무것도
+     * 남기지 않고 깊이 버퍼에만 쓴다. 이 뒤에 그려지는 것들이 깊이 검사에서
+     * 걸러지므로 제목 아래를 지나는 것이 그 자리에서 사라지고 **물이 그대로**
+     * 보인다. 덧그려지는 것이 하나도 없다.
+     *
+     * ── polygonOffset 이 필요한 이유 ──────────────────────────────────────
+     * 마스크와 내비가 같은 평면(z=0)에 있어 깊이 값이 같고, 기본 깊이 함수가
+     * `LessEqual` 이라 같은 값은 **통과한다**. 메시를 카메라 쪽으로 밀면 화면에서
+     * 조금 커져 글자와 어긋나므로, 기하학은 그대로 두고 깊이만 당긴다.
+     *
+     * `discard` 는 알파가 반을 넘는 곳에서만 깊이를 쓰기 위한 것이다. 알파
+     * 블렌딩은 깊이 쓰기와 무관하므로, 이것이 없으면 텍스처의 투명한 사각형
+     * 전체가 깊이를 써서 화면의 그 영역이 통째로 파인다.
+     */
+    this.maskMaterial = new ShaderMaterial({
+      vertexShader: VERT,
+      fragmentShader: MASK_FRAG,
+      transparent: false,
+      colorWrite: false,
+      depthWrite: true,
+      depthTest: true,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+      uniforms: { uMap: { value: null }, uOpacity: { value: 1 } },
+    });
+    this.mask = new Mesh(new PlaneGeometry(1, 1), this.maskMaterial);
+    /**
+     * 내비(10)보다 **먼저**, 그래서 5.
+     *
+     * 순서가 셋이다: 마스크가 깊이를 쓰고(5), 내비가 그 깊이에 걸리고(10),
+     * 글자가 맨 위에 그려진다(20). 마스크가 내비보다 뒤에 그려지면 내비는 이미
+     * 화면에 있으므로 아무 일도 일어나지 않는다.
+     */
+    this.mask.renderOrder = 5;
+    this.mask.frustumCulled = false;
+
     this.mesh = new Mesh(new PlaneGeometry(1, 1), this.material);
     this.mesh.renderOrder = -500;
     this.mesh.frustumCulled = false;
-    this.root = this.mesh;
+    /**
+     * 루트가 그룹인 것은 자식이 둘이기 때문이다 — 마스크와 글자.
+     * 배치는 둘 다 같은 값을 받는다.
+     */
+    this.root = new Group();
+    this.root.add(this.mask, this.mesh);
     this._key = '';
     this.layout(unitsPerPixel);
   }
@@ -169,6 +226,8 @@ export class SubmergedTitle {
   invalidate() {
     this.material.uniforms.uMap.value?.dispose();
     this.material.uniforms.uMap.value = null;
+    this.maskMaterial.uniforms.uMap.value?.dispose();
+    this.maskMaterial.uniforms.uMap.value = null;
   }
 
   /** @param {number} unitsPerPixel */
@@ -190,6 +249,8 @@ export class SubmergedTitle {
     if (!this.material.uniforms.uMap.value || this._texelScale !== scale) {
       this.material.uniforms.uMap.value?.dispose();
       this.material.uniforms.uMap.value = submergedTitleTexture({ scale });
+      this.maskMaterial.uniforms.uMap.value?.dispose();
+      this.maskMaterial.uniforms.uMap.value = submergedTitleMaskTexture({ scale });
       this._texelScale = scale;
     }
     const box = this.material.uniforms.uMap.value.userData;
@@ -241,8 +302,10 @@ export class SubmergedTitle {
      */
     const cy = FRAME.height / 2 - (44 + (box.contentH ?? box.height) / 2) * k;
 
-    this.mesh.scale.set(box.width * k * u, box.height * k * u, 1);
-    this.mesh.position.set(cx * u, cy * u, 0);
+    for (const m of [this.mesh, this.mask]) {
+      m.scale.set(box.width * k * u, box.height * k * u, 1);
+      m.position.set(cx * u, cy * u, 0);
+    }
     /**
      * 부호를 **뒤집는다.** CSS 와 three 의 회전 방향이 반대다.
      *
@@ -259,7 +322,7 @@ export class SubmergedTitle {
      *   z = +7  →  0.601,  주축  6.93도   (시안 6.88도)
      * 남은 0.4 는 굴절이 획을 밀어서 생기는 차이다 — 시안 기준판에는 굴절이 없다.
      */
-    this.mesh.rotation.z = (-box.rotation * Math.PI) / 180;
+    for (const m of [this.mesh, this.mask]) m.rotation.z = (-box.rotation * Math.PI) / 180;
   }
 
   /**
@@ -272,11 +335,15 @@ export class SubmergedTitle {
   update(dt, fade = 1) {
     this.material.uniforms.uTime.value += dt;
     this.material.uniforms.uOpacity.value = fade;
+    // 등장 중에는 마스크도 함께 물러난다 — 아직 없는 글자가 뒤를 파면 안 된다.
+    this.maskMaterial.uniforms.uOpacity.value = fade;
   }
 
   dispose() {
+    for (const m of [this.mesh, this.mask]) m.geometry.dispose();
     this.material.uniforms.uMap.value?.dispose();
-    this.mesh.geometry.dispose();
+    this.maskMaterial.uniforms.uMap.value?.dispose();
     this.material.dispose();
+    this.maskMaterial.dispose();
   }
 }
