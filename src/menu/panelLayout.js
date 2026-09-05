@@ -1,4 +1,4 @@
-import { FRAME } from '../core/frame.js';
+import { FRAME, frameScale } from '../core/frame.js';
 import { PANEL, SIZE, SPACE, TYPE } from '../core/tokens.js';
 
 /**
@@ -171,4 +171,36 @@ export function solvePanel({ title = false, caption = false, rows = [], footer =
       right: w / 2 - padX - fw / 2,
     },
   };
+}
+
+/**
+ * 푼 배치를 프레임의 **왼쪽 위**에 붙인다.
+ *
+ * ── 왜 필요한가 ─────────────────────────────────────────────────────────────
+ * `solvePanel` 은 판 하나를 화면 가운데에 놓는 것을 전제로 x=0 을 중심으로 모든
+ * 줄을 푼다. 판이 있을 때는 그게 맞았다 — 카드가 구도의 중심이었으니까. 판을
+ * 걷어낸 지금(`menuTextures.panelTexture` 머리말) 가운데 정렬은 근거를 잃었다:
+ * 남은 것은 활자뿐이고, 홈 화면의 활자는 전부 프레임 가장자리에 붙는다. 제목은
+ * 왼쪽 위로 흘러 나가고 내비와 날짜 도장은 30 의 여백에 선다.
+ *
+ * 줄 사이의 관계는 `solvePanel` 이 이미 맞춰 놓았으므로 다시 풀지 않는다.
+ * 바뀌어야 하는 것은 그 덩어리가 어디에 앉느냐 하나이고, 그래서 루트만 옮긴다.
+ *
+ * 여백 30 은 홈의 내비·날짜 도장과 **같은 값**이다. 화면마다 다른 값을 쓰면
+ * 오갈 때 글자가 좌우로 흔들린다 — 같은 세로선에 서야 제자리에 있는 것처럼
+ * 보인다. 세로도 마찬가지로 위에 건다: 가운데 정렬이면 줄 수가 다른 화면끼리
+ * 첫 줄의 높이가 달라져 화면을 바꿀 때 목록이 위아래로 뛴다.
+ *
+ * @param {import('three').Object3D} root  화면의 루트
+ * @param {{plate: {width: number}, rows: {y: number, h: number}[]}} box  solvePanel 의 결과
+ * @param {number} unitsPerPixel
+ * @param {number} [topPx]  프레임 위쪽에서 첫 줄까지, 저술 픽셀
+ */
+export function anchorTopLeft(root, box, unitsPerPixel, topPx = 52) {
+  const k = frameScale();
+  const margin = 30 * k;
+  // 줄 쿼드는 x=0 에 중심이 있고 글자는 그 왼쪽 끝에서 시작한다.
+  root.position.x = (-FRAME.width / 2 + margin + box.plate.width / 2) * unitsPerPixel;
+  const first = box.rows?.length ? box.rows[0].y + box.rows[0].h / 2 : 0;
+  root.position.y = (FRAME.height / 2 - topPx * k - first) * unitsPerPixel;
 }

@@ -1180,6 +1180,14 @@ export function titleTexture(text, sub, { width = 256, height = 80, scale = 1, w
   void withPlate;
 
   /**
+   * 글자는 **왼쪽**에서 시작한다. 가운데가 아니다.
+   *
+   * 판이 있을 때는 가운데가 맞았다 — 종이 위의 제목은 종이를 기준으로 놓인다.
+   * 판이 없어지면 기준도 없어지고, 남은 기준은 프레임의 왼쪽 선이다. 이 줄들이
+   * 가운데에 남아 있으면 왼쪽에 붙은 나머지 목록과 어긋나 보인다.
+   */
+
+  /**
    * 머리글은 줄이기 전에 **접는다**.
    *
    * ── 실측 ────────────────────────────────────────────────────────────────
@@ -1237,11 +1245,11 @@ export function titleTexture(text, sub, { width = 256, height = 80, scale = 1, w
   for (const row of lines.rows) {
     drawText(ctx, {
       text: row,
-      x: width / 2,
+      x: 0,
       y,
       font: lines.font,
       color: PALETTE.ui.text,
-      align: 'center',
+      align: 'left',
     });
     y += headSize + gap;
   }
@@ -1252,11 +1260,11 @@ export function titleTexture(text, sub, { width = 256, height = 80, scale = 1, w
     applyTracking(ctx, subType.tracking);
     drawText(ctx, {
       text: line.text,
-      x: width / 2,
+      x: 0,
       y: y - gap + SPACE.xs,
       font: line.font,
       color: PALETTE.ui.textMuted,
-      align: 'center',
+      align: 'left',
     });
     applyTracking(ctx, 0);
   }

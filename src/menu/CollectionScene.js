@@ -4,7 +4,7 @@ import { cardFaceTexture } from '../render/cardTexture.js';
 import { ROLE, SIZE, SPACE } from '../core/tokens.js';
 import { createSpriteMaterial } from './menuMaterials.js';
 import { menuPlateTexture, panelTexture } from './menuTextures.js';
-import { solvePanel } from './panelLayout.js';
+import { anchorTopLeft, solvePanel } from './panelLayout.js';
 
 /**
  * 컬렉션 — 카드 일곱 장의 카탈로그.
@@ -177,6 +177,8 @@ export class CollectionScene {
     }
     this.back.scale.set(fb.w * u, fb.h * u, 1);
     this.back.position.set(box.footer.left * u, box.footer.y * u, 0);
+  
+    anchorTopLeft(this.root, box, u);
   }
 
   /**

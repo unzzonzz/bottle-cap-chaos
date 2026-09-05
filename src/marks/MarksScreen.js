@@ -1,3 +1,4 @@
+import { anchorTopLeft } from '../menu/panelLayout.js';
 import { Group, Mesh, PlaneGeometry, Raycaster, Vector2 } from 'three';
 import { createSpriteMaterial } from '../menu/menuMaterials.js';
 import { menuPlateTexture, titleTexture } from '../menu/menuTextures.js';
@@ -207,7 +208,15 @@ export class MarksScreen {
       const row = at(logo ? '#logo' : '#slots');
       // 칸의 중심은 배지 줄만큼 위로 올라간다 — 슬롯의 높이에는 배지가 포함된다.
       const cy = row.y + (drop + badge.h) / 2;
-      const x = logo ? 0 : -span / 2 + tile / 2 + (i - 1) * (tile + gap);
+      /**
+       * 칸도 **왼쪽**에 건다. 줄의 가운데가 아니다.
+       *
+       * `-span / 2` 는 칸 묶음을 자기 폭의 가운데에 맞추는 값이었고, 판이
+       * 있을 때는 그것이 판의 가운데와 같았다. 판이 없어진 지금 기준은 목록의
+       * 왼쪽 선이다 — `anchorTopLeft` 가 루트를 거기 갖다 놓는다.
+       */
+      const left = -box.plate.width / 2;
+      const x = logo ? left + tile / 2 : left + tile / 2 + (i - 1) * (tile + gap);
       t.x = x;
       t.y = cy;
       t.plate.scale.set(tile * u, tile * u, 1);
@@ -269,6 +278,8 @@ export class MarksScreen {
       });
     }
     this.refresh();
+  
+    anchorTopLeft(this.root, box, u);
   }
 
   // ── state ─────────────────────────────────────────────────────────────────

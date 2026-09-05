@@ -4,7 +4,7 @@ import { menuPlateTexture, panelTexture, titleTexture } from './menuTextures.js'
 import { toMarkTexture } from '../marks/markTextures.js';
 import { PALETTE } from '../core/palette.js';
 import { RADIUS, ROLE, RULE } from '../core/tokens.js';
-import { solvePanel } from './panelLayout.js';
+import { anchorTopLeft, solvePanel } from './panelLayout.js';
 import { TIER_COUNT, TIER_NAMES } from '../core/quality.js';
 import { plate, roundRectPath } from '../ui/paper.js';
 import { dot, hairline } from '../ui/marks.js';
@@ -376,7 +376,14 @@ export class SettingsScene {
       let i = 0;
       for (const chip of this.chips) {
         if (chip.row !== def.id) continue;
-        const x = -used / 2 + cw / 2 + i * (cw + cg);
+        /**
+         * 칩도 **왼쪽**에 건다. 줄의 가운데가 아니다.
+         *
+         * `-used / 2` 는 칩 묶음을 자기 폭의 가운데에 맞추는 값이었고, 판이
+         * 있을 때는 그것이 판의 가운데와 같았다. 판이 없어진 지금 기준은 목록의
+         * 왼쪽 선이다 — 칩만 가운데 남으면 그 줄이 목록에서 튀어나온다.
+         */
+        const x = -box.plate.width / 2 + cw / 2 + i * (cw + cg);
         chip.mesh.scale.set(size.width * u, size.height * u, 1);
         chip.mesh.position.set(x * u, row.y * u, 0);
         i++;
@@ -413,6 +420,9 @@ export class SettingsScene {
       for (const item of [...this.items, ...this.footer]) item.label = null;
       chipCache.clear();
     }
+
+    anchorTopLeft(this.root, box, u);
+
     this.refresh();
   }
 

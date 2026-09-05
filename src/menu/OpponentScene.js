@@ -6,7 +6,7 @@ import { MarkTextures } from '../marks/markTextures.js';
 import { PLAYER_COLORS } from '../render/playerColors.js';
 import { PALETTE } from '../core/palette.js';
 import { ROLE } from '../core/tokens.js';
-import { solvePanel } from './panelLayout.js';
+import { anchorTopLeft, solvePanel } from './panelLayout.js';
 
 /**
  * 상대 선택 — two caps facing each other, and who is behind the far one.
@@ -302,6 +302,8 @@ export class OpponentScene {
       old?.dispose();
     }
     this.refresh();
+  
+    anchorTopLeft(this.root, box, u);
   }
 
   /**
