@@ -266,7 +266,8 @@ export class MenuItems {
     const size = lead ? NAV_LEAD : NAV_SIZE;
     return navLabelTexture(label, {
       size,
-      color: lead ? PALETTE.ui.textOnAccent : PALETTE.bluePale,
+      // 색은 하나다. 위계는 크기가 만든다 — `PALETTE.water.ink` 의 주석 참조.
+      color: PALETTE.water.ink,
       tracking: size * NAV_TRACKING,
       scale: PLATE_TEXEL_SCALE,
     });
@@ -435,9 +436,7 @@ export class MenuItems {
       if (item.rule.visible) {
         item.rule.scale.set(w, this._ruleH ?? 1, 1);
         item.rule.position.set((item.ruleLeft ?? 0) + w / 2, item.ruleY ?? 0, 0);
-        item.ruleMat.uniforms.uTint.value.set(
-          item.lead ? PALETTE.ui.textOnAccent : PALETTE.bluePale,
-        );
+        item.ruleMat.uniforms.uTint.value.set(PALETTE.water.ink);
         item.ruleMat.uniforms.uOpacity.value = fade;
       }
     }
@@ -446,8 +445,14 @@ export class MenuItems {
       tool.dim = approach(tool.dim ?? 1, any && !tool.hovered ? 0.45 : 1, dt, MOTION.hover);
       tool.material.uniforms.uOpacity.value = fade * tool.dim;
     }
-    // 숫자는 호버에 반응하지 않는다. 누를 수 있는 것이 아니기 때문이다.
-    this.stamp.material.uniforms.uOpacity.value = fade * 0.85;
+    /**
+     * 숫자는 호버에 반응하지 않는다 — 누를 수 있는 것이 아니다.
+     *
+     * 불투명도가 0.85 였다. 잉크가 같아도 0.85 로 그리면 **다른 색으로 보인다** —
+     * 실측으로 peak 가 rgb(112,167,220) 이었고 제목은 (188,220,242) 였다.
+     * 화면의 모든 글자가 같은 잉크여야 한다면 알파도 같아야 한다.
+     */
+    this.stamp.material.uniforms.uOpacity.value = fade;
   }
 
   /**

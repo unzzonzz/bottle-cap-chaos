@@ -838,9 +838,9 @@ export function menuPlateTexture(label, state, { width = 256, height = 52, scale
   const waterSkin = onWater
     ? {
         ...roleSkin(role, skinState),
-        text: PALETTE.ui.textOnAccent,
-        rule: PALETTE.ui.textOnAccent,
-        accent: PALETTE.ui.textOnAccent,
+        text: PALETTE.water.ink,
+        rule: PALETTE.water.ink,
+        accent: PALETTE.water.ink,
       }
     : null;
 
@@ -1000,7 +1000,7 @@ export function iconPlateTexture(icon, state = 'idle', { size = 64, scale = 1, o
     size: inner,
     // 열과 같은 이유로 뒤집힌다 — 이 아이콘도 종이가 아니라 물 위에 앉는다.
     // `menuPlateTexture` 의 `onWater` 주석에 실측이 있다.
-    color: onWater ? PALETTE.ui.textOnAccent : skin.text,
+    color: onWater ? PALETTE.water.ink : skin.text,
   });
   ctx.globalAlpha = 1;
 
@@ -1036,7 +1036,7 @@ export function dateStampTexture({ text = ['07', '06'], scale = 2 } = {}) {
   ctx.scale(scale, scale);
   ctx.font = `400 ${SIZE}px ${DISPLAY_FAMILY}`;
   applyTracking(ctx, TRACK);
-  ctx.fillStyle = PALETTE.ui.textOnAccent;
+  ctx.fillStyle = PALETTE.water.ink;
   ctx.textBaseline = 'alphabetic';
   const m = ctx.measureText('0');
   const ascent = m.fontBoundingBoxAscent || SIZE * 0.8;
@@ -1069,7 +1069,7 @@ export function ruleTexture() {
  * 상자를 글자에 맞춰 재서 `userData` 로 돌려준다. 가로줄로 늘어놓으려면 각
  * 항목의 실제 폭이 필요하고, 고정 폭 판으로는 자간이 제멋대로가 된다.
  */
-export function navLabelTexture(label, { size = 12, color = PALETTE.ui.textOnAccent, tracking = 0, scale = 2 } = {}) {
+export function navLabelTexture(label, { size = 12, color = PALETTE.water.ink, tracking = 0, scale = 2 } = {}) {
   const probe = makeCanvas(8, 8);
   probe.ctx.font = `400 ${size}px ${FONT_FAMILY}`;
   applyTracking(probe.ctx, tracking);
@@ -1135,7 +1135,8 @@ export function submergedTitleTexture({ scale = 1 } = {}) {
 
   ctx.font = `400 ${SIZE}px ${DISPLAY_FAMILY}`;
   applyTracking(ctx, TRACK);
-  ctx.fillStyle = PALETTE.ui.textOnAccent;
+  // 셰이더가 알파만 읽으므로 색은 형식이지만, 잉크의 출처를 하나로 둔다.
+  ctx.fillStyle = PALETTE.water.ink;
   ctx.textBaseline = 'alphabetic';
   ctx.textAlign = 'left';
 

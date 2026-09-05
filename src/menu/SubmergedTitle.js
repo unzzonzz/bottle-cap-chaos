@@ -54,10 +54,14 @@ const FRAG = /* glsl */ `
     vec2 uv = vUv + (vec2(nx, ny) - 0.5) * amt;
 
     vec4 texel = texture2D(uMap, uv);
-    // 수면 아래로 갈수록 물빛이 섞인다. 글자가 물 **안에** 있다는 유일한 단서다.
-    float depth = smoothstep(0.15, 1.0, vUv.y);
-    vec3 rgb = mix(uTint, uTint * 0.72, depth);
-    gl_FragColor = vec4(rgb, texel.a * uOpacity);
+    /**
+     * 색은 위아래로 **변하지 않는다.**
+     *
+     * 아래로 갈수록 물빛이 섞이는 그라디언트가 있었다 — 깊이의 단서였다. 화면의
+     * 모든 글자가 같은 잉크여야 한다는 결정에 따라 없앴다: 제목 안에서 색이
+     * 변하면 내비와도 같지 않고 자기 자신과도 같지 않다. 깊이는 굴절이 말한다.
+     */
+    gl_FragColor = vec4(uTint, texel.a * uOpacity);
   }
 `;
 
@@ -80,7 +84,7 @@ export class SubmergedTitle {
          * 넘어 글자가 통째로 흰 덩어리가 된다 — 실측으로 그렇게 됐다.
          * `bluePale` 의 선형 휘도는 0.685 로 임계 바로 아래다.
          */
-        uTint: { value: new Color(PALETTE.bluePale) },
+        uTint: { value: new Color(PALETTE.water.ink) },
         uOpacity: { value: 1 },
         uTime: { value: 0 },
         /**
