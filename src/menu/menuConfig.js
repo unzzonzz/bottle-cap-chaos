@@ -18,8 +18,16 @@ export const MENU_CONFIG = {
 
     // ── where it sits ──────────────────────────────────────────────────────
     /** Left of centre, so the menu column has the right half to itself. */
-    originX: -7.4,
-    originY: 1.2,
+    /**
+     * 병이 앉는 자리. C 시안의 좌표를 화면에서 역산한 값이다.
+     *
+     * 시안은 병을 오른쪽 위(`right: 62; top: 42`, 112x314)에 거의 수직으로 세운다.
+     * 화면에 투영한 상자를 재서 맞췄다 — 위 192.9 / 아래 −117.7 대 시안의
+     * 198 / −116 이다. 가로가 시안보다 넓은 것은 3D 모델이 그 그림의 병보다
+     * 통통하기 때문이고, 그건 이 작업의 범위 밖이다.
+     */
+    originX: 18.7,
+    originY: 3.2,
     /**
      * How far below the bottle the soft shadow sits.
      *
@@ -58,7 +66,17 @@ export const MENU_CONFIG = {
      * bracket has been widened to suit, but the pose stops working before the
      * arithmetic does: a bottle lying flat has no silhouette left.
      */
-    leanZ: 62,
+    /**
+     * 19 도. 62 였다.
+     *
+     * 시안의 병은 수직이다. 그대로 0 으로 두지 않은 것은 **액체 모델이 검증된
+     * 구간이 19~82 도**이기 때문이다(PHASE 1 실측: 그 범위에서 넘침 0.000 mm).
+     * 그 아래로 내리면 검증되지 않은 각도가 되고, 19 도면 화면에서 이미 거의
+     * 수직이다. 검증된 구간의 끝을 고르는 것이 임의의 값을 고르는 것보다 낫다.
+     *
+     * 라벨의 방향이 이 값에 묶여 있었다 — `labelTexture` 의 회전 주석 참조.
+     */
+    leanZ: 19,
     /** A little away from the camera, so it reads as an object and not a decal. */
     leanX: 9,
     /** Turns the label to the front. Fixed; the bottle never spins. */
