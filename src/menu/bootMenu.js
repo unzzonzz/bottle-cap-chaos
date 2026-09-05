@@ -1274,7 +1274,7 @@ export function bootMenu(
            * 도착한다.
            */
           onBack: () => fadeTo(marksOrigin),
-          backLabel: marksOrigin === 'settings' ? '← SETTINGS' : '← MENU',
+          backLabel: marksOrigin === 'settings' ? '← 설정' : '← 메뉴',
         });
         marks.root.add(confirm.root);
       }

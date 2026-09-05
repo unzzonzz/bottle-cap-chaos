@@ -504,7 +504,7 @@ export class SettingsScene {
       case 'marks':
         return '내 마크';
       case 'back':
-        return '← MENU';
+        return '← 메뉴';
       default:
         return id;
     }

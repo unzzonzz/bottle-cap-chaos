@@ -445,8 +445,8 @@ export class MarkEditor {
       this._backMaps.idle?.dispose();
       this._backMaps.hover?.dispose();
       this._backMaps = {
-        idle: menuPlateTexture('← MARKS', 'idle', box),
-        hover: menuPlateTexture('← MARKS', 'hover', box),
+        idle: menuPlateTexture('← 마크', 'idle', box),
+        hover: menuPlateTexture('← 마크', 'hover', box),
       };
       this.backButton.mesh.material.uniforms.uMap.value = this._backMaps.idle;
     }
@@ -530,15 +530,15 @@ export class MarkEditor {
     this.backButton = this._add(retro, {
       id: 'back',
       kind: 'back',
-      map: menuPlateTexture('← MARKS', 'idle', { width: 180, height: 40 }),
+      map: menuPlateTexture('← 마크', 'idle', { width: 180, height: 40 }),
       x: -170,
       y: L.backY,
       w: 180,
       h: 40,
     });
     this._backMaps = {
-      idle: menuPlateTexture('← MARKS', 'idle', { width: 180, height: 40 }),
-      hover: menuPlateTexture('← MARKS', 'hover', { width: 180, height: 40 }),
+      idle: menuPlateTexture('← 마크', 'idle', { width: 180, height: 40 }),
+      hover: menuPlateTexture('← 마크', 'hover', { width: 180, height: 40 }),
     };
   }
 

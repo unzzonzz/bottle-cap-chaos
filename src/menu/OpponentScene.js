@@ -341,7 +341,7 @@ export class OpponentScene {
       case 'start':
         return '시작';
       case 'back':
-        return '← MENU';
+        return '← 메뉴';
       default:
         return id;
     }

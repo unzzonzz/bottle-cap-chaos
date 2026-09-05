@@ -69,7 +69,7 @@ export class MarksScreen {
    * @param {() => void} onBack
    * @param {import('./ConfirmDialog.js').ConfirmDialog} confirm
    */
-  constructor({ retro, unitsPerPixel, book, defaultMark, onOpen, onBack, confirm, backLabel = '← BACK' }) {
+  constructor({ retro, unitsPerPixel, book, defaultMark, onOpen, onBack, confirm, backLabel = '← 뒤로' }) {
     const u = unitsPerPixel;
     this._u = u;
     this.book = book;

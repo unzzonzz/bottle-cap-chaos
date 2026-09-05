@@ -70,9 +70,21 @@ const plateScale = () => texelScale();
  */
 const PAGES = {
   home: [
-    { id: 'play', label: 'PLAY', icon: 'play', action: true },
-    { id: 'collection', label: 'COLLECTION' },
-    { id: 'settings', label: 'SETTINGS' },
+    /**
+     * 라벨은 **전부 한국어**다.
+     *
+     * PLAY / COLLECTION / SETTINGS 였다. C 시안이 영문 스몰캡스였고 그것이
+     * 이 화면의 목소리라고 읽었는데, 그 목소리를 하위 화면까지 밀고 가니
+     * 한글 목록 사이에 영문 한 줄이 남는 자리가 계속 생겼다 — 설정의 줄들은
+     * 한국어인데 나가는 문만 `← MENU` 인 식으로.
+     *
+     * 언어가 둘이면 그 자체가 위계로 읽힌다. 영문이 제목처럼, 한글이 본문처럼
+     * 보이는데 이 화면에서 그 둘은 같은 무게의 항목이다. 게임의 이름이 한글이고
+     * 모드 이름도 한글이므로, 하나로 맞춘다면 그쪽이다.
+     */
+    { id: 'play', label: '시작', icon: 'play', action: true },
+    { id: 'collection', label: '컬렉션' },
+    { id: 'settings', label: '설정' },
   ],
   play: [
     { id: 'knockout', label: '서바이벌', mode: true },
@@ -89,8 +101,14 @@ const NAV_LEAD = 22;
 const NAV_SIZE = 10;
 /** 모드명은 화면 제목 다음의 두 번째 디스플레이 계층이다. */
 const MODE_SIZE = 26;
-/** 자간, em 배수. 시안의 `letter-spacing: .2em`. */
-const NAV_TRACKING = 0.2;
+/**
+ * 자간, em 배수. 시안의 `.2em` 이 아니라 **0.08** 이다.
+ *
+ * 0.2em 은 영문 스몰캡스의 값이다. 대문자는 글자마다 폭이 달라서 넓은 자간이
+ * 줄을 고르게 만드는데, 한글은 모든 글자가 같은 폭이라 같은 값을 주면 고르게
+ * 되는 것이 아니라 그냥 흩어진다 — 낱말이 아니라 글자 셋으로 읽힌다.
+ */
+const NAV_TRACKING = 0.08;
 /** 항목 사이. 시안의 `gap: 24px`. */
 const NAV_GAP = 24;
 /** 홈 PLAY의 시작점부터 오른쪽 끝까지. 폭이 4:3으로 줄어도 보조 내비와 안 겹친다. */

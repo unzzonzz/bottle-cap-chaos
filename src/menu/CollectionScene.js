@@ -140,7 +140,7 @@ export class CollectionScene {
       this._backKey = bk;
       this.back.material.uniforms.uMap.value?.dispose();
       this.back.material.uniforms.uMap.value = menuPlateTexture(
-        '← MENU',
+        '← 메뉴',
         { role: ROLE.RETREAT, state: 'idle' },
         { width: Math.round(fb.w), height: Math.round(fb.h), scale: box.scale },
       );
