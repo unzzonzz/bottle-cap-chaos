@@ -364,7 +364,18 @@ export function bootMenu(
    * 아니라 블룸 쪽에서 풀었다 — 메뉴에서 블룸을 받는 것이 제목 하나뿐이고
    * 그마저 파괴이기 때문이다. 수치는 `menuConfig.view.bloom` 주석에 있다.
    */
-  menuRoot.add(title.root, bottle.root, bottle.burst, asUiLayer(items.root));
+  menuRoot.add(title.root, asUiLayer(items.root));
+  /**
+   * 병은 `menuRoot` 가 아니라 **씬**에 직접 붙는다.
+   *
+   * `swapTo` 는 화면을 바꿀 때 `menuRoot` 를 씬에서 통째로 뺀다. 병이 그 안에
+   * 있으면 설정으로 들어가는 순간 사라지는데, 그러면 하위 화면들이 "같은 물
+   * 속의 다른 자리" 가 아니라 그냥 다른 화면이 된다. 물은 남고 제목과 내비는
+   * 가는 것이 맞다 — 병도 물 쪽이다.
+   *
+   * 대신 하위 화면에서는 흐려진다. 아래 `tick` 의 `bottleFade` 가 그 일을 한다.
+   */
+  scene.add(bottle.root, bottle.burst);
   scene.add(menuRoot);
 
   let settings = null;
@@ -1304,7 +1315,7 @@ export function bootMenu(
            * 도착한다.
            */
           onBack: () => fadeTo(marksOrigin),
-          backLabel: marksOrigin === 'settings' ? '◀ 설정으로' : '◀ 메뉴로',
+          backLabel: marksOrigin === 'settings' ? '← SETTINGS' : '← MENU',
         });
         marks.root.add(confirm.root);
       }
@@ -1421,6 +1432,8 @@ export function bootMenu(
   // ── loop ─────────────────────────────────────────────────────────────────
   let raf = 0;
   let last = 0;
+  /** 병의 불투명도. 홈에서 1, 하위 화면에서 0.22 로 간다. */
+  let bottleFade = 1;
   /** 병을 화면 좌표로 투영할 때 쓰는 스크래치. 매 프레임 재사용한다. */
   const bottleAt = new Vector3();
   function tick(dt) {
@@ -1482,6 +1495,29 @@ export function bootMenu(
      */
     depth.setDepth(current === 'menu' ? 0 : current === 'editor' ? 0.95 : 0.9);
     depth.update(dt);
+
+    /**
+     * 병은 하위 화면에서 **가라앉는다.** 사라지지 않는다.
+     *
+     * 깊이 막(`depth`)은 renderOrder −900 이라 물 바로 위에 있고 병(0)보다
+     * 뒤에 그려진다 — 즉 막만으로는 병이 어두워지지 않는다. 막의 순서를 병
+     * 위로 올리면 하위 화면의 글자까지 같이 덮으므로 그쪽도 답이 아니다.
+     *
+     * 그래서 병의 불투명도를 직접 민다. 0.22 는 "저 뒤에 무언가 있다" 가
+     * 읽히면서 화면의 주인공이 글자라는 것이 흔들리지 않는 값이다.
+     */
+    const wantBottle = current === 'menu' ? 1 : 0.22;
+    bottleFade += (wantBottle - bottleFade) * Math.min(1, dt * 5);
+    bottle.root.traverse((o) => {
+      if (!o.isMesh) return;
+      for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+        if (!m) continue;
+        // 원래 불투명도를 한 번만 붙잡아 둔다. 매 프레임 곱하면 0 으로 내려간다.
+        if (m.userData.baseOpacity === undefined) m.userData.baseOpacity = m.opacity ?? 1;
+        m.transparent = true;
+        m.opacity = m.userData.baseOpacity * bottleFade;
+      }
+    });
     // 배경의 물. 렌더 클럭이고 게임 상태를 읽지도 쓰지도 않는다.
     // 젓는 세기를 돌려받아 제목에 그대로 넘긴다 — 둘이 같은 물이어야 한다.
     water.update(dt, viewport.resolution);

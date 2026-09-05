@@ -856,7 +856,15 @@ export function menuPlateTexture(label, state, { width = 256, height = 52, scale
     // 캡 높이의 절반을 베이스라인 보정으로 쓴다. 행 상자 한가운데에 앉는다.
     y: height / 2 + size * 0.36,
     font: `400 ${size}px ${FONT_FAMILY}`,
-    color: dim ? withAlpha(PALETTE.water.ink, 0.42) : PALETTE.water.ink,
+    /**
+     * 흐린 줄은 0.62 다. 0.42 였다.
+     *
+     * 판 위에 있을 때는 0.42 가 "이건 지금 못 누른다" 를 말하기에 충분했다.
+     * 물이 깊어진 지금은 배경이 어두워서 같은 알파가 훨씬 더 사라져 보인다 —
+     * 상대 선택 화면의 AI 와 온라인 줄이 읽히지 않는다는 것이 그 증상이었다.
+     * 흐리다는 것은 안 보인다는 뜻이 아니라 지금은 고를 수 없다는 뜻이다.
+     */
+    color: dim ? withAlpha(PALETTE.water.ink, 0.62) : PALETTE.water.ink,
     align: 'left',
   });
   /**
