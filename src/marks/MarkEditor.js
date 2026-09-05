@@ -1094,22 +1094,27 @@ function swatchTexture(colour, selected, size = L.swatch) {
   ctx.imageSmoothingEnabled = true;
   ctx.scale(scale, scale);
 
-  const r = edge * 0.22;
+  /**
+   * 색 **자체**가 칸을 채운다. 액자를 두르지 않는다.
+   *
+   * 회색 테두리 안에 색을 조금 작게 놓고 있었고, 고르면 그 테두리가 코발트가
+   * 되고 포커스 링이 하나 더 붙었다. 액자 셋이 색 하나를 둘러싼 꼴인데, 이
+   * 화면에서 판을 전부 걷어낸 마당에 가장 작은 요소가 가장 많은 테를 두르고
+   * 있었다.
+   *
+   * 색이 칸을 꽉 채우고, 고른 칸만 **흰 테두리 하나**를 얻는다. 이 화면의 모든
+   * 상태 표시와 같은 재료다 — `menuTextures.deepWindow` 의 헤어라인과 같은 잉크,
+   * 같은 두께.
+   */
+  const r = edge * 0.18;
   roundRectPath(ctx, 0, 0, edge, edge, r);
-  ctx.fillStyle = selected ? PALETTE.cobalt : PALETTE.ui.edge;
-  ctx.fill();
-  roundRectPath(ctx, edge * 0.12, edge * 0.12, edge * 0.76, edge * 0.76, r * 0.7);
   ctx.fillStyle = colour;
   ctx.fill();
   if (selected) {
-    focusRing(ctx, {
-      x: 0.5,
-      y: 0.5,
-      w: edge - 1,
-      h: edge - 1,
-      radius: r,
-      accent: PALETTE.cobalt,
-    });
+    roundRectPath(ctx, 1, 1, edge - 2, edge - 2, r);
+    ctx.strokeStyle = PALETTE.water.ink;
+    ctx.lineWidth = 2;
+    ctx.stroke();
   }
 
   const tex = toMarkTexture(canvas);

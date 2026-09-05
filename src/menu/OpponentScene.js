@@ -1,7 +1,6 @@
 import { Group, Mesh, PlaneGeometry, Raycaster, Vector2 } from 'three';
-import { buildCapGeometry, CAP_DEFAULTS, CAP_GROUP } from '../cap/capGeometry.js';
 import { createSpriteMaterial } from './menuMaterials.js';
-import { menuPlateTexture, panelTexture } from './menuTextures.js';
+import { capDiscTexture, menuPlateTexture, panelTexture } from './menuTextures.js';
 import { MarkTextures } from '../marks/markTextures.js';
 import { PLAYER_COLORS } from '../render/playerColors.js';
 import { PALETTE } from '../core/palette.js';
@@ -149,45 +148,25 @@ export class OpponentScene {
       rotations: [0, 0],
     });
 
-    this._geometry = buildCapGeometry({ ...CAP_DEFAULTS, shell: true });
-    this._capRadius = this._geometry.userData.radius ?? 1.6;
-    this._capHeight = this._geometry.userData.height ?? 0;
-
+    /**
+     * 뚜껑 둘은 **평면**이다. 3D 메시가 아니다.
+     *
+     * `buildCapGeometry` 로 만든 진짜 원반이었다 — 조명을 받고 환경 맵을
+     * 반사하고 서로를 향해 돌아 있었다. 잘 만든 물건이지만 이 화면의 나머지가
+     * 전부 평면 활자라, 입체 하나가 섞이면 그것만 다른 공간에서 온 것으로 보인다.
+     * 무엇을 고르는지 말하는 데 필요한 것은 색과 마크이지 입체감이 아니다.
+     *
+     * 마주 보게 하던 yaw 도 함께 나갔다. 평면 원반에는 향할 앞이 없고, 기울이면
+     * 타원이 되어 뚜껑이 아니라 접시로 보인다.
+     */
     /** @type {Mesh[]} index is the player. */
-    this.caps = [0, 1].map((player) => {
-      const materials = [];
-      materials[CAP_GROUP.BODY] = retro.create({ color: PLAYER_COLORS[player] });
-      materials[CAP_GROUP.PANEL] = retro.create({
-        map: this._marks.textureFor(player),
-        color: PALETTE.untinted,
-      });
-      materials[CAP_GROUP.LINER] = retro.create({ color: PALETTE.metal.liner, preset: 'plastic' });
-
-      const pivot = new Group();
-
-      /**
-       * Turned toward the middle, on the PIVOT rather than on the cap.
-       *
-       * `rotation.x = PI/2` on the cap is the editor's pose — panel toward the
-       * camera, parked on its mid-height. Yawing the pivot after that swings the
-       * whole thing about the vertical, so each cap turns to look across the gap
-       * at the other one. That is the "마주 보고 놓인 구성" the brief asks for.
-       *
-       * Rolling the cap on its own z was the first attempt and it does not read:
-       * a disc seen face-on has no visible front to point anywhere, so a roll
-       * about the view axis just tilts the mark. It has to be a yaw, and the
-       * yaw has to be on a parent, or it would compose with the x rotation into
-       * a tumble.
-       */
-      pivot.rotation.y = player === 0 ? 0.42 : -0.42;
-
-      const cap = new Mesh(this._geometry, materials);
-      cap.rotation.x = Math.PI / 2;
-      cap.position.z = -(this._geometry.userData.height ?? 0) * 0.5;
-      pivot.add(cap);
-      this.root.add(pivot);
-      return pivot;
+    this.caps = [0, 1].map(() => {
+      const mesh = new Mesh(new PlaneGeometry(1, 1), createSpriteMaterial(retro, { map: null }));
+      mesh.renderOrder = 10;
+      this.root.add(mesh);
+      return mesh;
     });
+    this._capKey = '';
 
     /** @type {{id: string, mesh: Mesh, maps: object, label: string|null}[]} */
     this.items = L.rows.map((row) => this._plate(row.id));
@@ -248,7 +227,8 @@ export class OpponentScene {
      */
     const capWidth = Math.min(L.capWidth, box.plate.width * 0.28, caps.h * 0.8);
     const capX = capWidth * L.capXShare;
-    const perCapUnit = (capWidth / (this._capRadius * 2)) * u;
+    // 평면 뚜껑이라 지오메트리 반지름을 거칠 이유가 없다. 폭이 곧 지름이다.
+    const capPx = Math.round(capWidth);
     /**
      * 뚜껑을 패널 **앞으로** 밀어낸다.
      *
@@ -262,10 +242,28 @@ export class OpponentScene {
      * 뚜껑 높이만큼 앞으로 밀면 어느 각도에서도 전부 패널 앞이다. 원근 확대는
      * 무시할 만하다 — 카메라가 896 픽셀 뒤에 있고 이 값은 20 픽셀 남짓이다.
      */
-    const forward = this._capHeight * perCapUnit;
-    this.caps.forEach((pivot, player) => {
-      pivot.position.set((player === 0 ? -capX : capX) * u, caps.y * u, forward);
-      pivot.scale.setScalar(perCapUnit);
+    /**
+     * 뚜껑을 굽는다. 크기가 바뀌었을 때만.
+     *
+     * 마크는 `MarkTextures` 가 캔버스를 제자리에서 다시 칠하므로, 여기서 굽는
+     * 텍스처는 그 순간의 그림을 복사한 것이다 — 마크가 바뀌면 `refresh` 가
+     * 키를 흔들어 다시 굽는다.
+     */
+    const capKey = `${capPx}`;
+    if (capKey !== this._capKey) {
+      this._capKey = capKey;
+      this.caps.forEach((mesh, player) => {
+        mesh.material.uniforms.uMap.value?.dispose();
+        mesh.material.uniforms.uMap.value = capDiscTexture({
+          color: PLAYER_COLORS[player],
+          mark: this._marks.textureFor(player)?.image ?? null,
+          size: capPx,
+        });
+      });
+    }
+    this.caps.forEach((mesh, player) => {
+      mesh.scale.set(capPx * u, capPx * u, 1);
+      mesh.position.set((player === 0 ? -capX : capX) * u, caps.y * u, 0);
     });
 
     for (const item of this.items) {
@@ -462,12 +460,11 @@ export class OpponentScene {
       item.maps.hover?.dispose();
       item.maps.disabled?.dispose();
     }
-    for (const pivot of this.caps) {
-      for (const cap of pivot.children) {
-        for (const m of cap.material) m?.dispose();
-      }
+    for (const mesh of this.caps) {
+      mesh.geometry.dispose();
+      mesh.material.uniforms.uMap.value?.dispose();
+      mesh.material.dispose();
     }
-    this._geometry.dispose();
     this.panel.geometry.dispose();
     this.panel.material.uniforms.uMap.value?.dispose();
     this.panel.material.dispose();

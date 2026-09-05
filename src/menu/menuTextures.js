@@ -1065,3 +1065,81 @@ export function collectionRowTexture(card, { width, height }) {
   return tex;
 }
 
+
+/**
+ * 뚜껑 하나를, 평면으로. **3D 메시가 아니다.**
+ *
+ * ── 왜 굽는가 ───────────────────────────────────────────────────────────────
+ * 상대 선택 화면의 뚜껑 둘은 `buildCapGeometry` 로 만든 진짜 3D 원반이었다.
+ * 조명을 받고 환경 맵을 반사하고 서로를 향해 돌아 있었다 — 판 위의 물건과 같은
+ * 재료로 만든, 잘 만든 물건이다.
+ *
+ * 그런데 이 화면의 나머지는 전부 평면 활자다. 입체가 하나 섞이면 그것만 다른
+ * 공간에서 온 것으로 보이고, 다섯 화면을 같은 언어로 맞춘 뒤에는 그 하나가
+ * 유일하게 튀는 것이 된다. 무엇을 고르는지 말하는 데 필요한 것은 색과 마크이지
+ * 입체감이 아니다.
+ *
+ * ── 크림프는 남긴다 ────────────────────────────────────────────────────────
+ * 테두리의 짧은 방사 눈금이 병뚜껑을 병뚜껑으로 만드는 유일한 형태다. 원만
+ * 그리면 그건 동그라미이고, 이 게임의 이름이 알까기다.
+ *
+ * @param {object} o
+ * @param {string} o.color       뚜껑 몸통 색
+ * @param {CanvasImageSource|null} o.mark  가운데에 얹을 마크. 없으면 빈 뚜껑
+ * @param {number} o.size        저술 픽셀
+ */
+export function capDiscTexture({ color, mark = null, size = 96 }) {
+  const scale = texelScale();
+  const px = Math.max(24, Math.round(size * scale));
+  const { canvas, ctx } = makeCanvas(px, px);
+  const half = px / 2;
+  const r = half - 1;
+
+  // 몸통.
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(half, half, r, 0, Math.PI * 2);
+  ctx.fill();
+
+  /**
+   * 크림프. 21 개인 것은 실제 왕관 뚜껑의 이 수다.
+   *
+   * 색을 칠하지 않고 **파낸다**(`destination-out`). 밝은 눈금을 얹으면 색이
+   * 밝은 뚜껑에서 사라지고, 어두운 눈금을 얹으면 어두운 뚜껑에서 사라진다 —
+   * 파내면 뒤의 물이 비쳐서 어느 색에서나 같은 모양으로 읽힌다.
+   */
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.lineWidth = Math.max(1, px * 0.02);
+  ctx.lineCap = 'butt';
+  for (let i = 0; i < 21; i++) {
+    const a = (i / 21) * Math.PI * 2;
+    const c = Math.cos(a);
+    const s = Math.sin(a);
+    ctx.beginPath();
+    ctx.moveTo(half + c * r, half + s * r);
+    ctx.lineTo(half + c * (r - px * 0.075), half + s * (r - px * 0.075));
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // 마크가 앉는 패널. 뚜껑 반지름의 0.72 — `markTextures` 의 CAP_PANEL_RATIO 와 같다.
+  const panelR = r * 0.72;
+  ctx.fillStyle = withAlpha(PALETTE.water.ink, 0.14);
+  ctx.beginPath();
+  ctx.arc(half, half, panelR, 0, Math.PI * 2);
+  ctx.fill();
+
+  if (mark) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(half, half, panelR, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.drawImage(mark, half - panelR, half - panelR, panelR * 2, panelR * 2);
+    ctx.restore();
+  }
+
+  const tex = toTexture(canvas);
+  tex.userData = { width: size, height: size };
+  return tex;
+}
