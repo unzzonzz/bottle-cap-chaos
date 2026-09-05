@@ -138,6 +138,16 @@ const CONE_FILL_REF_HALF = 0.09;
 const CONE_EDGE_ALPHA = 0.35;
 
 /**
+ * 콘의 길이. 미리보기가 꺼져 있을 때 쓰는 추정치이고, 단위는 뚜껑 반지름이다.
+ *
+ * `CONE_MIN_RADII` 는 바닥이자 원래 있던 상수다 — 당김이 0 이어도 콘이 그려져야
+ * 한다. `CONE_REACH_RADII` 는 실측 롤아웃에 맞춘 계수이고, **제곱**으로 곱해지는
+ * 이유는 `update` 의 표에 있다.
+ */
+const CONE_MIN_RADII = 2.5;
+const CONE_REACH_RADII = 20;
+
+/**
  * ── 이 면은 품질 티어를 읽지 않는다. 그것이 결정이다 ────────────────────────
  * `core/quality.js` 를 임포트하는 것은 하늘·조명·재질·필드 뷰 넷이고 여기는
  * 아니다. 콘은 §11 의 불가침 목록에 있다 — **에러 콘은 언제나 보인다.** 티어를
@@ -550,10 +560,55 @@ export class AimOverlay {
     if (s.assist === false) this.pullGeo.setDrawRange(0, 0);
     else this._writePull(s.com, s.pullX, s.pullZ, s.clampedDistance, s.atClamp, smash);
 
-    // The cone and the aim line reach as far as the shot does. A fixed length
-    // would say the same thing about a nudge as about a full draw, when the whole
-    // point is that the full draw's error is enormous and the nudge's is nothing.
-    const reach = Math.max(s.geom.radius * 2.5, s.reach || 0);
+    /**
+     * How far the cone and the aim line go.
+     *
+     * The intent has always been "as far as the shot does" — a fixed length says
+     * the same thing about a nudge as about a full draw, when the whole point is
+     * that the full draw's error is enormous and the nudge's is nothing.
+     *
+     * ── and for the whole of the shipped game it was a fixed length ──────────
+     * `s.reach` is the last completed PREVIEW's length, and the preview is off
+     * by default: `config.preview.enabled` is the developer's line, and the 궤적
+     * card is the only thing that turns it on. So in ordinary play this fell to
+     * the floor — `radius * 2.5`, four world units — every frame, at every draw.
+     * Measured against what the shot actually does on the survival board: four
+     * units is the reach of a 0.24 draw. The cone was permanently drawing the
+     * weakest shot in the game, about a third of a cap wide at its tip, and the
+     * comment above it said otherwise.
+     *
+     * Found by rendering it and reading the pixels — §11 calls the cone
+     * inviolable and the PHASE 4 audit could never measure it, because a
+     * synthetic pointer event never reaches `PointerRouter`. Driving `AimInput`
+     * by hand and diffing two renders of one frame is what finally showed it.
+     *
+     * ── the estimate, and what it is not ────────────────────────────────────
+     * It is not physics. Nothing here may read damping or friction — those live
+     * in the frozen simulation and a render-side copy of them would drift. It is
+     * a curve fitted to measured rollouts, in cap radii, and its shape is the
+     * point: SQUARED, so a nudge stays short.
+     *
+     *   draw   survival   this   football   this   curling   this
+     *   0.34      8.0      7.7      —         —       —        —
+     *   0.57     22.1     14.4     14.7*    10.8      —        —
+     *   0.80     29.7     24.5     22.8*    26.0     49.6*   22.5
+     *   1.00     36.3     36.0      ~27     36.0     94.4     36.0
+     *
+     *   * measured at the nearest draw that mode reached: 0.46 and 0.83 for
+     *     football, 0.76 for curling.
+     *
+     * It errs SHORT nearly everywhere, and that is the safe direction: the cone
+     * is a claim about where the cap may end up, and a claim that reaches past
+     * the truth is worse than one that stops early. Curling is the outlier by a
+     * factor of two and a half — its ice is the whole card, stones travel much
+     * further than anything a shared constant can express — so there the cone
+     * reads as the angle rather than as the distance. Turn the preview on and
+     * the real number replaces all of this.
+     */
+    const reach = Math.max(
+      s.geom.radius * CONE_MIN_RADII,
+      s.reach || s.geom.radius * (CONE_MIN_RADII + CONE_REACH_RADII * s.power * s.power),
+    );
     // The trajectory card takes the cone away, and that is not a decoration.
     // The cone says "it will go somewhere in here"; the card's whole claim is
     // that it will go exactly THERE, and the line already draws the exact shot.
