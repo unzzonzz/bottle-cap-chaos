@@ -5,7 +5,6 @@ import { createLightRig } from '../core/lighting.js';
 import { createWater } from './water.js';
 import { SubmergedTitle } from './SubmergedTitle.js';
 import { setTextureRenderer } from '../core/textures.js';
-import { onQualityChange, refreshShadowCasters } from '../core/quality.js';
 import { DISPLAY_ASPECT, Viewport } from '../core/Viewport.js';
 import { SceneComposer } from '../core/Composer.js';
 import { FRAME, MIN_FRAME_ASPECT, frameScale } from '../core/frame.js';
@@ -180,17 +179,29 @@ export function bootMenu(
    * 인터페이스가 같아서 되돌리는 것은 이 한 줄이다.
    */
   const water = createWater(scene);
-  const lights = createLightRig(scene);
-  lights.setExtents({ x: 26, z: 26 });
-
   /**
-   * 티어가 바뀌었을 때 이 문서가 직접 해야 하는 것: 씬의 그림자 캐스터.
+   * 조명은 남고, **그림자는 없다.**
    *
-   * `main.js` 의 같은 자리와 같은 이유다 — 씬을 아는 쪽만 할 수 있다. 이 화면에서
-   * 그림자를 던지는 것은 병 하나뿐이지만, 그 하나가 최저·낮음에서 사라지고
-   * 보통 이상에서 돌아오는 것이 여기서 처리된다.
+   * ── 왜 조명이 남는가 ──────────────────────────────────────────────────
+   * 메뉴 화면 자체에는 조명을 받는 것이 하나도 없다 — 물 돔도 제목도 내비도
+   * 전부 자기 셰이더로 색을 낸다. 그래서 리그를 지우려다, 재 보고 그만뒀다:
+   * 마크 편집기에서 조명을 끄면 화면 평균 밝기가 134.98 에서 123.50 으로
+   * 떨어진다. 뚜껑 미리보기가 이 리그를 받고 있다. 상대 선택 화면의 뚜껑들도
+   * 같은 씬에 있다.
+   *
+   * 환경 맵(`createEnvironment`)은 더 그렇다. 그건 씬이 아니라 재질 팩토리에
+   * 넘어가므로 이 문서의 씬을 넘어 캡 와이프까지 닿는다 — 위쪽 주석 참조.
+   *
+   * ── 왜 그림자는 없는가 ────────────────────────────────────────────────
+   * 병이 유일한 캐스터였다. 지금은 메뉴·상대·컬렉션·마크·편집기 다섯 화면
+   * 전부에서 캐스터도 리시버도 0 인데, 2048x2048 그림자 맵이 잡히고 그림자
+   * 패스가 매 프레임 아무것도 그리지 않고 돌고 있었다. `shadows: false` 면
+   * `sun.castShadow` 가 꺼지고 맵은 애초에 할당되지 않는다.
+   *
+   * `setExtents` 도 함께 나갔다 — 그림자 프러스텀을 병 하나에 맞추던 값이다.
+   * 게임 문서는 별개이므로 판 위의 그림자는 그대로다.
    */
-  onQualityChange(() => refreshShadowCasters(scene));
+  const lights = createLightRig(scene, { shadows: false });
 
   const camera = new PerspectiveCamera(cfg.camera.fov, DISPLAY_ASPECT, 1, 400);
 
@@ -326,19 +337,23 @@ export function bootMenu(
   /** 지난 프레임의 정규화 포인터. 물을 젓는 것은 그 차이다. */
   const lastPointerN = { x: 0, y: 0 };
   /**
-   * 제목은 **월드 레이어**에 둔다. `asUiLayer` 를 씌우지 않는다.
+   * 제목도 **블룸 밖**이다. 병이 없어지고 잉크가 흰색이 되면서 바뀌었다.
    *
-   * UI 레이어는 월드가 다 그려진 뒤 별도 패스로 올라간다. 제목이 거기 가면
-   * 물과 같은 패스에 있지 않게 되고, 물에 잠긴 것으로 보여야 할 글자가 물 위에
-   * 얹힌 것이 된다.
+   * ── 예전에 월드 레이어였던 이유, 그리고 그것이 사라진 이유 ──────────────
+   * 병이 있을 때는 제목이 병보다 **뒤**에 있어야 했다. UI 레이어는 월드가 다
+   * 그려진 뒤 별도 패스로 올라가므로 거기 두면 제목이 병 앞에 오고, 그러면 병이
+   * 글자에 인쇄된 것이 된다. 병이 없으니 그 제약이 없다.
    *
-   * 월드에 있으므로 **블룸도 받는다.** 그래서 잉크를 순백이 아니라 옅은 파랑으로
-   * 잡았다 — 처음에 흰색으로 두었더니 글자가 통째로 타서 흰 덩어리가 됐다.
-   * UI 레이어가 존재하는 이유는 크기가 아니라 휘도였고, 그 문제는 레이어를
-   * 바꾸는 것이 아니라 값을 임계 아래로 내려서 푼다. `SubmergedTitle` 의
-   * `uTint` 주석에 수치가 있다.
+   * 그리고 잉크가 순백이 되면서 월드 레이어가 오히려 문제가 됐다. 거기 있으면
+   * 블룸을 받는데, 흰색의 선형 휘도는 1.0 이고 브라이트패스 임계는 0.72 라
+   * 글자가 통째로 타서 흰 덩어리가 된다 — 예전에 실제로 그렇게 됐고, 그래서
+   * 잉크를 옅은 파랑(선형 0.685)으로 낮춰 두었던 것이다. 이제 색이 지정된
+   * 값이므로 반대로 푼다: 색을 낮추는 대신 글자를 블룸 밖으로 옮긴다.
+   *
+   * 그림은 같다. 물은 불투명하고 제목은 어느 패스에서든 그 위에 합성되므로,
+   * 패스가 바뀌어도 픽셀은 바뀌지 않는다 — 블룸만 빠진다.
    */
-  menuRoot.add(title.root, asUiLayer(items.root));
+  menuRoot.add(asUiLayer(title.root), asUiLayer(items.root));
   scene.add(menuRoot);
 
   let settings = null;

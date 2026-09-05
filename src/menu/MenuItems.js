@@ -1,12 +1,10 @@
 import { Group, Mesh, PlaneGeometry, Raycaster, Vector2 } from 'three';
 import { PALETTE } from '../core/palette.js';
 import { createSpriteMaterial } from './menuMaterials.js';
-import { dateStampTexture, iconPlateTexture, navLabelTexture, ruleTexture } from './menuTextures.js';
+import { dateStampTexture, navLabelTexture, ruleTexture } from './menuTextures.js';
 import { FRAME, frameScale } from '../core/frame.js';
-import { MOTION, ROLE, RULE, SIZE, SPACE } from '../core/tokens.js';
+import { MOTION, ROLE, RULE } from '../core/tokens.js';
 
-/** 저술 기준 판 폭. 아이콘 버튼이 프레임 배수를 되읽는 기준이다. */
-const DEFAULT_PLATE_WIDTH = 256;
 import { approach } from '../ui/motion.js';
 
 /**
@@ -79,15 +77,6 @@ const PAGES = {
   ],
 };
 
-/**
- * 열 밖의 것: 필요할 때만 찾는 것.
- *
- * 내 마크만 남는다. 설정이 열로 돌아갔으므로 아이콘은 하나이고, 그 하나는
- * 설정 안에 묻혀 있었다는 이유로 여기 있다 — 뚜껑에 새길 그림은 이 게임에서
- * 사람들이 실제로 바꾸는 유일한 것인데 음량 슬라이더 아래 네 번째 줄에 있었다.
- */
-const DEFAULT_TOOLS = [{ id: 'marks', icon: 'marks' }];
-
 /* ── 내비의 값. 전부 C 시안에서 그대로 옮긴 것이다 (프레임 853x480 기준) ──── */
 /** 첫 항목. 이 화면의 주된 행동이라 한 단계 크다. */
 const NAV_LEAD = 12;
@@ -111,7 +100,16 @@ export class MenuItems {
    * @param {import('../core/GlossMaterial.js').GlossMaterials} retro
    * @param {object} tuning  the live `MENU_CONFIG.items` block
    */
-  constructor({ retro, tuning, tools = DEFAULT_TOOLS }) {
+  /**
+   * ── 열 밖의 아이콘 버튼은 없다 ──────────────────────────────────────────
+   * 내 마크 아이콘 하나가 내비 위에 떠 있었다. 뚜껑에 새길 그림이 설정의 네 번째
+   * 줄에 묻혀 있다는 이유로 꺼내 둔 것이었는데, 이 화면에 글자가 아닌 것이 그
+   * 하나만 남으면서 오히려 이물이 됐다 — 배경과 활자만 남은 구성에서 아이콘
+   * 하나는 어디에도 속하지 않는다.
+   *
+   * 들어가는 길은 설정에 그대로 있다 (`SettingsScene` 의 `{ id: 'marks' }`).
+   */
+  constructor({ retro, tuning }) {
     this.tuning = tuning;
     this.root = new Group();
     this._retro = retro;
@@ -139,22 +137,6 @@ export class MenuItems {
         id: null, label: '', role: null, mesh, material, map: null,
         rule, ruleMat, hovered: false, shift: 0, grow: { x: 0, v: 0 },
       };
-    });
-
-    /**
-     * 열 밖의 아이콘 버튼. 판과 **같은 목록**에 들어가야 눌린다.
-     *
-     * 별도의 레이캐스트를 만들지 않는 이유는 부록 B3.3 이 지적한 것과 같다:
-     * 판은 `asUiLayer` 때문에 레이어 1 에 있고, 기본 레이어만 보는 광선은 그것을
-     * 시험조차 하지 않는다. 목록이 하나면 그 사실을 한 번만 맞히면 된다.
-     */
-    this.tools = tools.map((def) => {
-      const maps = this._bakeTool(def.icon);
-      const material = createSpriteMaterial(retro, { map: maps.idle });
-      const mesh = new Mesh(new PlaneGeometry(1, 1), material);
-      mesh.renderOrder = 10;
-      this.root.add(mesh);
-      return { ...def, mesh, material, maps, hovered: false, isTool: true };
     });
 
     /**
@@ -232,10 +214,7 @@ export class MenuItems {
     });
     this._plateKey = '';
     this._rebakeIfResized();
-    this._picks = [
-      ...this.items.filter((i) => i.id && !i.disabled),
-      ...this.tools,
-    ].map((i) => i.mesh);
+    this._picks = this.items.filter((i) => i.id && !i.disabled).map((i) => i.mesh);
     if (this._unitsPerPixel) this.layout(this._unitsPerPixel);
   }
 
@@ -273,37 +252,6 @@ export class MenuItems {
     });
   }
 
-  /** 아이콘 버튼 한 개의 두 상태. */
-  _bakeTool(icon) {
-    const size = Math.round(SIZE.buttonIcon.w * this._toolScale());
-    return {
-      idle: iconPlateTexture(icon, 'idle', { size, scale: PLATE_TEXEL_SCALE, onWater: true }),
-      hover: iconPlateTexture(icon, 'hover', { size, scale: PLATE_TEXEL_SCALE, onWater: true }),
-    };
-  }
-
-  /**
-   * 아이콘 버튼의 프레임 배수.
-   *
-   * 판과 같은 비율로 줄어야 한다 — `bootMenu.scaleColumn` 이 `plateWidth` 를
-   * 저술값에서 줄이므로, 그 비율을 여기서 되읽는다. 따로 계산하면 좁은 프레임에서
-   * 아이콘만 크게 남는다.
-   */
-  _toolScale() {
-    return Math.min(1, this.tuning.plateWidth / DEFAULT_PLATE_WIDTH);
-  }
-
-  /**
-   * 판 크기가 바뀌었으면 텍스처를 다시 굽는다.
-   *
-   * ── 왜 필요한가 ────────────────────────────────────────────────────────
-   * 가로 화면에서 판 폭은 프레임에 비례한다. 640 폭 프레임에서 256 이던 판은 421
-   * 프레임에서 168 이고, 텍스처를 그대로 두면 168 폭 쿼드에 256 폭 그림이 눌려
-   * 붙는다 — 글자가 가로로 압축돼 보인다.
-   *
-   * 크기가 같으면 아무것도 하지 않는다. `layout()` 은 리사이즈마다 불리므로
-   * 이 가드가 없으면 창을 끌 때마다 항목 수 x 3 장을 다시 굽는다.
-   */
   /**
    * 항목 텍스처를 다시 굽는다.
    *
@@ -340,12 +288,6 @@ export class MenuItems {
       item.map = this._bake(item.label, i === 0);
       item.material.uniforms.uMap.value = item.map;
     });
-    for (const tool of this.tools) {
-      const next = this._bakeTool(tool.icon);
-      for (const tex of Object.values(tool.maps)) tex.dispose();
-      tool.maps = next;
-      tool.material.uniforms.uMap.value = tool.hovered ? next.hover : next.idle;
-    }
   }
 
   layout(unitsPerPixel) {
@@ -391,18 +333,6 @@ export class MenuItems {
 
       cursor -= ink + NAV_GAP * k;
     }
-
-    /** 아이콘 버튼은 열 **위**, 같은 오른쪽 선. */
-    const icon = Math.round(SIZE.buttonIcon.w * this._toolScale());
-    const gap = Math.round(SPACE.md * this._toolScale());
-    const toolY = baseline + NAV_LEAD * k + gap + icon / 2;
-    const last = this.tools.length - 1;
-    this.tools.forEach((tool, i) => {
-      const tx = right - icon / 2 - (last - i) * (icon + gap);
-      tool.home = { x: tx * u, y: toolY * u };
-      tool.mesh.scale.set(icon * u, icon * u, 1);
-      tool.mesh.position.set(tool.home.x, tool.home.y, 0);
-    });
 
     /** 날짜 도장: 왼쪽 30 / 아래 26. 시안 그대로. */
     const st = this.stamp.material.uniforms.uMap.value.userData;
@@ -457,10 +387,6 @@ export class MenuItems {
       }
     }
 
-    for (const tool of this.tools) {
-      tool.dim = approach(tool.dim ?? 1, any && !tool.hovered ? 0.45 : 1, dt, MOTION.hover);
-      tool.material.uniforms.uOpacity.value = fade * tool.dim;
-    }
     /**
      * 숫자는 호버에 반응하지 않는다 — 누를 수 있는 것이 아니다.
      *
@@ -493,19 +419,25 @@ export class MenuItems {
     // refusing the press is worse than one that never responds.
     const hits = this._ray.intersectObjects(this._picks, false);
     const mesh = hits[0]?.object ?? null;
-    return [...this.items, ...this.tools].find((i) => i.mesh === mesh) ?? null;
+    return this.items.find((i) => i.mesh === mesh) ?? null;
   }
 
+  /**
+   * 호버는 **플래그만** 세운다. 텍스처를 바꾸지 않는다.
+   *
+   * ── 여기 텍스처 교체가 있었고, 그것은 터질 자리였다 ─────────────────────
+   * `it.material.uniforms.uMap.value = on ? it.maps.hover : it.maps.idle` 이
+   * 있었다. 상태별 텍스처 쌍(`maps`)을 갖는 것은 아이콘 버튼뿐이었고 내비
+   * 항목은 `map` 한 장만 갖는다 — 즉 내비에 커서를 올리면 `it.maps` 가
+   * undefined 라 그 줄에서 예외가 났다. 아이콘이 있던 시절의 잔재다.
+   *
+   * 지금 호버가 보이는 방식은 밑줄이 자라는 것과 나머지가 흐려지는 것 둘이고,
+   * 둘 다 매 프레임 움직이는 값이라 애초에 구울 수 없다 — `update` 가 한다.
+   */
   setHover(item) {
     if (this.hovered === item) return;
     this.hovered = item;
-    for (const it of [...this.items, ...this.tools]) {
-      const on = it === item && !it.disabled;
-      if (on === it.hovered) continue;
-      it.hovered = on;
-      if (it.disabled) continue;
-      it.material.uniforms.uMap.value = on ? it.maps.hover : it.maps.idle;
-    }
+    for (const it of this.items) it.hovered = it === item && !it.disabled;
   }
 
   dispose() {
@@ -518,11 +450,9 @@ export class MenuItems {
       item.ruleMat?.dispose();
       item.map?.dispose();
     }
-    for (const item of [...this.items, ...this.tools]) {
+    for (const item of this.items) {
       item.mesh.geometry.dispose();
       item.material.dispose();
-      // 항목은 `map` 하나, 도구는 상태별 `maps` 를 갖는다. 둘이 다르다.
-      if (item.maps) for (const m of Object.values(item.maps)) m.dispose();
     }
     this.root.clear();
   }

@@ -561,59 +561,6 @@ function wrapToFit(ctx, text, type, maxWidth, maxRows) {
 }
 
 /**
- * 아이콘 버튼 한 장. 라벨 없이 그림만.
- *
- * ── RETREAT 계열 시각인 이유 ────────────────────────────────────────────────
- * 부록 B3.2 가 그렇게 정했고, 근거가 있다: 이 둘(설정·내 마크)은 게임을 시작하지
- * 않는다. 메인 메뉴에 온 사람이 하려는 것은 모드를 고르는 것이고, 이 둘은 필요할
- * 때만 찾는 것이다. **채워지지 않고 떠 있지 않은** 모양이 그 사실을 말한다 —
- * 열의 세 판은 떠 있고 이 둘은 평평하다.
- *
- * 툴팁은 없다. 터치 기기에 호버가 없으므로 툴팁은 절반의 사용자에게 존재하지 않는
- * 설명이고, 존재하지 않을 수 있는 설명에 의미를 맡길 수 없다. 그래서 그림이 혼자
- * 서야 하고, `icons.js` 의 두 주석이 왜 그 그림이어야 하는지 적고 있다.
- */
-export function iconPlateTexture(icon, state = 'idle', { size = 64, scale = 1, onWater = false } = {}) {
-  const { canvas, ctx } = makeCanvas(Math.round(size * scale), Math.round(size * scale));
-  ctx.scale(scale, scale);
-
-  /**
-   * ── the plate is gone, and the name is kept ─────────────────────────────
-   * This drew a `roleButton` behind the icon and then the icon on top. PHASE 4's
-   * audit removed it: two rounded squares under two icons at the foot of the
-   * home column are §24's "generic rounded UI cards" in the one place the page
-   * is supposed to be quietest, and the icons are already different shapes from
-   * each other, so the plate contributed nothing to telling them apart.
-   *
-   * The function keeps its name because what it makes is still a texture for an
-   * icon BUTTON — the hit quad is the mesh, and that is unchanged. Renaming it
-   * would touch four call sites to say the same thing.
-   *
-   * `hover` and `pressed` fold to `idle` in `skinFor` (the menu's plates react
-   * to nothing), so the two baked states differ only for `disabled`. That is
-   * kept rather than collapsed: `disabled` is a state of the thing.
-   */
-  const SKIN_STATE = { active: 'pressed', dimmed: 'disabled' };
-  const skin = skinFor(SKIN_STATE[state] ?? state);
-
-  const inner = size * 0.62;
-  ctx.globalAlpha = skin.alpha;
-  drawIcon(ctx, icon, {
-    x: (size - inner) / 2,
-    y: (size - inner) / 2,
-    size: inner,
-    // 열과 같은 이유로 뒤집힌다 — 이 아이콘도 종이가 아니라 물 위에 앉는다.
-    // `menuPlateTexture` 의 `onWater` 주석에 실측이 있다.
-    color: onWater ? PALETTE.water.ink : skin.text,
-  });
-  ctx.globalAlpha = 1;
-
-  const tex = toTexture(canvas);
-  tex.userData = { width: size, height: size };
-  return tex;
-}
-
-/**
  * 좌하단의 두 줄 숫자. C 시안의 `07 / 06`.
  *
  * 무엇을 가리키는 숫자가 아니라 **구도의 추**다 — 제목이 왼쪽 위에서 잘려 들어오고
