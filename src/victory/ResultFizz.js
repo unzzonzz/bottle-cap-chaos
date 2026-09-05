@@ -1,7 +1,37 @@
 import { Mesh, PlaneGeometry } from 'three';
 import { FRAME } from '../core/frame.js';
-import { risePolynomial, solveAge } from '../menu/Fizz.js';
 import { bubbleTexture } from '../menu/menuTextures.js';
+
+/**
+ * a + g a^2 + g^2 a^3 / 3 — 반지름이 선형으로 자라는 기포의 상승 적분.
+ *
+ * ── 여기 있는 이유 ─────────────────────────────────────────────────────────
+ * 원래 `menu/Fizz.js` 에 있었다. 그쪽 주석이 "법칙은 옮겨 다니고 그 클래스는
+ * 아니다" 라고 적어 두었는데, 메뉴에서 병이 사라지면서 클래스가 통째로 없어졌고
+ * 법칙만 남았다. 남은 호출자가 이 파일 하나라 여기로 왔다.
+ */
+function risePolynomial(a, growth) {
+  return a + growth * a * a + (growth * growth * a * a * a) / 3;
+}
+
+/**
+ * 이 기포가 수면에 닿기까지 걸리는 시간.
+ *
+ * `risePolynomial(a) = distance` 에 대한 뉴턴법. 도함수가 정확히 (1 + growth a)^2
+ * — 반지름 비의 제곱이고 그것이 곧 상승 속도다. 단조롭고 매끄러워서 어디서
+ * 출발해도 서너 번에 수렴한다.
+ */
+function solveAge(distance, growth) {
+  let a = distance;
+  for (let n = 0; n < 6; n++) {
+    const f = risePolynomial(a, growth) - distance;
+    const d = (1 + growth * a) ** 2;
+    a -= f / d;
+    if (a < 1e-4) a = 1e-4;
+  }
+  return a;
+}
+
 
 /**
  * Carbonation up the result screen. The menu's bubbles, run up a flat frame.

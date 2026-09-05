@@ -1,24 +1,18 @@
-import { Color, Group, Mesh, PerspectiveCamera, PlaneGeometry, Scene, Vector3 } from 'three';
+import { Group, PerspectiveCamera, Scene } from 'three';
 import { GlossMaterials } from '../core/GlossMaterial.js';
 import { createEnvironment } from '../core/environment.js';
 import { createLightRig } from '../core/lighting.js';
 import { createWater } from './water.js';
 import { SubmergedTitle } from './SubmergedTitle.js';
 import { setTextureRenderer } from '../core/textures.js';
-import {
-  onQualityChange,
-  refreshShadowCasters,
-  SHADOW_RANK,
-  tagShadow,
-} from '../core/quality.js';
+import { onQualityChange, refreshShadowCasters } from '../core/quality.js';
 import { DISPLAY_ASPECT, Viewport } from '../core/Viewport.js';
 import { SceneComposer } from '../core/Composer.js';
 import { FRAME, MIN_FRAME_ASPECT, frameScale } from '../core/frame.js';
-import { aimedLaunchDirection, Bottle } from './Bottle.js';
 import { PALETTE, withAlpha } from '../core/palette.js';
 import { registerTextureCache, whenFontsReady } from '../ui/fonts.js';
 import { clearLegacyStorage } from '../core/legacyStorage.js';
-import { CapWipe, WIPE_FRAME } from '../core/CapWipe.js';
+import { CapWipe } from '../core/CapWipe.js';
 import { MenuItems } from './MenuItems.js';
 import { SettingsScene } from './SettingsScene.js';
 import { OpponentScene } from './OpponentScene.js';
@@ -100,9 +94,9 @@ import { MenuAudio } from '../audio/MenuAudio.js';
  * On the match page the HUD, the cards and the victory screen are separate
  * scenes with their own orthographic cameras, so keeping them out of the bloom
  * chain is just a matter of rendering them afterwards. Here the plates ARE world
- * objects: real quads in the perspective scene, sitting in front of the bottle,
- * because that is what gives them the slight yaw and the hover shift that make
- * them read as panels standing in a room.
+ * objects: real quads in the perspective scene, because that is what gives them
+ * the slight yaw and the hover shift that make them read as panels standing in
+ * a room.
  *
  * So the separation is done with layers instead of scenes. The world draws on
  * layer 0 through the bloom chain, the plates draw on layer 1 straight to the
@@ -158,7 +152,6 @@ export function bootMenu(
    * from one place.
    */
   createEnvironment(viewport.renderer, retro);
-
 
   // Same fire-and-forget as `main.js`: the menu bakes its plates into cached
   // canvas textures too, and this is what stops them being baked in the
@@ -226,9 +219,6 @@ export function bootMenu(
   let camWiden = 1;
 
   const LANDSCAPE_POSE = {
-    originX: cfg.bottle.originX,
-    originY: cfg.bottle.originY,
-    shadowDrop: cfg.bottle.shadowDrop,
     columnX: cfg.items.columnX,
     columnY: cfg.items.columnY,
     plateWidth: cfg.items.plateWidth,
@@ -279,77 +269,29 @@ export function bootMenu(
    */
   function applyArrangement(_u) {
     const k = scaleColumn();
-    Object.assign(cfg.bottle, {
-      originX: LANDSCAPE_POSE.originX,
-      originY: LANDSCAPE_POSE.originY,
-      shadowDrop: LANDSCAPE_POSE.shadowDrop,
-    });
     cfg.items.columnX = Math.round(LANDSCAPE_POSE.columnX * k);
     cfg.items.columnY = Math.round(LANDSCAPE_POSE.columnY * k);
   }
 
   // ── contents ─────────────────────────────────────────────────────────────
-  /**
-   * 재질별 클리핑을 켠다. `Bottle` 의 액면이 클립 평면이다.
-   *
-   * 전역 스위치이고 렌더러는 게임과 공유하는 물건이므로 어디서 켜는지가 중요하다.
-   * 여기가 맞는 자리인 이유: 문서는 메뉴이거나 게임이지 둘 다가 아니고
-   * (`main.js` 가 갈라 놓는다), 이 줄은 메뉴 문서에서만 실행된다.
-   *
-   * 켜도 클립 평면이 없는 재질은 값을 치르지 않는다 — three 는 재질마다
-   * 평면 수를 세고, 0 이면 `NUM_CLIPPING_PLANES` 가 0 이라 그 분기 전체가
-   * 전처리기에서 사라진다. 실측으로도 프레임 시간 차이가 측정 오차 안이었다.
-   */
-  viewport.renderer.localClippingEnabled = true;
-
-  const bottle = new Bottle({ retro, tuning: cfg.bottle });
   const items = new MenuItems({ retro, tuning: cfg.items });
 
   /**
-   * ── the floor is gone, and the pool of light with it ────────────────────
-   * There was a 30x30 quad lying flat under the bottle with a bright radial
-   * wash printed on it — "the one light in the room, and the bottle is what it
-   * is lighting". It read well and it was a FLOOR, which is exactly what §6.2
-   * takes away: the bottle hangs in space, there is nothing under it, and a
-   * pool of light on nothing is a hole in the picture. Measured on screen it
-   * was also the brightest thing in the menu by a distance, past the bloom
-   * threshold, so the bottom third of the frame was a white blur.
+   * ── 이 화면에는 이제 3D 물건이 하나도 없다 ──────────────────────────────
+   * 바닥이 먼저 나갔고(§6.2 — 떠 있는 것 아래의 광원 웅덩이는 그림의 구멍이다),
+   * 그 다음이 병이다. 남은 것은 배경의 물 돔과 그 안에 잠긴 제목, 그리고 UI
+   * 레이어의 글자들뿐이다 — 실측으로 드로우 콜 5 개에 삼각형 10 개다.
    *
-   * What replaces it is the SEA — `core/sky.js` draws the world below the
-   * horizon now, so the lower half of the menu has somewhere to be without
-   * anything being placed there. `floorPoolTexture` is still exported and has
-   * no caller; it is left for the moment because the victory screen's own wash
-   * may want it, and PHASE 5 is where that is decided.
+   * 조명 리그와 환경 맵은 아직 만들어진다. 지금 그것을 받는 재질이 이 문서에
+   * 하나도 없으므로 값을 치르고 아무 일도 하지 않는데, 하위 화면 다섯과 마크
+   * 편집기까지 전부 확인해야 지울 수 있어서 남겨 두었다.
    */
   const menuRoot = new Group();
   /**
-   * 병은 그림자를 던지고 바닥은 받는다.
+   * 물에 잠긴 제목.
    *
-   * `bottle.shadow` 는 손으로 그린 타원 스프라이트인데, 그걸 지우지 않는 이유는
-   * 병이 공중에 떠 있기 때문이다 — 실제 그림자는 바닥의 광원 반대편에 생기지만
-   * 이 연출의 그림자는 "병이 떠 있다"를 말하려고 병 바로 아래에 있다. 둘은 다른
-   * 일을 한다.
-   */
-  /**
-   * 병은 여전히 그림자를 던진다 — **받을 것이 없을 뿐이다.**
-   *
-   * 태그를 남기는 이유는 티어 시스템이 이 목록으로 캐스터를 세기 때문이고
-   * (`core/quality.refreshShadowCasters`), 던지는 쪽이 목록에서 빠지면 게임
-   * 화면으로 넘어갔을 때 등급이 어긋난다. `bottle.shadow` 는 손으로 그린 타원
-   * 스프라이트이고 그것이 이 화면의 유일한 그림자다 — 실제 그림자는 광원 반대편에
-   * 생기지만, 이 연출의 그림자는 "병이 떠 있다" 를 말하려고 병 아래 멀리 있다.
-   */
-  bottle.root.traverse((o) => {
-    if (o.isMesh) tagShadow(o, SHADOW_RANK.HERO);
-  });
-  // The shadow and the burst are siblings of the bottle rather than children of
-  // it: one is placed by a world position every frame and the other hangs a
-  // fixed distance below. Parenting either would add the float to it twice.
-  /**
-   * 물에 잠긴 제목. 병보다 **뒤**에 그린다.
-   *
-   * `renderOrder -500` 은 물(-1000)과 나머지 사이다. 글자가 병 앞에 오면 병이
-   * 종이에 인쇄된 것이 되고, 이 화면에서 병은 물 속의 물건이다.
+   * `renderOrder -500` 은 물(-1000)과 나머지 사이다. 물보다 앞, 내비보다 뒤 —
+   * 글자는 물 **속**에 있고 내비는 유리 위에 인쇄된 것처럼 앞에 있다.
    */
   const title = new SubmergedTitle({ unitsPerPixel: unitsPerPixel() });
 
@@ -386,9 +328,9 @@ export function bootMenu(
   /**
    * 제목은 **월드 레이어**에 둔다. `asUiLayer` 를 씌우지 않는다.
    *
-   * UI 레이어는 월드가 다 그려진 뒤 별도 패스로 올라간다. 거기 두면 제목이 병
-   * **앞**에 오고, 그러면 병이 글자에 인쇄된 것이 된다 — 이 화면에서 병은 물
-   * 속의 물건이고 글자는 그보다 더 깊은 곳에 있다.
+   * UI 레이어는 월드가 다 그려진 뒤 별도 패스로 올라간다. 제목이 거기 가면
+   * 물과 같은 패스에 있지 않게 되고, 물에 잠긴 것으로 보여야 할 글자가 물 위에
+   * 얹힌 것이 된다.
    *
    * 월드에 있으므로 **블룸도 받는다.** 그래서 잉크를 순백이 아니라 옅은 파랑으로
    * 잡았다 — 처음에 흰색으로 두었더니 글자가 통째로 타서 흰 덩어리가 됐다.
@@ -396,7 +338,7 @@ export function bootMenu(
    * 바꾸는 것이 아니라 값을 임계 아래로 내려서 푼다. `SubmergedTitle` 의
    * `uTint` 주석에 수치가 있다.
    */
-  menuRoot.add(title.root, bottle.root, bottle.shadow, bottle.burst, asUiLayer(items.root));
+  menuRoot.add(title.root, asUiLayer(items.root));
   scene.add(menuRoot);
 
   let settings = null;
@@ -405,10 +347,9 @@ export function bootMenu(
   /**
    * 내 마크, and the things it needs.
    *
-   * The book is built eagerly because the menu bottle wears whatever P1 has
-   * chosen and therefore needs the answer before its first frame; the SCREEN is
-   * built on first entry, like the settings scene, because most sessions never
-   * open it. `LocalStorageMarks` is the only place in the menu that names a
+   * 책을 미리 짓는 이유는 뚜껑 와이프가 P1 이 고른 마크를 쓰기 때문이다 —
+   * 전환의 첫 프레임 전에 답이 나와 있어야 한다. 반면 화면 자체는 설정 화면과
+   * 같이 처음 들어갈 때 짓는다. 대부분의 세션은 열지 않는다. `LocalStorageMarks` is the only place in the menu that names a
    * storage implementation — everything downstream takes a `MarkStorage`.
    */
   const markBook = new MarkBook(new LocalStorageMarks());
@@ -487,13 +428,6 @@ export function bootMenu(
 
   const transition = new Transition({ tuning: cfg.transition });
 
-  /** World position -> the overlay's frame pixels. */
-  function toFrame(world) {
-    const p = world.clone().project(camera);
-    return { x: (p.x * WIPE_FRAME.width) / 2, y: (p.y * WIPE_FRAME.height) / 2 };
-  }
-  const mouth = new Vector3();
-  const mouthDir = new Vector3();
   /** Whether THIS document plays the cap's exit. Written by `runTransition`. */
   let uncoverRun = true;
 
@@ -901,51 +835,18 @@ export function bootMenu(
       null,
       {
         /**
-         * ── the cap only comes OFF THE BOTTLE when the bottle is there ───────
-         * On the menu this is the bottle being opened: the crimp lets go, the
-         * cap hops off the mouth along the axis the bottle has turned toward
-         * the camera, and the eruption goes off underneath it.
+         * 뚜껑은 화면 한가운데에서 카메라를 향해 온다.
          *
-         * Every other screen has no bottle on it, and nothing takes its place.
-         * The cap used to be fired out of thin air there — out of the point the
-         * bottle WOULD have occupied, off to one side of a screen it was not
-         * on — which was reported exactly that way. The bars are what covers
-         * the frame now, so a screen with no bottle simply gets the bars: there
-         * is no longer a hole to fill.
-         */
-        /**
-         * ── the cap only comes OFF THE BOTTLE when the bottle is there ───────
-         * On the menu this is the bottle being opened: the crimp lets go, the
-         * cap leaves the mouth along the axis the bottle has turned toward the
-         * camera, and the eruption goes off underneath it.
+         * 예전에는 메뉴에만 병이 있어서 두 갈래였다 — 메뉴에서는 뚜껑이 병의
+         * 주둥이에서 그 축을 따라 떠나고, 다른 화면에서는 허공에서 나왔다. 후자가
+         * "병이 없는 화면에서 병이 있었을 자리에서 뚜껑이 튀어나온다"는 문제로
+         * 보고됐고, 그래서 병 없는 화면은 그냥 가운데에서 오도록 갈라 두었다.
          *
-         * Every other screen has no bottle on it. This used to run regardless,
-         * so pressing 시작 on the opponent screen fired a cap out of thin air —
-         * out of the point the bottle WOULD have occupied, off to one side of a
-         * screen it was not on, and it was reported exactly that way. With
-         * nothing to leave, the cap simply comes at the camera from dead
-         * centre, which is also how the game page plays it coming back.
-         *
-         * Two caps for one frame, or none for one frame, are both visible at
-         * 60 Hz — so the bottle loses its cap on the frame the overlay gains
-         * one, not a frame either side.
+         * 병이 사라졌으니 메뉴도 같은 화면이다. 갈래가 없어졌고, 화면을 덮는 것은
+         * 어차피 바(bar)다 — 메울 구멍이 애초에 없다.
          */
         onPop: () => {
-          if (current !== 'menu') {
-            wipe.begin({ x: 0, y: 0 }, aimedLaunchDirection(cfg.bottle));
-            return;
-          }
-          bottle.setCapVisible(false);
-          bottle.popBurst();
-          bottle.mouthWorld(mouth);
-          bottle.mouthDirection(mouthDir);
-          const from = toFrame(mouth);
-          // The heading is the bottle's own axis, projected — and by now the
-          // bottle has turned to point that axis at the camera. A cap that came
-          // off a leaning bottle and then flew straight up the screen would read
-          // as two unrelated events.
-          const ahead = toFrame(mouth.clone().addScaledVector(mouthDir, 4));
-          wipe.begin(from, { x: ahead.x - from.x, y: ahead.y - from.y });
+          wipe.begin({ x: 0, y: 0 }, { x: 0, y: 1 });
         },
         onSwap,
         onDone: () => {
@@ -963,8 +864,6 @@ export function bootMenu(
            */
           if (!uncover) return;
           wipe.end();
-          bottle.setCapVisible(true);
-          bottle.popCap(0);
         },
       },
     );
@@ -1374,7 +1273,6 @@ export function bootMenu(
   // ── debug ────────────────────────────────────────────────────────────────
   const debug = bootMenuDebug({
     config: cfg,
-    bottle,
     wipe,
     items,
     transition,
@@ -1382,8 +1280,6 @@ export function bootMenu(
     composer,
     viewport,
     overlay: wipe.scene,
-    onRebuild: () => bottle.rebuild(),
-    onLean: () => bottle.applyLean(),
     onLayout: () => placeCamera(),
     onPlay: () => run('settings'),
     // ── 내 마크 ──
@@ -1465,60 +1361,35 @@ export function bootMenu(
   // ── loop ─────────────────────────────────────────────────────────────────
   let raf = 0;
   let last = 0;
-  /** Scratch for projecting the bottle to screen space. Reused every frame. */
-  const bottleAt = new Vector3();
-
   function tick(dt) {
 
     const state = transition.update(dt);
 
     /**
-     * Where the pointer is, in -1..1 of the CANVAS, and how close it has come.
+     * 커서의 **속도**로 물을 젓는다. 위치가 아니다.
      *
-     * ── it is not a hit test, deliberately ────────────────────────────────
-     * §6.3 asks the glass to react to being approached, and a raycast against
-     * the bottle answers a different question: it is inside or it is outside,
-     * which is a switch, and a switch is what produces the on/off snap the
-     * direction bans. So the bottle is handed a direction and a proximity and
-     * decides for itself — everything downstream of `setPointer` is continuous.
+     * ── 여기 있던 것 ───────────────────────────────────────────────────────
+     * 병이 있을 때는 커서의 위치와 근접도를 병에 넘겨 유리가 반응하게 했다.
+     * §6.3 이 요구한 것이었고, 레이캐스트 대신 방향과 거리를 넘긴 이유는 히트
+     * 테스트가 켜짐/꺼짐의 스냅을 만들기 때문이었다. 병이 없어지면서 그 계산도
+     * 함께 나갔고, 커서에 반응하는 것은 이제 물 하나다.
      *
-     * `near` falls off over roughly a third of the canvas from the bottle's
-     * own screen position, which is close enough that walking the pointer
-     * across the menu column does not stir it.
+     * 가만히 올려 둔 커서가 물을 계속 젓고 있으면 그건 물이 아니라 소음이다.
+     * 지난 프레임에서 얼마나 움직였는지를 재서, 움직인 만큼만 넣는다.
      */
     if (pointer.inside) {
       const rect = canvas.getBoundingClientRect();
       const nx = ((pointer.x - rect.left) / Math.max(1, rect.width)) * 2 - 1;
       const ny = ((pointer.y - rect.top) / Math.max(1, rect.height)) * 2 - 1;
-      bottleAt.copy(bottle.root.position).project(camera);
-      const d = Math.hypot(nx - bottleAt.x, ny + bottleAt.y);
-      bottle.setPointer(nx, ny, Math.max(0, 1 - d / 0.9));
-      /**
-       * 물을 젓는 것은 커서의 **속도**다. 위치가 아니다.
-       *
-       * 가만히 올려 둔 커서가 물을 계속 젓고 있으면 그건 물이 아니라 소음이다.
-       * 지난 프레임에서 얼마나 움직였는지를 재서, 움직인 만큼만 넣는다.
-       */
       const moved = Math.hypot(nx - lastPointerN.x, ny - lastPointerN.y);
       water.stir(Math.min(0.5, moved * 2.6));
       lastPointerN.x = nx;
       lastPointerN.y = ny;
-    } else {
-      bottle.setPointer(0, 0, 0);
     }
 
-    // The bottle turns its mouth toward the camera for the whole run and
-    // unwinds once it is over — see `Bottle.applyLean`. Driven by the STAGE, so
-    // it is fully aimed before the cap goes.
-    bottle.update(dt, { aim: transition.running ? 1 : 0, camera });
     // 배경의 물. 렌더 클럭이고 게임 상태를 읽지도 쓰지도 않는다.
     // 젓는 세기를 돌려받아 제목에 그대로 넘긴다 — 둘이 같은 물이어야 한다.
     const stirred = water.update(dt, viewport.resolution);
-    // The burst is a billboard. The camera is fixed now that the shake is gone,
-    // so this could be done once — it is not, because a sprite that is visibly
-    // edge-on is the failure and one quaternion copy a frame is not worth the
-    // risk of the camera ever moving again.
-    bottle.burst.quaternion.copy(camera.quaternion);
 
     title.update(dt, stirred, current === 'menu' ? 1 : 0);
     items.update(dt, current === 'menu' ? 1 : 0);
@@ -1534,9 +1405,8 @@ export function bootMenu(
 
     /**
      * ── the camera had a shake of its own, and it has gone ────────────────
-     * Same frequency family as the bottle's at a fraction of the amplitude,
-     * position only — rotating it would have swung the whole frame and read as
-     * an earthquake rather than as a hand on a bottle. There is no hand.
+     * 위치만 흔드는 저진폭 셰이크였다. 회전을 섞으면 프레임 전체가 돌아 지진이
+     * 되고, 이 화면에는 흔들 손이 없다.
      *
      * The camera is still written every frame rather than once in
      * `placeCamera`, because `camWiden` moves on every resize and this is the
@@ -1580,13 +1450,12 @@ export function bootMenu(
   // The same console handle the match page exposes as `__cap`. The menu had
   // none, which meant every question about its camera or its frame had to be
   // answered by reading source instead of by asking the running page.
-  window.__menu = { viewport, composer, camera, scene, cfg, items, bottle, placeCamera };
+  window.__menu = { viewport, composer, camera, scene, cfg, items, title, placeCamera };
 
   function render() {
     const r = viewport.renderer;
 
-    // 1. The world — water, bottle, liquid, fizz — through the bloom chain.
-    //    This page is almost entirely the glossy surfaces that pass exists for.
+    // 1. The world — the water and the title in it — through the bloom chain.
     camera.layers.set(WORLD_LAYER);
     composer.render();
 
@@ -1596,7 +1465,7 @@ export function bootMenu(
     //    optional. A scene with a Colour background forces a colour clear
     //    inside `render()` REGARDLESS of `autoClear` — three sets `forceClear`
     //    when it paints one — so rendering the same scene a second time
-    //    repaints the backdrop over the bloomed world and the bottle disappears.
+    //    repaints the backdrop over the bloomed world and it disappears.
     //    That is exactly what it did. The match page never hits this because
     //    its overlays are separate scenes with no background of their own.
     camera.layers.set(UI_LAYER);
@@ -1653,7 +1522,7 @@ export function bootMenu(
   // verifying — the covered frame is three frames long and is not something you
   // can catch by looking.
   window.__menu = {
-    config: cfg, bottle, wipe, items, transition, camera, viewport, retro, tick,
+    config: cfg, wipe, items, transition, camera, viewport, retro, tick,
     run, scene,
     // The screens, for the same reason `tick` is here: a sub-screen sits behind
     // a covered frame and a fade, and neither is something you can step through
