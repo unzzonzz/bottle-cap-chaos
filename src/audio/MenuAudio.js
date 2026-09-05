@@ -246,32 +246,20 @@ export class MenuAudio {
     }
 
     /**
-     * The carbonation. Always on, and very quiet.
+     * ── 탄산 소리는 없다 ──────────────────────────────────────────────────
      *
-     * ── it used to rise with the shake, and there is no shake ──────────────
-     * The loop was driven by the wind-up envelope: it saturated after 0.38 s and
-     * held there while the press was held, and `rate` carried most of the build
-     * because the sound is a single band of noise with no oscillator under it —
-     * raising the rate lifts the noise playback and the band with it, so the
-     * fizz gets finer and more agitated, which is what more gas in less space
-     * sounds like.
+     * `menu_shake` 루프가 상시 깔려 있었다. 원래는 병을 흔드는 제스처가 만드는
+     * 소리였고, §6.1 이 그 제스처를 없애면서 "음료 자신의 것" 인 배경 소리로
+     * 바꿔 두었다 — 병이 화면에 있었기 때문에 성립하던 근거다.
      *
-     * §6.1 turns the fizz from something a gesture produces into the drink's
-     * own, so the loop becomes a bed: on whenever the menu is, at a fraction of
-     * the gain it used to peak at, at the low end of the rate range where it
-     * reads as a settled drink rather than an agitated one.
+     * 병이 없어졌다. 화면에 탄산이 없는데 탄산 소리가 나면 그건 분위기가 아니라
+     * 출처 없는 잡음이고, 조용한 화면에서 잡음은 유일하게 계속되는 것이라 더
+     * 크게 들린다.
      *
-     * ── `shakeGain` still names it, and cannot be renamed ──────────────────
-     * The key lives in `config.menu`, under `src/game/`, which the direction
-     * freezes at diff 0. It is the carbonation bed's gain now. The floor of
-     * 0.42 and the 0.3 factor below are what turn a peak level into a bed one.
+     * 루프를 끄되 지우지 않는 이유는 `stopLoops` 가 아니라 `on: false` 로 두면
+     * 페이드가 걸려 켜져 있던 상태에서 화면을 옮겨도 뚝 끊기지 않기 때문이다.
      */
-    this.audio.setLoop('menu_shake', {
-      on: true,
-      gain: 0.3 * Math.max(0, this.config.shakeGain ?? 0.42),
-      rate: 0.72,
-      fade: 0.4,
-    });
+    this.audio.setLoop('menu_shake', { on: false, fade: 0.4 });
   }
 
   dispose() {

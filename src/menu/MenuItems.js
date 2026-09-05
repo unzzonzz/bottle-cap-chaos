@@ -2,7 +2,7 @@ import { Group, Mesh, PlaneGeometry, Raycaster, Vector2 } from 'three';
 import { PALETTE } from '../core/palette.js';
 import { createSpriteMaterial } from './menuMaterials.js';
 import { dateStampTexture, navLabelTexture, ruleTexture } from './menuTextures.js';
-import { FRAME, frameScale } from '../core/frame.js';
+import { FRAME, frameScale, texelScale } from '../core/frame.js';
 import { MOTION, ROLE, RULE } from '../core/tokens.js';
 
 import { approach } from '../ui/motion.js';
@@ -43,7 +43,14 @@ import { approach } from '../ui/motion.js';
  * 설정을 읽지 않는다. 2 인 이유는 레티나(DPR 2)에서 텍셀 하나가 화면 픽셀 하나가
  * 되는 지점이기 때문이고, 그 위는 메뉴 판 열두 장에 쓰기엔 낭비다.
  */
-const PLATE_TEXEL_SCALE = 2;
+/**
+ * 텍셀 배수. 상수가 아니라 **화면에서 되읽는다.**
+ *
+ * 2 로 박혀 있었다. 큰 창에서는 모자라고(텍셀이 늘어나 흐리다) 작은 창에서는
+ * 남는다. `texelScale()` 이 frameScale 과 디바이스 픽셀 비를 곱해 실제로
+ * 필요한 배수를 낸다 — 자세한 것은 `core/frame.js`.
+ */
+const plateScale = () => texelScale();
 
 /**
  * 열에 서는 것. **두 페이지다.**
@@ -65,14 +72,14 @@ const PLATE_TEXEL_SCALE = 2;
  */
 const PAGES = {
   home: [
-    { id: 'play', label: 'PLAY →', eyebrow: 'BOTTLE-CAP GAME', action: true },
+    { id: 'play', label: 'PLAY →', action: true },
     { id: 'collection', label: 'COLLECTION' },
     { id: 'settings', label: 'SETTINGS' },
   ],
   play: [
-    { id: 'knockout', label: '서바이벌', eyebrow: 'SUMMER TABLE', mode: true },
-    { id: 'football', label: '축구', eyebrow: 'SUMMER LAWN', mode: true },
-    { id: 'curling', label: '컬링', eyebrow: 'SUMMER SLIDE', mode: true },
+    { id: 'knockout', label: '서바이벌', mode: true },
+    { id: 'football', label: '축구', mode: true },
+    { id: 'curling', label: '컬링', mode: true },
     { id: 'home', label: '← 뒤로', role: ROLE.RETREAT },
   ],
 };
@@ -144,7 +151,7 @@ export class MenuItems {
       rule.renderOrder = 11;
       this.root.add(rule);
       return {
-        id: null, label: '', eyebrow: '', role: null, mesh, material, map: null,
+        id: null, label: '', role: null, mesh, material, map: null,
         action: false, mode: false,
         rule, ruleMat, hovered: false, grow: { x: 0, v: 0 },
       };
@@ -214,7 +221,6 @@ export class MenuItems {
       const def = defs[i] ?? null;
       item.id = def?.id ?? null;
       item.label = def?.label ?? '';
-      item.eyebrow = def?.eyebrow ?? '';
       item.role = def?.role ?? null;
       item.action = def?.action ?? false;
       item.mode = def?.mode ?? false;
@@ -260,10 +266,8 @@ export class MenuItems {
         color: PALETTE.water.ink,
         // 큰 한글에는 촘촘한 명조, 영문 설명에는 성긴 산세리프를 쓴다.
         tracking: MODE_SIZE * -0.025,
-        eyebrow: item.eyebrow,
-        eyebrowTracking: 1.35,
         display: true,
-        scale: PLATE_TEXEL_SCALE,
+        scale: plateScale(),
       });
     }
 
@@ -273,9 +277,7 @@ export class MenuItems {
       // 색은 하나다. 위계는 크기가 만든다 — `PALETTE.water.ink` 의 주석 참조.
       color: PALETTE.water.ink,
       tracking: size * (item.action ? 0.11 : NAV_TRACKING),
-      eyebrow: item.eyebrow,
-      eyebrowTracking: 1.35,
-      scale: PLATE_TEXEL_SCALE,
+      scale: plateScale(),
     });
   }
 
@@ -304,7 +306,7 @@ export class MenuItems {
 
   _rebakeIfResized() {
     const key = this.items
-      .map((i) => `${i.label}/${i.eyebrow}/${i.action ? 'a' : ''}/${i.mode ? 'm' : ''}`)
+      .map((i) => `${i.label}/${i.action ? 'a' : ''}/${i.mode ? 'm' : ''}`)
       .join('|');
     if (key === this._plateKey) return;
     this._plateKey = key;

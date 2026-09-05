@@ -7,6 +7,7 @@ import { DISPLAY_FAMILY, FONT_FAMILY } from '../ui/fonts.js';
 import { applyTracking, fitText, fontSpec, roleSkin, roundRectPath } from '../ui/paper.js';
 import { ring } from '../ui/marks.js';
 import { accentOf, drawArtMotif } from '../render/cardTexture.js';
+import { texelScale } from '../core/frame.js';
 
 /**
  * Every pixel the menu needs, drawn at runtime. No image files, same as
@@ -497,7 +498,6 @@ export function menuPlateTexture(label, state, { width = 256, height = 52, scale
    * 그쪽인지는 거기 머리말에 실측과 함께 있다.
    */
   const size = Math.max(11, Math.round(height * 0.30));
-  const dim = skinState === 'disabled' || spec.state === 'dimmed';
   applyTracking(ctx, size * 0.06);
   drawText(ctx, {
     text: label,
@@ -506,14 +506,17 @@ export function menuPlateTexture(label, state, { width = 256, height = 52, scale
     y: height / 2 + size * 0.36,
     font: `400 ${size}px ${FONT_FAMILY}`,
     /**
-     * 흐린 줄은 0.62 다. 0.42 였다.
+     * 흐린 줄이 없다. **모든 글자가 같은 순백**이다.
      *
-     * 판 위에 있을 때는 0.42 가 "이건 지금 못 누른다" 를 말하기에 충분했다.
-     * 물이 깊어진 지금은 배경이 어두워서 같은 알파가 훨씬 더 사라져 보인다 —
-     * 상대 선택 화면의 AI 와 온라인 줄이 읽히지 않는다는 것이 그 증상이었다.
-     * 흐리다는 것은 안 보인다는 뜻이 아니라 지금은 고를 수 없다는 뜻이다.
+     * 0.42 였다가 0.62 로 올렸다가, 결국 없앴다. 흐리게 하는 것이 말하려던 것은
+     * "지금은 고를 수 없다" 인데, 물 위에서 알파를 내리면 그냥 안 보인다 —
+     * 배경이 균일한 종이가 아니라 밝기가 변하는 물이라, 같은 알파가 자리마다
+     * 다른 밝기로 읽힌다. 상태를 알파로 말하는 것은 종이 위에서만 되는 방법이다.
+     *
+     * 못 고르는 줄은 눌러도 아무 일이 없는 것으로, 그리고 `준비 중` 도장으로
+     * 말한다. 색으로는 말하지 않는다.
      */
-    color: dim ? withAlpha(PALETTE.water.ink, 0.62) : PALETTE.water.ink,
+    color: PALETTE.water.ink,
     align: 'left',
   });
   /**
@@ -849,7 +852,7 @@ export function submergedTitleTexture({ scale = 1 } = {}) {
   ctx.fillText('알까기', PAD_L + INDENT, base1 + LINE);
 
   const tex = toTexture(canvas);
-  tex.userData = { width, height, contentH, rotation: -7 };
+  tex.userData = { width, height, contentH, rotation: 0 };
   return tex;
 }
 
@@ -1007,14 +1010,18 @@ export function titleTexture(text, sub, { width = 256, height = 80, scale = 1, w
 export function collectionCardTexture(card, width, { locked = false } = {}) {
   const w = Math.max(48, Math.round(width));
   const h = Math.round(w * (SIZE.card.h / SIZE.card.w));
-  const key = `collect:${card.id}:${w}:${locked}`;
+  /**
+   * 텍셀은 화면이 정한다. `w` 는 저술 픽셀이라 그대로 구우면 레티나에서 흐리다.
+   */
+  const scale = texelScale();
+  const key = `collect:${card.id}:${w}:${locked}:${scale}`;
   const hit = cardCache.get(key);
   if (hit) return hit;
 
-  const { canvas, ctx } = makeCanvas(w, h);
+  const { canvas, ctx } = makeCanvas(Math.round(w * scale), Math.round(h * scale));
   const fw = SIZE.card.w;
   const fh = SIZE.card.h;
-  ctx.scale(w / fw, h / fh);
+  ctx.scale((w * scale) / fw, (h * scale) / fh);
 
   const accent = accentOf(card);
   const ink = PALETTE.water.ink;

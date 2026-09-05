@@ -60,7 +60,7 @@ export function bootMenuDebug(ctx) {
     return { frame() {}, gui: null };
   }
 
-  const { config, wipe, transition, retro, composer, viewport, overlay } = ctx;
+  const { config, fade, transition, retro, composer, viewport, overlay } = ctx;
   /** Frame counter for the audio readouts' slow poll. See the return below. */
   let audioTick = 0;
   const gui = new GUI({ title: 'MENU / 전환' });
@@ -180,7 +180,7 @@ export function bootMenuDebug(ctx) {
   function frame(state) {
     // Only while the cap is on screen: at rest the overlay is empty and a
     // checkerboard behind nothing is a checkerboard over the whole menu.
-    checker.visible = flags.checker && wipe.root.visible;
+    checker.visible = flags.checker && fade.cover > 0.5;
 
     if (state.stage !== lastStage) {
       lastStage = state.stage;
@@ -188,10 +188,9 @@ export function bootMenuDebug(ctx) {
       stageRow.updateDisplay();
     }
 
-    const m = wipe.root.visible ? wipe.margin() : 0;
-    stats.cover = wipe.root.visible
-      ? `여백 ${m.toFixed(1)}px${m < 0 ? '  ⚠ 틈' : '  덮음'}`
-      : '뚜껑 없음';
+    // 페이드는 프레임을 다 덮거나 안 덮거나 둘 중 하나다. 뚜껑 시절의 "여백이
+    // 몇 픽셀 남았나" 는 원반이 사각 프레임을 덮는지 재는 값이었고 함께 나갔다.
+    stats.cover = `${(fade.cover * 100).toFixed(0)}%`;
     coverRow.updateDisplay();
   }
 

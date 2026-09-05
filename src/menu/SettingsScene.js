@@ -2,7 +2,7 @@ import { Group, Mesh, PlaneGeometry, Raycaster, Vector2 } from 'three';
 import { createSpriteMaterial } from './menuMaterials.js';
 import { menuPlateTexture, panelTexture, titleTexture } from './menuTextures.js';
 import { toMarkTexture } from '../marks/markTextures.js';
-import { PALETTE } from '../core/palette.js';
+import { PALETTE, withAlpha } from '../core/palette.js';
 import { RADIUS, ROLE, RULE } from '../core/tokens.js';
 import { anchorTopLeft, solvePanel } from './panelLayout.js';
 import { TIER_COUNT, TIER_NAMES } from '../core/quality.js';
@@ -392,11 +392,33 @@ export class SettingsScene {
     // 판 텍스처 키가 이 값을 쓴다. 볼륨 줄이 없는 화면에서도 정의되어야 한다.
     this._chip = this._chipSize.get('volume') ?? L.chip;
 
+    /**
+     * 푸터도 **본문과 같은 왼쪽 선**에 선다.
+     *
+     * 푸터 버튼은 자기 폭(`box.footer.button.w`)을 갖고 좌우 끝에 나뉘어 앉았다 —
+     * 알약 두 개가 판의 아래 모서리를 잡던 배치다. 판이 없어진 지금 그 폭은
+     * 본문 줄과 달라서, 글자가 쿼드의 왼쪽 끝에서 시작하므로 시작점이 몇 픽셀
+     * 어긋난다. 목록이 기울어 보이는 원인이 이것이었다.
+     *
+     * 폭을 본문과 같게 주면 모든 줄의 왼쪽 끝이 정확히 한 선이 된다.
+     */
+    /**
+     * 푸터는 **열의 왼쪽 선**에서 시작한다. 폭은 자기 것을 쓴다.
+     *
+     * 쿼드를 열 폭으로 넓혔더니 텍스처가 가로로 늘어나 글자가 커졌다 — 캔버스는
+     * 자기 폭으로 구워지고 쿼드가 그것을 늘리기 때문이다. 폭은 그대로 두고
+     * **왼쪽 끝**만 열에 맞춘다. 글자가 쿼드의 왼쪽에서 시작하므로 그러면
+     * 본문 줄들과 같은 세로선에 선다.
+     *
+     * 오른쪽 항목(COMMIT)은 열의 오른쪽 끝에 붙는다. 나가는 문과 실행하는 것이
+     * 같은 자리에 있으면 안 된다.
+     */
     const fb = box.footer.button;
+    const left = -box.plate.width / 2;
     for (const item of this.footer) {
       item.size = { width: fb.w, height: fb.h, scale: box.scale };
       item.mesh.scale.set(fb.w * u, fb.h * u, 1);
-      const x = item.side < 0 ? box.footer.left : box.footer.right;
+      const x = item.side < 0 ? left + fb.w / 2 : left + box.plate.width - fb.w / 2;
       item.mesh.position.set(x * u, box.footer.y * u, 0);
     }
 
@@ -796,8 +818,16 @@ function chipTexture(filled, state, size = L.chip, kind = 'step') {
    * 히트 영역은 둘 다 그대로 칸 하나씩이다. 바뀐 것은 그림뿐이다.
    */
   if (kind === 'meter') {
-    hairline(ctx, 0, h / 2, w, h / 2, filled ? PALETTE.menu.meterOn : PALETTE.menu.meterOff, RULE.thin);
-    if (filled) dot(ctx, w / 2, h / 2, Math.min(w, h) * 0.42, PALETTE.menu.meterOn);
+    /**
+     * 눈금은 **선 하나**다. 점을 얹지 않는다.
+     *
+     * 채워진 칸마다 가운데에 원을 찍고 있었다. 선이 이미 채워짐과 비어 있음을
+     * 말하는데 원이 같은 말을 한 번 더 하고, 작은 원이 줄지어 있으면 눈금이
+     * 아니라 구슬로 보인다. 채워진 칸은 잉크가 밝고 빈 칸은 흐리다 — 그것으로
+     * 충분하고, 그 대비가 이 화면의 다른 모든 상태 표시와 같은 방식이다.
+     */
+    hairline(ctx, 0, h / 2, w, h / 2,
+      filled ? PALETTE.water.ink : withAlpha(PALETTE.water.ink, 0.3), RULE.thin);
   } else {
     const inset = RULE.thin;
     roundRectPath(ctx, inset, inset, w - inset * 2, h - inset * 2, RADIUS.chip);

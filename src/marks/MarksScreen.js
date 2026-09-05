@@ -5,7 +5,7 @@ import { menuPlateTexture, titleTexture } from '../menu/menuTextures.js';
 import { badgeTexture, iconTexture, tileTexture } from './markIcons.js';
 import { markThumbnail, toMarkTexture } from './markTextures.js';
 import { DEFAULT_MARK, SLOT_COUNT } from './MarkBook.js';
-import { FRAME } from '../core/frame.js';
+import { FRAME, texelScale } from '../core/frame.js';
 import { SPACE } from '../core/tokens.js';
 import { PLATE_TEXEL_SCALE, solveColumn } from '../menu/columnLayout.js';
 
@@ -129,7 +129,14 @@ export class MarksScreen {
 
     // The thumbnail is redrawn in place rather than swapped, so nothing above
     // ever holds a disposed texture — the same contract `MarkTextures` keeps.
-    const thumbCanvas = markThumbnail(null, 64);
+    /**
+     * 썸네일 캔버스 256. 64 였다.
+     *
+     * 칸은 화면에서 100 저술픽셀 안팎이고 디바이스 픽셀로는 그 2.5 배쯤 된다.
+     * 64 짜리 그림을 거기 늘리면 그만큼 뭉개진다 — "저화질 감성" 의 정체가
+     * 이것이었다. 256 이면 어느 창에서도 축소만 일어난다.
+     */
+    const thumbCanvas = markThumbnail(null, 256);
     const thumb = new Mesh(
       new PlaneGeometry(1, 1),
       createSpriteMaterial(retro, { map: toMarkTexture(thumbCanvas) }),
@@ -247,8 +254,11 @@ export class MarksScreen {
       for (const t of this.tiles) {
         t.maps.idle?.dispose();
         t.maps.hover?.dispose();
-        t.maps.idle = tileTexture('idle', { size: Math.round(tile), accent: t.accent });
-        t.maps.hover = tileTexture('hover', { size: Math.round(tile), accent: t.accent });
+        // 칸의 테두리도 화면 배수로 굽는다. `tile` 은 저술 픽셀이라 그대로 쓰면
+        // 레티나에서 선 하나가 두 픽셀에 걸쳐 흐려진다.
+        const ts = Math.round(tile * texelScale());
+        t.maps.idle = tileTexture('idle', { size: ts, accent: t.accent });
+        t.maps.hover = tileTexture('hover', { size: ts, accent: t.accent });
         t.plus.material.uniforms.uMap.value = iconTexture('plus', 'idle', {
           size: Math.round(tile * 0.36),
         });

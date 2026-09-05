@@ -303,3 +303,38 @@ export function refitFrameCamera(cam) {
 export function halfDiagonal() {
   return Math.hypot(FRAME.width, FRAME.height) / 2;
 }
+
+/**
+ * 캔버스 텍스처를 몇 배로 구울 것인가. **화면이 정한다.**
+ *
+ * ── 왜 상수 2 로는 안 되는가 ────────────────────────────────────────────────
+ * 이 프로젝트의 글자는 전부 캔버스에 구워져 쿼드에 붙는다. 텍셀 하나가 디바이스
+ * 픽셀 하나보다 크게 늘어나면 그만큼 흐려진다 — 확대된 비트맵이기 때문이다.
+ *
+ * 얼마나 늘어나는지는 세 값의 곱이다:
+ *
+ *   frameScale()                   저술값이 이 프레임에서 몇 배로 줄었나
+ *   innerHeight * pixelRatio       화면이 실제로 몇 픽셀인가
+ *   / FRAME.height                 그 픽셀이 저술 좌표로 몇인가
+ *
+ * 실측: 1024x600 창(dpr 2)에서 프레임이 433x316 이면 저술 1px 이 디바이스
+ * 2.5px 이고 frameScale 이 0.658 이라, 제목을 scale 1 로 구우면 텍셀 하나가
+ * 디바이스 픽셀 1.646 개로 늘어난다. 그만큼 흐리다.
+ *
+ * 그래서 배수를 화면에서 되읽는다. 결과가 1 이면 텍셀과 픽셀이 1:1 이다.
+ *
+ * ── 0.5 단위로 끊는 이유 ────────────────────────────────────────────────────
+ * 창을 끄는 동안 이 값이 연속으로 변하면 프레임마다 모든 글자를 다시 굽는다.
+ * 끊어 두면 몇 단계에서만 다시 굽고, 그 사이의 오차는 최대 0.5 텍셀이라 눈에
+ * 보이지 않는다. 위로 올림하는 것은 모자란 쪽이 흐림이고 남는 쪽은 메모리뿐이기
+ * 때문이다.
+ *
+ * 상한 4 는 메모리다. 제목은 853x243 저술이므로 4 배면 3412x972, 13MB 다.
+ */
+export function texelScale() {
+  if (typeof window === 'undefined') return 2;
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  const devicePerAuthored = ((window.innerHeight || FRAME.height) * ratio) / FRAME.height;
+  const want = frameScale() * devicePerAuthored;
+  return Math.max(1, Math.min(4, Math.ceil(want * 2) / 2));
+}

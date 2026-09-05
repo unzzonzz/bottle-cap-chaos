@@ -1,4 +1,4 @@
-import { FRAME, frameScale } from '../core/frame.js';
+import { FRAME, frameScale, texelScale } from '../core/frame.js';
 import { PANEL, SIZE, SPACE, TYPE } from '../core/tokens.js';
 
 /**
@@ -31,6 +31,11 @@ import { PANEL, SIZE, SPACE, TYPE } from '../core/tokens.js';
  */
 
 /** 패널 텍스처의 텍셀 배수. 레티나에서 텍셀 하나가 화면 픽셀 하나. */
+/**
+ * 텍셀 배수. 화면에서 되읽는다 — `core/frame.texelScale` 머리말 참조.
+ *
+ * 상수 2 였다. 큰 창에서 모자라 글자가 흐려졌다.
+ */
 export const PANEL_TEXEL_SCALE = 2;
 
 /**
@@ -159,7 +164,13 @@ export function solvePanel({ title = false, caption = false, rows = [], footer =
      * 않는 캔버스에도 같은 이유로 적용된다 — 그보다 큰 것은 화면에 보이지 않는
      * 해상도를 메모리에 들고 있는 것이다.
      */
-    scale: Math.min(PANEL_TEXEL_SCALE, 1024 / Math.max(w, texH)),
+    /**
+     * 배수는 화면이 정하고, 텍스처 한 변이 1024 를 넘지 않는 선에서 깎인다.
+     *
+     * `PANEL_TEXEL_SCALE` 은 이제 하한이 아니라 이름만 남은 상수다 — 실제
+     * 배수는 `texelScale()` 이 frameScale 과 디바이스 픽셀 비로 낸다.
+     */
+    scale: Math.max(1, Math.min(texelScale(), 1024 / Math.max(w, texH))),
     plate: { width: plateWidth, height: plateHeight },
     gap,
     rows: out,

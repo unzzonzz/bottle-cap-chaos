@@ -279,7 +279,10 @@ export class OpponentScene {
     for (const item of this.footer) {
       item.size = { width: fb.w, height: fb.h, scale: box.scale };
       item.mesh.scale.set(fb.w * u, fb.h * u, 1);
-      const x = item.side < 0 ? box.footer.left : box.footer.right;
+      // 나가는 문은 열의 왼쪽 끝, 실행하는 것은 오른쪽 끝. 폭은 자기 것을 쓴다 —
+      // 쿼드를 열 폭으로 넓히면 캔버스가 늘어나 글자가 커진다.
+      const left = -box.plate.width / 2;
+      const x = item.side < 0 ? left + fb.w / 2 : left + box.plate.width - fb.w / 2;
       item.mesh.position.set(x * u, box.footer.y * u, 0);
     }
 

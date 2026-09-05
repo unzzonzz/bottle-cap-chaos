@@ -12,7 +12,7 @@ import { FRAME, MIN_FRAME_ASPECT, frameScale } from '../core/frame.js';
 import { PALETTE, withAlpha } from '../core/palette.js';
 import { registerTextureCache, whenFontsReady } from '../ui/fonts.js';
 import { clearLegacyStorage } from '../core/legacyStorage.js';
-import { CapWipe } from '../core/CapWipe.js';
+import { createFade } from './fade.js';
 import { MenuItems } from './MenuItems.js';
 import { SettingsScene } from './SettingsScene.js';
 import { OpponentScene } from './OpponentScene.js';
@@ -435,11 +435,7 @@ export function bootMenu(
    * and ending, which is a different job (`core/Cinematic.js`), and the menu no
    * longer instantiates one.
    */
-  const wipe = new CapWipe({
-    retro,
-    tuning: cfg.wipe,
-    panelMap: capLogoTexture(),
-  });
+  const fade = createFade();
 
   const transition = new Transition({ tuning: cfg.transition });
 
@@ -871,7 +867,7 @@ export function bootMenu(
          * 덮는 것은 어차피 바(bar)이고 메울 구멍이 애초에 없다.
          */
         onPop: () => {
-          wipe.begin({ x: 0, y: 0 }, { x: 0, y: 1 });
+          /* 페이드는 스테이지가 몰고 간다. 여기서 시작할 것이 없다. */
         },
         onSwap,
         onDone: () => {
@@ -887,8 +883,7 @@ export function bootMenu(
            * contract, and the only thing that crosses the boundary is which
            * frame the cap is on.
            */
-          if (!uncover) return;
-          wipe.end();
+          /* 페이드도 스테이지가 몰고 간다 — `uncoverRun` 을 읽는 것은 tick 이다. */
         },
       },
     );
@@ -1298,13 +1293,13 @@ export function bootMenu(
   // ── debug ────────────────────────────────────────────────────────────────
   const debug = bootMenuDebug({
     config: cfg,
-    wipe,
+    fade,
     items,
     transition,
     retro,
     composer,
     viewport,
-    overlay: wipe.scene,
+    overlay: fade.scene,
     onLayout: () => placeCamera(),
     onPlay: () => run('settings'),
     // ── 내 마크 ──
@@ -1467,19 +1462,26 @@ export function bootMenu(
      * from the swap. `Cinematic` owned its own tween because four different
      * sequences drove it; this one has exactly one driver.
      */
+    /**
+     * 덮개. 뚜껑이 아니라 **페이드**다.
+     *
+     * `state.t` 는 각 스테이지 안에서 0..1 이다. POP 에서 짙어지고, COVER 에서
+     * 꽉 차 있고(그 안에서 씬이 바뀐다), EXIT 에서 옅어진다. 다른 문서로
+     * 넘어가는 경우에는 옅어지지 않는다 — 여기서 걷으면 다음 문서가 그릴 때까지
+     * 이 화면이 다시 보인다. 그 계약은 `uncoverRun` 이 쥐고 있다.
+     */
     switch (state.stage) {
       case STAGE.POP:
-        wipe.launch(state.t, dt);
+        fade.setCover(state.t);
         break;
       case STAGE.COVER:
-        wipe.cover(dt);
+        fade.setCover(1);
         break;
       case STAGE.EXIT:
-        // Held at the cover on a navigation. See `uncoverRun`.
-        if (uncoverRun) wipe.exit(state.t, dt);
-        else wipe.cover(dt);
+        fade.setCover(uncoverRun ? 1 - state.t : 1);
         break;
       default:
+        fade.setCover(0);
         break;
     }
 
@@ -1520,14 +1522,14 @@ export function bootMenu(
     r.render(scene, camera);
     scene.background = sky;
 
-    // 3. The modal and the cap wipe, which own their own scenes. Both are
+    // 3. 모달과 페이드. 둘 다 자기 씬을 갖고 블룸 밖이다.
     //    outside the bloom: the modal is nothing but type, and the cap carries
     //    the game's name at six times its texel size, which a bright pass would
     //    smear.
     modal.render(r);
     // Last of all, over the modal included: at the covered frame it is the only
     // thing on screen.
-    wipe.render(r);
+    fade.render(r);
     r.autoClear = true;
 
     // Back to the world layer, so anything that reads the camera between frames
@@ -1566,7 +1568,7 @@ export function bootMenu(
   // verifying — the covered frame is three frames long and is not something you
   // can catch by looking.
   window.__menu = {
-    config: cfg, wipe, items, transition, camera, viewport, retro, tick,
+    config: cfg, fade, items, transition, camera, viewport, retro, tick,
     composer, title, lights,
     run, scene,
     // The screens, for the same reason `tick` is here: a sub-screen sits behind

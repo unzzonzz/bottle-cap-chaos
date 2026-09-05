@@ -187,7 +187,8 @@ export class CollectionScene {
       );
     }
     this.back.scale.set(fb.w * u, fb.h * u, 1);
-    this.back.position.set(box.footer.left * u, box.footer.y * u, 0);
+    // 열의 왼쪽 끝. 폭은 자기 것 — 쿼드를 넓히면 텍스처가 늘어나 글자가 커진다.
+    this.back.position.set((-box.plate.width / 2 + fb.w / 2) * u, box.footer.y * u, 0);
   
     anchorTopLeft(this.root, box, u);
   }

@@ -138,14 +138,19 @@ const CONE_FILL_REF_HALF = 0.09;
 const CONE_EDGE_ALPHA = 0.35;
 
 /**
- * 콘의 길이. 미리보기가 꺼져 있을 때 쓰는 추정치이고, 단위는 뚜껑 반지름이다.
+ * 콘과 화살표의 **고정 길이**, 뚜껑 반지름의 배수.
  *
- * `CONE_MIN_RADII` 는 바닥이자 원래 있던 상수다 — 당김이 0 이어도 콘이 그려져야
- * 한다. `CONE_REACH_RADII` 는 실측 롤아웃에 맞춘 계수이고, **제곱**으로 곱해지는
- * 이유는 `update` 의 표에 있다.
+ * ── 예전에는 당김에 따라 자랐다 ─────────────────────────────────────────────
+ * `radius * (2.5 + 20 * power^2)` 였고, 미리보기가 켜져 있으면 실측 롤아웃
+ * 거리를 대신 썼다. 물리적으로는 정직했지만 조준하는 내내 부채꼴과 화살표가
+ * 함께 길어졌다 줄어들었고, 그 변화가 각도의 변화보다 커서 눈에 먼저 들어오는
+ * 것이 길이였다. 조준은 방향을 고르는 일이다.
+ *
+ * 12 는 그 공식이 당김 0.55 근처에서 내던 값이다 — 흔히 쏘는 세기에서 보던
+ * 길이 그대로다. 더 짧으면 화살표가 뚜껑에 묻히고, 더 길면 판을 가로질러
+ * 반대편 뚜껑들을 덮는다.
  */
-const CONE_MIN_RADII = 2.5;
-const CONE_REACH_RADII = 20;
+const CONE_FIXED_RADII = 12;
 
 /**
  * ── 이 면은 품질 티어를 읽지 않는다. 그것이 결정이다 ────────────────────────
@@ -605,10 +610,22 @@ export class AimOverlay {
      * reads as the angle rather than as the distance. Turn the preview on and
      * the real number replaces all of this.
      */
-    const reach = Math.max(
-      s.geom.radius * CONE_MIN_RADII,
-      s.reach || s.geom.radius * (CONE_MIN_RADII + CONE_REACH_RADII * s.power * s.power),
-    );
+    /**
+     * ── 길이는 **고정**이다. 당김에 따라 자라지 않는다 ──────────────────────
+     *
+     * 여기가 `s.reach || radius * (MIN + REACH * power^2)` 였다. 미리보기가 켜져
+     * 있으면 실제 롤아웃 거리를, 꺼져 있으면 당김의 제곱에 비례한 추정을 썼다.
+     * 물리적으로는 정직한 값이다 — 세게 당기면 멀리 간다.
+     *
+     * 그런데 화면에서는 조준하는 내내 부채꼴과 화살표가 함께 길어졌다 줄어들고,
+     * 그 변화가 각도의 변화보다 크다. 조준은 **방향을 고르는 일**인데 눈에 먼저
+     * 들어오는 것이 길이였다. 길이를 묶으면 남는 변화는 방향과 각도뿐이고,
+     * 그 둘이 조준이 실제로 정하는 것이다.
+     *
+     * 거리는 다른 것이 말한다 — 미리보기 선이 켜져 있으면 그 선의 끝이, 컬링에서는
+     * 거리 마크가. 콘은 "어느 쪽으로, 얼마나 정확히" 만 말한다.
+     */
+    const reach = s.geom.radius * CONE_FIXED_RADII;
     // The trajectory card takes the cone away, and that is not a decoration.
     // The cone says "it will go somewhere in here"; the card's whole claim is
     // that it will go exactly THERE, and the line already draws the exact shot.

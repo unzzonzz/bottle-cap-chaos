@@ -1,5 +1,5 @@
 import { Color, Mesh, PlaneGeometry, ShaderMaterial } from 'three';
-import { FRAME, frameScale } from '../core/frame.js';
+import { FRAME, frameScale, texelScale } from '../core/frame.js';
 import { PALETTE } from '../core/palette.js';
 import { submergedTitleTexture } from './menuTextures.js';
 import { WATER_NOISE_GLSL } from './water.js';
@@ -164,8 +164,21 @@ export class SubmergedTitle {
     const u = unitsPerPixel ?? this._u;
     this._u = u;
 
-    if (!this.material.uniforms.uMap.value) {
-      this.material.uniforms.uMap.value = submergedTitleTexture({ scale: 1 });
+    /**
+     * 배수는 **화면이 정한다.** 상수 1 이었다.
+     *
+     * 텍셀 하나가 디바이스 픽셀 하나보다 크게 늘어나면 그만큼 흐리다. 실측으로
+     * scale 1 일 때 1.646 배로 늘어나 있었다 — 화면에서 제일 큰 활자가 제일
+     * 흐렸다. `texelScale()` 이 그 배율을 되읽는다.
+     *
+     * 값이 바뀌면 다시 굽는다. 창을 끌면 프레임이 변하고 배수도 변하므로,
+     * 한 번 구워 두면 다른 크기에서 다시 흐려진다.
+     */
+    const scale = texelScale();
+    if (!this.material.uniforms.uMap.value || this._texelScale !== scale) {
+      this.material.uniforms.uMap.value?.dispose();
+      this.material.uniforms.uMap.value = submergedTitleTexture({ scale });
+      this._texelScale = scale;
     }
     const box = this.material.uniforms.uMap.value.userData;
 
