@@ -12,7 +12,7 @@ import {
 } from '../core/quality.js';
 import { DISPLAY_ASPECT, Viewport } from '../core/Viewport.js';
 import { SceneComposer } from '../core/Composer.js';
-import { BOARD_ASPECT, FRAME, frameScale } from '../core/frame.js';
+import { FRAME, MIN_FRAME_ASPECT, frameScale } from '../core/frame.js';
 import { aimedLaunchDirection, Bottle } from './Bottle.js';
 import { PALETTE, withAlpha } from '../core/palette.js';
 import { whenFontsReady } from '../ui/fonts.js';
@@ -258,9 +258,11 @@ export function bootMenu(
    * A `tall` branch stacked the bottle above the column instead of placing it
    * left of one, for a portrait phone where the side-by-side layout squeezed
    * both into a narrow half. `FRAME.tall` was the switch and it is gone with the
-   * band system — the frame is 4:3 in every window now, so the stacked pose
-   * could never be reached again and a pose nothing can reach is a pose that
-   * will be wrong the next time the tokens move.
+   * band system — 4:3 is the frame's NARROWEST shape now (정책 C widens it up to
+   * 16:9 and never past it in the other direction), so the stacked pose could
+   * never be reached again and a pose nothing can reach is a pose that will be
+   * wrong the next time the tokens move. Side by side gets BETTER as the frame
+   * widens, which is what the wide-window screenshots show.
    *
    * `u` is still taken: `scaleColumn` is about to make the plates smaller and
    * the caller has already computed the units-per-pixel that goes with them.
@@ -505,12 +507,17 @@ export function bootMenu(
      * of the width — became half of it. That was never a scale bug; it was a
      * field-of-view one.
      *
-     * The frame is 4:3 in every window now, so the only thing left for this to
-     * correct is the frame height's rounding to a whole pixel: at most 0.1%,
-     * which is a pull-back of a tenth of a percent. Kept rather than pinned to 1
-     * because it is the correct general statement and it costs one `max`.
+     * 4:3 is the frame's NARROWEST shape now, not its only one (정책 C). So the
+     * `max(1, …)` is what carries the change: at 4:3 this is 1 to within the
+     * width's rounding, and at anything wider the ratio drops below 1 and the
+     * clamp holds it at 1. That is right — a wider canvas already sees more
+     * horizontally, so there is nothing to pull back from.
+     *
+     * What it still corrects is a canvas NARROWER than 4:3, which happens in a
+     * tall window: there the frame stays 4:3 and the canvas letterboxes, and
+     * this is the tenth-of-a-percent that the width's rounding leaves.
      */
-    camWiden = Math.max(1, BOARD_ASPECT / camera.aspect);
+    camWiden = Math.max(1, MIN_FRAME_ASPECT / camera.aspect);
     camera.position.set(0, cfg.camera.height * camWiden, cfg.camera.distance * camWiden);
     camera.lookAt(0, cfg.camera.lookAtY * camWiden, 0);
     camera.updateProjectionMatrix();

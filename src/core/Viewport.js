@@ -24,15 +24,20 @@ import { onQualityChange, QUALITY } from './quality.js';
 ColorManagement.enabled = true;
 
 /**
- * The 3D camera's aspect. Still 4:3.
+ * The aspect a 3D camera is BUILT with, before the first fit. 4:3.
  *
- * ── it is the frame's aspect too, and that is new ───────────────────────────
- * The canvas could once be taller than 4:3, with the play area in a 4:3
- * sub-rectangle, which is why this constant and the frame's own aspect were two
- * different numbers. They are the same number now — see `core/frame.js` on why
- * the frame no longer grows. This stays as the DEFAULT a camera is built with;
- * `main.js` still pushes `FRAME.aspect` in on resize, which differs from 4/3 by
- * the height's rounding and is what the canvas is actually shaped to.
+ * ── it is no longer "the" aspect, and that is the point ─────────────────────
+ * It was the one shape everything had: the canvas, the frame and every camera.
+ * 정책 C makes the frame's aspect follow the window between 4:3 and 16:9
+ * (`MIN_FRAME_ASPECT` / `MAX_FRAME_ASPECT` in `core/frame.js`), so 4:3 is the
+ * NARROWEST shape rather than the only one.
+ *
+ * This constant survives as the value a camera is constructed with, because a
+ * camera exists for a frame or two before the first resize reaches it and a
+ * camera built with `NaN` aspect draws nothing. The real number arrives right
+ * after: `main.js` pushes `FRAME.aspect` into `GameCamera.setBoardCssWidth` on
+ * every resize, and `bootMenu` sets the menu camera's from the same place.
+ * Nothing should read this expecting to learn the current shape.
  */
 export const DISPLAY_ASPECT = 4 / 3;
 
@@ -257,10 +262,15 @@ export class Viewport {
      *
      * The match page used to resolve a frame that could be taller than 4:3 and
      * fit the canvas to THAT, while the menu and the cap viewer fitted to a
-     * fixed 4:3. The frame is 4:3 for everyone now, so both branches compute the
-     * same shape and the flag that chose between them is gone. `FRAME.aspect`
-     * rather than `BOARD_ASPECT` so the canvas matches the orthographic UI box
-     * exactly — see the note on `aspect` in `frame.js`.
+     * fixed 4:3. Both read `FRAME.aspect` now, so they compute the same shape
+     * and the flag that chose between them is gone.
+     *
+     * Reading the frame rather than a constant is what makes 정책 C work here
+     * without another line: the frame's aspect follows the window between 4:3
+     * and 16:9, so between those two shapes this produces a canvas that fills
+     * the window exactly and there are no bars at all. Outside them the clamp
+     * holds and the `if` below adds the bar — letterbox in a tall window,
+     * pillarbox in one wider than 16:9.
      */
     updateFrame(availW, availH);
     const aspect = FRAME.aspect;
