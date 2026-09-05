@@ -1,13 +1,14 @@
-import { Group, Mesh, PlaneGeometry, Raycaster, Vector2 } from 'three';
+import { Group, Mesh, Plane, PlaneGeometry, Raycaster, Vector2, Vector3 } from 'three';
 import { createSpriteMaterial } from './menuMaterials.js';
 import { menuPlateTexture, panelTexture, titleTexture } from './menuTextures.js';
 import { toMarkTexture } from '../marks/markTextures.js';
 import { PALETTE, withAlpha } from '../core/palette.js';
 import { RADIUS, ROLE, RULE } from '../core/tokens.js';
-import { anchorHead, anchorTopLeft, solvePanel } from './panelLayout.js';
+import { anchorFooter, anchorHead, anchorTopLeft, solvePanel } from './panelLayout.js';
 import { TIER_COUNT, TIER_NAMES } from '../core/quality.js';
 import { plate, roundRectPath } from '../ui/paper.js';
 import { dot, hairline } from '../ui/marks.js';
+import { FRAME, frameScale } from '../core/frame.js';
 
 /**
  * 설정 — a heading, the things it holds, and a way back.
@@ -70,6 +71,18 @@ import { dot, hairline } from '../ui/marks.js';
  * 316 이라 제목도 마지막 두 줄도 화면 밖이었다. 이유와 해법은 `panelLayout.js`
  * 머리말에 있다.
  */
+/**
+ * 목록이 보이는 띠의 위·아래 여백, 저술 픽셀.
+ *
+ * 위는 난외 표제(22 + 11)의 자리에 숨 쉴 틈을 더한 값이고, 아래는 나가는 문의
+ * 자리다 — 여백 28 에 줄 높이와 틈을 더해 74. 이보다 작으면 목록의 마지막 줄이
+ * 나가는 문과 겹쳐 둘 다 안 읽힌다.
+ */
+const SCROLL_TOP = 62;
+const SCROLL_BOTTOM = 74;
+/** 휠 한 픽셀이 목록을 몇 프레임픽셀 미는가. */
+const SCROLL_RATE = 0.5;
+
 const L = {
   chip: { width: 22, height: 22, gap: 5 },
   steps: 10,
@@ -200,6 +213,18 @@ export class SettingsScene {
     modal = null,
   }) {
     this.root = new Group();
+    /** 굴러가는 것들. 줄과 칩만 여기 들어간다. */
+    this.list = new Group();
+    /**
+     * 목록을 자르는 두 평면. 위와 아래.
+     *
+     * 굴러간 줄이 난외 표제나 나가는 문 위로 올라가면 두 글자가 겹쳐 둘 다
+     * 안 읽힌다. 스크롤이 있는 목록은 자기 띠 안에서만 보여야 한다.
+     *
+     * 월드 좌표라 `layout` 이 프레임에 맞춰 상수를 다시 넣는다.
+     */
+    this._clip = [new Plane(new Vector3(0, -1, 0), 0), new Plane(new Vector3(0, 1, 0), 0)];
+    this.root.add(this.list);
     this.audioSettings = audioSettings;
     this.graphicsSettings = graphicsSettings;
     this.viewSettings = viewSettings;
@@ -283,7 +308,14 @@ export class SettingsScene {
       new PlaneGeometry(1, 1),
       createSpriteMaterial(this._retro, { map: null }),
     );
-    this.root.add(mesh);
+    // 푸터는 굴러가지 않는다 — 나가는 문은 목록의 일부가 아니다.
+    if (def.side === undefined) {
+      mesh.material.clippingPlanes = this._clip;
+      this.list.add(mesh);
+    } else {
+      // 푸터는 굴러가지 않으므로 자를 이유도 없다.
+      this.root.add(mesh);
+    }
     return { ...def, mesh, maps, label: null };
   }
 
@@ -303,7 +335,8 @@ export class SettingsScene {
           new PlaneGeometry(1, 1),
           createSpriteMaterial(this._retro, { map: null }),
         );
-        this.root.add(mesh);
+        mesh.material.clippingPlanes = this._clip;
+        this.list.add(mesh);
         this.chips.push({ row: row.id, prefix: row.prefix, index: i, mesh });
       }
     }
@@ -324,6 +357,31 @@ export class SettingsScene {
    *
    * 리사이즈에도 다시 불린다 — 프레임이 바뀌면 판 크기와 간격이 둘 다 바뀐다.
    */
+  /**
+   * 스크롤을 민다. 휠 한 칸이 한 줄쯤이다.
+   *
+   * @param {number} dy  화면 픽셀. 아래로 굴리면 양수
+   */
+  scroll(dy) {
+    if (!this._scrollMax) return false;
+    const next = Math.max(0, Math.min(this._scrollMax, (this._scroll ?? 0) + dy * SCROLL_RATE));
+    if (next === this._scroll) return false;
+    this._scroll = next;
+    this._applyScroll();
+    return true;
+  }
+
+  /**
+   * 스크롤 값을 루트에 얹는다.
+   *
+   * 루트의 **기준 y** 를 따로 들고 있는 이유는 `anchorTopLeft` 가 매 배치마다
+   * 루트를 다시 놓기 때문이다. 스크롤을 루트에 직접 더하면 다음 리사이즈에서
+   * 그 값이 사라진다.
+   */
+  _applyScroll() {
+    this.list.position.y = (this._scroll ?? 0) * (this._u ?? 1);
+  }
+
   layout(unitsPerPixel) {
     const u = unitsPerPixel ?? this._u;
     this._u = u;
@@ -340,6 +398,42 @@ export class SettingsScene {
     const box = solvePanel({ title: true, rows: slots, footer: FOOTER.length });
     this._box = box;
     const at = (id) => box.rows.find((r) => r.id === id);
+
+    /**
+     * ── 간격이 **두 종류**다. 균일한 한 종류가 아니라 ──────────────────────
+     *
+     * `solvePanel` 은 모든 줄을 같은 간격으로 쌓는다. 세로로 쌓이는 컨트롤에는
+     * 그게 맞지만, 이 화면에는 **한 덩어리인 두 줄**이 있다: 마스터 볼륨과 그
+     * 눈금, 그래픽과 그 눈금. 같은 간격으로 두면 눈금이 자기 이름에서 떨어져
+     * 다음 줄과 같은 거리에 놓이고, 어느 값의 눈금인지 붙여 읽어야 안다.
+     *
+     * 그래서 푼 결과의 y 만 다시 잡는다. 줄의 **높이**는 솔버가 프레임에 맞춰
+     * 정한 값이라 그대로 쓰고, 사이의 거리만 두 종류로 나눈다:
+     *
+     *   덩어리 안 (이름 → 눈금)   7
+     *   그 밖의 모든 줄 사이      26
+     *
+     * 세로 총합이 지금과 4 픽셀 차이라(328 대 332) 프레임에 그대로 들어간다.
+     * 세 번째 간격(묶음 소제목)은 넣지 않았다 — 항목이 여덟 줄이라 아직 필요
+     * 없고, 화면에 없던 활자 등급을 하나 늘리게 된다.
+     */
+    const GAP_TIGHT = Math.round(7 * box.ky);
+    const GAP_LOOSE = Math.round(26 * box.ky);
+    /**
+     * 굴러가는 것은 **줄들뿐**이다. 난외 표제와 나가는 문은 제자리에 있는다.
+     *
+     * 처음에는 루트를 통째로 밀었는데, 그러면 나가는 문이 목록과 함께 올라가
+     * 닉네임 줄과 겹쳤다. 화면에서 나가는 길이 목록의 일부가 되면 안 된다 —
+     * 그것은 목록이 얼마나 길든 같은 자리에 있어야 하는 것이다.
+     */
+    // 첫 줄의 자리는 솔버가 정한 것을 그대로 쓰고, 그 아래만 다시 쌓는다.
+    box.rows.forEach((row, i) => {
+      if (i === 0) return;
+      const prev = box.rows[i - 1];
+      // 칩 줄은 바로 위 줄의 **값**이다. 그 둘만 붙인다.
+      const tight = String(row.id).startsWith('#chips:');
+      row.y = prev.y - prev.h / 2 - (tight ? GAP_TIGHT : GAP_LOOSE) - row.h / 2;
+    });
 
     this.panel.scale.set(box.panel.w * u, box.panel.texH * u, 1);
     // 난외 표제의 자리는 아래 `anchorHead` 가 정한다 — 프레임의 여백에 직접 붙는다.
@@ -421,12 +515,9 @@ export class SettingsScene {
      * 같은 자리에 있으면 안 된다.
      */
     const fb = box.footer.button;
-    const left = -box.plate.width / 2;
     for (const item of this.footer) {
       item.size = { width: fb.w, height: fb.h, scale: box.scale };
       item.mesh.scale.set(fb.w * u, fb.h * u, 1);
-      const x = item.side < 0 ? left + fb.w / 2 : left + box.plate.width - fb.w / 2;
-      item.mesh.position.set(x * u, box.footer.y * u, 0);
     }
 
     // 판 크기가 바뀌었으면 텍스처를 다시 굽는다. `refresh` 는 라벨이 같으면
@@ -452,6 +543,34 @@ export class SettingsScene {
 
     anchorTopLeft(this.root, box, u);
     anchorHead(this.panel, box, this.root, u);
+    // 나가는 문은 프레임 아래에 고정한다. 목록이 길어져도 자리가 안 변한다.
+    for (const item of this.footer) anchorFooter(item.mesh, { w: fb.w, h: fb.h }, this.root, u);
+
+    /**
+     * ── 목록이 프레임보다 길면 **스크롤한다** ──────────────────────────────
+     *
+     * 지금 여덟 줄은 들어가지만 간격을 벌린 만큼 여유가 없고, 좁은 프레임에서는
+     * 솔버가 줄 높이를 눌러 글자가 작아지는 방식으로 버텨 왔다 — 읽히지 않는
+     * 작은 글자보다 넘치는 목록을 미는 편이 낫다.
+     *
+     * 스크롤할 수 있는 거리는 내용의 높이에서 보이는 높이를 뺀 만큼이다. 0 이면
+     * 다 보이는 것이고 휠은 아무 일도 하지 않는다.
+     */
+    const first = box.rows[0];
+    const last = box.rows[box.rows.length - 1];
+    const contentH = first && last ? first.y + first.h / 2 - (last.y - last.h / 2) : 0;
+    const visibleH = FRAME.height - (SCROLL_TOP + SCROLL_BOTTOM) * frameScale();
+    this._scrollMax = Math.max(0, contentH - visibleH);
+    /**
+     * 평면의 상수. 월드 좌표라 프레임 배율과 `unitsPerPixel` 을 둘 다 태운다.
+     * 위 평면은 아래를 향하고(법선 -y) 아래 평면은 위를 향한다 — 둘 사이가 띠다.
+     */
+    const k = frameScale();
+    const topY = (FRAME.height / 2 - SCROLL_TOP * k) * u;
+    const bottomY = (-FRAME.height / 2 + SCROLL_BOTTOM * k) * u;
+    this._clip[0].constant = topY;
+    this._clip[1].constant = -bottomY;
+    this._applyScroll();
 
     this.refresh();
   }
@@ -463,9 +582,9 @@ export class SettingsScene {
     const s = this.audioSettings;
     switch (id) {
       case 'volume':
-        return `마스터 볼륨   ${Math.round((s?.volume ?? 0) * 100)}%`;
+        return `마스터 볼륨\t${Math.round((s?.volume ?? 0) * 100)}%`;
       case 'mute':
-        return `음소거   ${s?.muted ? '켬' : '끔'}`;
+        return `음소거\t${s?.muted ? '켬' : '끔'}`;
       /**
        * 이름이지 숫자가 아니다.
        *
@@ -475,7 +594,7 @@ export class SettingsScene {
        * 판이 또 그걸 말할 이유도 없다.
        */
       case 'graphics':
-        return `그래픽   ${TIER_NAMES[this.graphicsSettings?.tier ?? 0] ?? ''}`;
+        return `그래픽\t${TIER_NAMES[this.graphicsSettings?.tier ?? 0] ?? ''}`;
       /**
        * "카메라 추적" 이지 "발사 뚜껑 추적" 이 아니다.
        *
@@ -484,13 +603,13 @@ export class SettingsScene {
        * 줄을 끄러 오는 사람은 "카메라가 자꾸 움직인다" 를 고치러 온 것이다.
        */
       case 'track':
-        return `카메라 추적   ${this.viewSettings?.trackCamera ? '켬' : '끔'}`;
+        return `카메라 추적\t${this.viewSettings?.trackCamera ? '켬' : '끔'}`;
       case 'assist':
-        return `조준 보조   ${this.viewSettings?.aimAssist ? '켬' : '끔'}`;
+        return `조준 보조\t${this.viewSettings?.aimAssist ? '켬' : '끔'}`;
       case 'nickname':
         // '없음' rather than a blank: an empty right-hand column reads as a
         // broken row, and "you have not chosen one" is the thing worth saying.
-        return `닉네임   ${this.profile?.nickname || '없음'}`;
+        return `닉네임\t${this.profile?.nickname || '없음'}`;
       case 'server':
         /**
          * '자동' is a real answer, not an empty one.
@@ -500,7 +619,7 @@ export class SettingsScene {
          * typed. Showing a blank there would read as broken; showing the
          * derived URL would read as a setting somebody had chosen.
          */
-        return `서버   ${this.profile?.server || '자동'}`;
+        return `서버\t${this.profile?.server || '자동'}`;
       case 'marks':
         return '내 마크';
       case 'back':

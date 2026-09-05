@@ -245,3 +245,25 @@ export function anchorHead(panel, box, root, unitsPerPixel) {
   const wantY = (FRAME.height / 2 - 22 * k - box.panel.texH / 2) * u;
   panel.position.set(wantX - root.position.x, wantY - root.position.y, 0);
 }
+
+/**
+ * 나가는 문을 프레임의 **왼쪽 아래 여백**에 붙인다.
+ *
+ * `anchorHead` 의 짝이다. 푸터도 판이 있던 시절에는 판의 아래 모서리를 잡는
+ * 물건이었고, 판을 걷어낸 뒤에도 솔버가 준 `footer.y` 를 따라 목록 끝에 붙어
+ * 있었다 — 목록이 길어지면 마지막 줄과 겹친다.
+ *
+ * 여백은 왼쪽 30(목록과 같은 값), 아래 28(홈의 내비와 같은 값)이다.
+ *
+ * @param {import('three').Object3D} mesh
+ * @param {{w: number, h: number}} size  푸터 쿼드의 크기, 프레임 픽셀
+ * @param {import('three').Object3D} root
+ * @param {number} unitsPerPixel
+ */
+export function anchorFooter(mesh, size, root, unitsPerPixel) {
+  const k = frameScale();
+  const u = unitsPerPixel;
+  const wantX = (-FRAME.width / 2 + 30 * k + size.w / 2) * u;
+  const wantY = (-FRAME.height / 2 + 28 * k + size.h / 2) * u;
+  mesh.position.set(wantX - root.position.x, wantY - root.position.y, 0);
+}

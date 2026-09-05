@@ -497,10 +497,34 @@ export function menuPlateTexture(label, state, { width = 256, height = 52, scale
    * 대비는 물을 어둡게 해서 얻는다. `depth.js` 가 그 장치이고, 왜 카드가 아니라
    * 그쪽인지는 거기 머리말에 실측과 함께 있다.
    */
+  /**
+   * ── 이름은 왼쪽, 값은 **오른쪽 끝** ────────────────────────────────────
+   *
+   * 라벨이 `이름\t값` 으로 들어온다. 예전에는 공백 셋으로 붙여 한 문자열이었고,
+   * 그러면 값의 시작점이 이름 길이를 따라 줄마다 달라진다 — 값만 세로로 훑는
+   * 것이 불가능하다. 설정 화면에서 사람이 하는 일이 바로 그것인데.
+   *
+   * 탭으로 나누는 이유는 호출부가 여덟 군데이고 대부분이 한 줄짜리 삼항식이라,
+   * 객체를 돌려주게 바꾸면 그 여덟이 다 길어지기 때문이다. 구분자 하나면 된다.
+   */
+  const tab = label.indexOf('\t');
+  const name = tab >= 0 ? label.slice(0, tab) : label;
+  const value = tab >= 0 ? label.slice(tab + 1) : '';
+
   const size = Math.max(11, Math.round(height * 0.30));
   applyTracking(ctx, size * 0.06);
+  if (value) {
+    drawText(ctx, {
+      text: value,
+      x: width,
+      y: height / 2 + size * 0.36,
+      font: `400 ${size}px ${FONT_FAMILY}`,
+      color: PALETTE.water.ink,
+      align: 'right',
+    });
+  }
   drawText(ctx, {
-    text: label,
+    text: name,
     x: 0,
     // 캡 높이의 절반을 베이스라인 보정으로 쓴다. 행 상자 한가운데에 앉는다.
     y: height / 2 + size * 0.36,
@@ -1045,6 +1069,17 @@ export function titleTexture(text, sub, { width = 256, height = 80, scale = 1, w
   void withPlate;
 
   /**
+   * 이름과 값을 나눈다. `menuPlateTexture` 와 같은 규약이다.
+   *
+   * 읽기 전용 줄(마스터 볼륨, 그래픽)이 이 함수를 쓴다. 누르는 줄과 읽는 줄이
+   * 값을 다른 자리에 두면 그건 두 개의 표가 겹쳐 있는 것이고, 설정 화면에서
+   * 사람이 하는 일은 값을 세로로 훑는 것 하나다.
+   */
+  const tabAt = String(text ?? '').indexOf('\t');
+  const headText = tabAt >= 0 ? text.slice(0, tabAt) : text;
+  const valueText = tabAt >= 0 ? text.slice(tabAt + 1) : '';
+
+  /**
    * 글자는 **왼쪽**에서 시작한다. 가운데가 아니다.
    *
    * 판이 있을 때는 가운데가 맞았다 — 종이 위의 제목은 종이를 기준으로 놓인다.
@@ -1086,7 +1121,7 @@ export function titleTexture(text, sub, { width = 256, height = 80, scale = 1, w
    * 폭에 대해서는 접고, 높이에 대해서는 줄인다. 접을 축이 하나뿐이기 때문이다.
    */
   const fitK = (() => {
-    const probeLines = wrapToFit(probe.ctx, text, TYPE.body, room, 2);
+    const probeLines = wrapToFit(probe.ctx, headText, TYPE.body, room, 2);
     const rows = probeLines.rows.length;
     const need =
       rows * TYPE.body.size +
@@ -1098,13 +1133,30 @@ export function titleTexture(text, sub, { width = 256, height = 80, scale = 1, w
   const titleType = { ...TYPE.body, size: Math.round(TYPE.body.size * fitK) };
   const subType = { ...TYPE.caption, size: Math.round(TYPE.caption.size * fitK) };
 
-  const lines = wrapToFit(probe.ctx, text, titleType, room, 2);
+  const lines = wrapToFit(probe.ctx, headText, titleType, room, 2);
 
   const headSize = lines.size;
   const gap = Math.round(headSize * 0.18);
   const headBlock = lines.rows.length * headSize + (lines.rows.length - 1) * gap;
   const subH = sub ? subType.size + SPACE.xs : 0;
   let y = Math.round((height - headBlock - subH) / 2 + headSize * 0.82);
+
+  /**
+   * 값은 오른쪽 끝, 첫 줄의 베이스라인에. 이름이 두 줄로 접혀도 값은 첫 줄에
+   * 남는다 — 값이 아래로 따라가면 오른쪽 열이 줄마다 다른 높이에 서게 된다.
+   */
+  if (valueText) {
+    applyTracking(ctx, titleType.tracking);
+    drawText(ctx, {
+      text: valueText,
+      x: width,
+      y,
+      font: fontSpec(titleType),
+      color: PALETTE.water.ink,
+      align: 'right',
+    });
+    applyTracking(ctx, 0);
+  }
 
   applyTracking(ctx, titleType.tracking);
   for (const row of lines.rows) {

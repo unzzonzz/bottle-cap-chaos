@@ -291,6 +291,16 @@ export function bootMenu(
   }
 
   // ── contents ─────────────────────────────────────────────────────────────
+  /**
+   * 재질별 클리핑을 켠다. 설정 화면의 목록이 굴러갈 때 띠 밖을 잘라내려면 필요하다.
+   *
+   * 전역 스위치이고 렌더러는 게임과 공유하는 물건이지만, 이 줄은 메뉴 문서에서만
+   * 실행된다 — 문서는 메뉴이거나 게임이지 둘 다가 아니다(`main.js` 가 갈라 놓는다).
+   * 켜도 클립 평면이 없는 재질은 값을 치르지 않는다: three 는 재질마다 평면 수를
+   * 세고, 0 이면 그 분기 전체가 전처리기에서 사라진다.
+   */
+  viewport.renderer.localClippingEnabled = true;
+
   const items = new MenuItems({ retro, tuning: cfg.items });
 
   /**
@@ -1058,6 +1068,22 @@ export function bootMenu(
    * 화면이 통째로 바뀌는 것이 급작스럽지 않은 것은, 각 화면이 자기 패널을 들고
    * 있어서 바뀌는 것이 배경이 아니라 패널이기 때문이다.
    */
+  /**
+   * 휠은 지금 보이는 화면에 넘긴다.
+   *
+   * 목록이 프레임보다 길 수 있는 화면만 받는다 — 받은 쪽이 `true` 를 돌려주면
+   * 페이지 자체의 스크롤을 막는다. 스크롤할 것이 없으면 막지 않는다: 브라우저의
+   * 기본 동작을 이유 없이 삼키면 그 페이지는 고장 난 것으로 느껴진다.
+   */
+  canvas.addEventListener(
+    'wheel',
+    (e) => {
+      const target = current === 'settings' ? settings : null;
+      if (target?.scroll?.(e.deltaY)) e.preventDefault();
+    },
+    { passive: false },
+  );
+
   function fadeTo(target) {
     menuAudio?.screenChange();
     swapTo(target);
