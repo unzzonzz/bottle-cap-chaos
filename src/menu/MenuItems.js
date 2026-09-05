@@ -146,7 +146,7 @@ export class MenuItems {
       return {
         id: null, label: '', eyebrow: '', role: null, mesh, material, map: null,
         action: false, mode: false,
-        rule, ruleMat, hovered: false, shift: 0, grow: { x: 0, v: 0 },
+        rule, ruleMat, hovered: false, grow: { x: 0, v: 0 },
       };
     });
 
@@ -413,18 +413,21 @@ export class MenuItems {
        * 종류다: 가리킨 것 말고 나머지가 물러나고, 가리킨 것 아래로 밑줄이
        * 왼쪽부터 뻗는다. 판은 여전히 아무 데도 안 간다.
        */
-      item.shift = approach(item.shift, item.hovered ? 1 : 0, dt, MOTION.hover);
       item.dim = approach(item.dim ?? 1, any && !item.hovered ? 0.45 : 1, dt, MOTION.hover);
       spring(item.grow, item.hovered ? 1 : 0, 12);
 
-      const u = this._unitsPerPixel ?? 1;
-      // 주 행동과 모드만 오른쪽으로 두 픽셀 흐른다. 크기 변화 없이 방향을 알린다.
-      const travel = item.action || item.mode ? 2 : 0;
-      item.mesh.position.set(
-        item.home.x + item.shift * travel * u,
-        item.home.y + item.shift * -1.5 * u,
-        0,
-      );
+      /**
+       * ── 항목은 **움직이지 않는다** ──────────────────────────────────────
+       * 가리킨 항목이 오른쪽으로 2px, 위로 1.5px 흘렀다. 방향을 알린다는 근거로
+       * 넣은 것이었는데, 밑줄이 이미 왼쪽부터 오른쪽으로 자라며 같은 말을 하고
+       * 있다. 두 장치가 같은 말을 하면 하나는 소음이고, 소음인 쪽은 글자를
+       * 움직이는 쪽이다 — 자간이 넓은 작은 활자가 몇 픽셀 흔들리면 읽는 중에
+       * 줄이 미끄러진 것처럼 보인다.
+       *
+       * 호버가 말하는 것은 이제 둘이다: 밑줄이 자라고, 나머지가 흐려진다.
+       * 둘 다 자리를 건드리지 않는다.
+       */
+      item.mesh.position.set(item.home.x, item.home.y, 0);
       item.material.uniforms.uOpacity.value = fade * item.dim;
 
       // 밑줄: 왼쪽 끝을 고정하고 폭만 자란다
