@@ -2,7 +2,7 @@ import { CanvasTexture, ClampToEdgeWrapping, LinearFilter, LinearMipmapLinearFil
 import { PALETTE, withAlpha } from '../core/palette.js';
 import { RADIUS, ROLE, RULE, SPACE, TYPE } from '../core/tokens.js';
 import { drawIcon } from '../ui/icons.js';
-import { drawLettering, drawTitle, letteringWidth } from '../ui/lettering.js';
+import { drawLettering, letteringWidth } from '../ui/lettering.js';
 import {
   applyTracking,
   dialogPanel,
@@ -14,6 +14,7 @@ import {
   roleSkin,
   skinFor,
 } from '../ui/paper.js';
+import { ring } from '../ui/marks.js';
 
 /**
  * Every pixel the menu needs, drawn at runtime. No image files, same as
@@ -754,7 +755,7 @@ export function burstSheet() {
  * @param {string} label
  * @param {string|{role?: string, state?: string, selected?: boolean}} state
  */
-export function menuPlateTexture(label, state, { width = 256, height = 52, scale = 1 } = {}) {
+export function menuPlateTexture(label, state, { width = 256, height = 52, scale = 1, onWater = false } = {}) {
   /**
    * `scale` 는 텍셀 배수다. 좌표는 프레임 픽셀 그대로 두고 캔버스만 키운다.
    *
@@ -815,6 +816,23 @@ export function menuPlateTexture(label, state, { width = 256, height = 52, scale
    * 된다. `RADIUS.chip` 은 `roundRectPath` 가 높이의 절반으로 죄므로 어느
    * 크기에서도 같은 비율이다.
    */
+  /**
+   * 물 위에 앉는 열의 잉크는 **흰색**이다.
+   *
+   * 실측: 내비 자리의 물이 선형 휘도 0.234~0.309 다. 어두운 잉크(`cobaltInk`,
+   * 0.0596)는 거기서 2.59:1 이고, 4.5:1 을 내려면 배경이 0.44 여야 하는데 그건
+   * 블룸을 넘는 밝기다. 배경을 어둡게 하고 잉크를 뒤집는 것이 유일한 길이다.
+   * 물의 아래쪽을 `water.js` 가 그만큼 어둡게 만든다.
+   */
+  const waterSkin = onWater
+    ? {
+        ...roleSkin(role, skinState),
+        text: PALETTE.ui.textOnAccent,
+        rule: PALETTE.ui.textOnAccent,
+        accent: PALETTE.ui.textOnAccent,
+      }
+    : null;
+
   roleButton(ctx, {
     x: 0,
     y: 0,
@@ -823,6 +841,7 @@ export function menuPlateTexture(label, state, { width = 256, height = 52, scale
     radius: RADIUS.chip,
     role,
     state: skinState,
+    skin: waterSkin,
     selected,
     label,
     // 도장이 오른쪽을 먹으므로 라벨은 남은 왼쪽에서 가운데를 잡는다.
@@ -939,7 +958,7 @@ function wrapToFit(ctx, text, type, maxWidth, maxRows) {
  * 설명이고, 존재하지 않을 수 있는 설명에 의미를 맡길 수 없다. 그래서 그림이 혼자
  * 서야 하고, `icons.js` 의 두 주석이 왜 그 그림이어야 하는지 적고 있다.
  */
-export function iconPlateTexture(icon, state = 'idle', { size = 64, scale = 1 } = {}) {
+export function iconPlateTexture(icon, state = 'idle', { size = 64, scale = 1, onWater = false } = {}) {
   const { canvas, ctx } = makeCanvas(Math.round(size * scale), Math.round(size * scale));
   ctx.scale(scale, scale);
 
@@ -968,7 +987,9 @@ export function iconPlateTexture(icon, state = 'idle', { size = 64, scale = 1 } 
     x: (size - inner) / 2,
     y: (size - inner) / 2,
     size: inner,
-    color: skin.text,
+    // 열과 같은 이유로 뒤집힌다 — 이 아이콘도 종이가 아니라 물 위에 앉는다.
+    // `menuPlateTexture` 의 `onWater` 주석에 실측이 있다.
+    color: onWater ? PALETTE.ui.textOnAccent : skin.text,
   });
   ctx.globalAlpha = 1;
 
@@ -977,49 +998,68 @@ export function iconPlateTexture(icon, state = 'idle', { size = 64, scale = 1 } 
   return tex;
 }
 
+
 /**
- * 게임의 이름, 벡터 획으로. 판 없음.
+ * 내비의 표식. 지금 가리키는 항목 옆에 서는 작은 고리.
  *
- * ── §4.4 가 제목을 그리라고 했고 이 자리가 마지막이었다 ────────────────────
- * 홈의 제목은 `titleTexture` 로 그려지고 있었다 — 둥근 흰 판 위에 `한여름 알까기`
- * 와 부제 `메인 메뉴`. 세 가지가 §11 과 §4.4 에 걸린다: 판은 화면에서 가장 큰
- * 흰 사각형이고("두꺼운 패널"), 이름은 폰트로 조판돼 있고, 부제는 화면이 이미
- * 말하는 것을 한 번 더 말한다.
- *
- * 셋 다 여기서 없어진다. `lettering.drawTitle` 은 자모를 획으로 조합하므로 폰트
- * 로딩과 무관하고 — 이 텍스처는 한 번 구워서 캐시되므로 그 무관함이 여기서 가장
- * 값지다 — 굵기를 웨이트가 아니라 획으로 얻는다.
- *
- * 크기는 폭에서 푼다. `letteringWidth` 로 재서 여백 안에 들어가는 배수를 찾는다.
+ * §20 의 어휘에서 `○` 하나를 골라 쓴다. 이것이 스프라이트인 이유는 항목 사이를
+ * **미끄러져야** 하기 때문이다 — 텍스처에 그려 넣으면 항목마다 굽고 지워야 하고,
+ * 그러면 움직일 수 없다. 움직이는 것은 지오메트리여야 한다.
  */
-export function homeTitleTexture({ width = 256, height = 96, scale = 1 } = {}) {
+export function navMarkerTexture({ size = 12, scale = 2 } = {}) {
+  const px = Math.round(size * scale);
+  const { canvas, ctx } = makeCanvas(px, px);
+  ctx.scale(scale, scale);
+  ring(ctx, size / 2, size / 2, size / 2 - RULE.thin, RULE.thin, PALETTE.ui.textOnAccent);
+  const tex = toTexture(canvas);
+  tex.userData = { width: size, height: size };
+  return tex;
+}
+
+/**
+ * 물에 잠기는 제목. 두 줄로 쌓고, 프레임에 잘리도록 크게 굽는다.
+ *
+ * ── 없어진 `homeTitleTexture` 를 대신한다 ──────────────────────────────────
+ * 저쪽은 한 줄이었고 열의 머리글로 판 안에 **들어가도록** em 을 줄였다. 이 구조
+ * 에서 제목은 열의 일부가 아니라 화면을 가로지르는 오브제이고, 프레임에 잘리는
+ * 것이 구조다 — 들어가야 한다는 전제가 사라졌으므로 그 함수도 같이 없앴다.
+ *
+ * 잉크가 흰색인 것은 이 화면에서 파랑이 지면이기 때문이다. 종이에 잉크가 아니라
+ * 물에 빛이다. 화면에 나갈 때의 실제 색은 `SubmergedTitle` 의 셰이더가 정한다 —
+ * 여기서 굽는 것은 **모양**뿐이고 셰이더는 알파만 읽는다.
+ *
+ * 둘째 줄을 들여쓰는 것은 레퍼런스의 계단식 배치다. 두 줄을 왼쪽으로 맞추면
+ * 블록이 되고, 어긋내면 흐름이 생긴다.
+ */
+export function submergedTitleTexture({ size = 120, scale = 1 } = {}) {
+  /**
+   * 상자를 **글자에서** 잰다. 받지 않는다.
+   *
+   * 폭을 밖에서 주면 글자가 그 안 어디에 앉는지를 부르는 쪽이 알 수 없고,
+   * 실측으로 그것 때문에 블록이 화면 왼쪽으로 통째로 빠졌다. 여기서 재서
+   * `userData` 로 돌려주면 배치하는 쪽은 상자만 놓으면 된다.
+   */
+  const tracking = -size * 0.03;
+  const indent = size * 0.62;
+  const pad = size * 0.16;
+  const w1 = letteringWidth('한여름', size, tracking);
+  const w2 = indent + letteringWidth('알까기', size, tracking);
+  const width = Math.round(Math.max(w1, w2) + pad * 2);
+  const height = Math.round(size * 1.82 + pad * 2);
+
   const { canvas, ctx } = makeCanvas(Math.round(width * scale), Math.round(height * scale));
   ctx.scale(scale, scale);
 
-  const room = width - SPACE.md * 2;
-  /**
-   * `drawTitle` 은 두 덩이 사이에 `size * 0.34` 의 간격을 넣으므로, 폭은 em 에
-   * 대해 선형이다. 한 번 재고 나누면 맞는 em 이 나온다 — 이분법이 필요 없다.
-   */
-  const probe = drawTitleWidth(ctx, 100);
-  const em = Math.max(12, Math.min(height * 0.62, (room / probe) * 100));
-
-  drawTitle(ctx, {
-    x: width / 2,
-    y: (height - em) / 2,
-    size: em,
-    color: PALETTE.ui.text,
+  drawLettering(ctx, '한여름', {
+    x: pad, y: pad, size, color: PALETTE.ui.textOnAccent, tracking, align: 'left',
+  });
+  drawLettering(ctx, '알까기', {
+    x: pad + indent, y: pad + size * 0.82, size, color: PALETTE.ui.textOnAccent, tracking, align: 'left',
   });
 
   const tex = toTexture(canvas);
   tex.userData = { width, height };
   return tex;
-}
-
-/** `drawTitle` 이 `size` 에서 차지하는 폭. 그리지 않고 잰다. */
-function drawTitleWidth(ctx, size) {
-  const tracking = size * 0.06;
-  return letteringWidth('한여름', size, tracking) + size * 0.34 + letteringWidth('알까기', size, tracking);
 }
 
 /**

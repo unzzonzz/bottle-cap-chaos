@@ -1,6 +1,6 @@
 import { Group, Mesh, PlaneGeometry, Raycaster, Vector2 } from 'three';
 import { createSpriteMaterial } from './menuMaterials.js';
-import { homeTitleTexture, iconPlateTexture, menuPlateTexture } from './menuTextures.js';
+import { iconPlateTexture, menuPlateTexture, navMarkerTexture } from './menuTextures.js';
 import { FRAME } from '../core/frame.js';
 import { MOTION, ROLE, SIZE, SPACE } from '../core/tokens.js';
 
@@ -99,12 +99,6 @@ export class MenuItems {
     /** Which page the column is showing. `setPage` swaps it. */
     this.page = 'home';
 
-    this.title = new Mesh(
-      new PlaneGeometry(1, 1),
-      createSpriteMaterial(retro, { map: this._bakeTitle() }),
-    );
-    this.root.add(this.title);
-
     /**
      * 두 페이지 중 **긴 쪽**만큼 메시를 만들어 두고 재사용한다.
      *
@@ -136,6 +130,22 @@ export class MenuItems {
       this.root.add(mesh);
       return { ...def, mesh, material, maps, hovered: false, isTool: true };
     });
+
+    /**
+     * 지금 가리키는 항목 옆에 서는 고리. 항목 사이를 **미끄러진다.**
+     *
+     * 호버를 텍스처 교체로만 표현하면 상태가 두 개인 스위치가 되고, 그 사이에
+     * 아무 일도 일어나지 않는다. 이 하나가 열에 **연속성**을 준다 — 어디서
+     * 어디로 갔는지가 보인다.
+     */
+    this.marker = new Mesh(
+      new PlaneGeometry(1, 1),
+      createSpriteMaterial(retro, { map: navMarkerTexture(), opacity: 0 }),
+    );
+    this.marker.renderOrder = 11;
+    this.root.add(this.marker);
+    /** 마커의 스프링 상태. 위치와 불투명도가 따로 움직인다. */
+    this._mark = { y: 0, vy: 0, o: 0, vo: 0, has: false };
 
     this._ray = new Raycaster();
     /**
@@ -214,6 +224,8 @@ export class MenuItems {
       width: Math.round(t.plateWidth),
       height: Math.round(t.plateHeight),
       scale: PLATE_TEXEL_SCALE,
+      // 이 열은 종이가 아니라 물 위에 앉는다. 잉크가 뒤집힌다.
+      onWater: true,
     };
     // `role` is passed through so 뒤로 gets its left arrow. Everything else on
     // these two pages is a CHOICE and takes the default.
@@ -225,18 +237,12 @@ export class MenuItems {
     };
   }
 
-  /** The game's name, as vector strokes. See `menuTextures.homeTitleTexture`. */
-  _bakeTitle() {
-    const w = Math.round(this.tuning.plateWidth);
-    return homeTitleTexture({ width: w, height: Math.round(w * 0.34), scale: PLATE_TEXEL_SCALE });
-  }
-
   /** 아이콘 버튼 한 개의 두 상태. */
   _bakeTool(icon) {
     const size = Math.round(SIZE.buttonIcon.w * this._toolScale());
     return {
-      idle: iconPlateTexture(icon, 'idle', { size, scale: PLATE_TEXEL_SCALE }),
-      hover: iconPlateTexture(icon, 'hover', { size, scale: PLATE_TEXEL_SCALE }),
+      idle: iconPlateTexture(icon, 'idle', { size, scale: PLATE_TEXEL_SCALE, onWater: true }),
+      hover: iconPlateTexture(icon, 'hover', { size, scale: PLATE_TEXEL_SCALE, onWater: true }),
     };
   }
 
@@ -288,9 +294,6 @@ export class MenuItems {
       tool.material.uniforms.uMap.value = tool.hovered ? next.hover : next.idle;
     }
 
-    const title = this.title.material.uniforms.uMap.value;
-    this.title.material.uniforms.uMap.value = this._bakeTitle();
-    title?.dispose();
   }
 
   layout(unitsPerPixel) {
@@ -305,69 +308,53 @@ export class MenuItems {
     const n = live.length;
 
     /**
-     * 제목판과 항목들은 **하나의 덩어리**로 배치되고, 그 덩어리가 프레임에 맞춰
-     * 잘리지 않도록 위로 밀린 만큼 다시 내려온다.
+     * 열은 **오른쪽 아래**에 오른쪽 맞춤으로 선다.
      *
-     * 예전에는 제목을 항목 열 위에 `title.height * 0.72` 만큼 띄워 놓기만 했다.
-     * 제목판이 52 였을 때는 우연히 화면 안에 들어갔고, 두 줄 머리글을 담느라 84 가
-     * 되자 위쪽이 프레임 밖으로 나갔다. 덩어리 전체 높이를 재서 배치하면 판이 몇
-     * 픽셀이든 그런 일이 없다.
-     */
-    const title = this.title.material.uniforms.uMap.value.userData ?? { width: 256, height: 80 };
-    // 판 사이 간격은 항목 사이와 같아야 한 열로 읽힌다. 제목만 더 붙으면
-    // 제목이 첫 항목의 머리처럼 보인다.
-    const titleGap = Math.max(SPACE.md, Math.round(t.pitch - t.plateHeight));
-    const itemsTop = t.columnY + ((n - 1) / 2) * t.pitch + t.plateHeight / 2;
-    let titleY = itemsTop + titleGap + title.height / 2;
-
-    /**
-     * 프레임 위 가장자리를 넘으면 덩어리 전체를 그만큼 내린다.
+     * ── 왜 가운데 열이 아니라 구석인가 ──────────────────────────────────────
+     * 제목이 화면을 가로지르는 오브제가 되면서 가운데를 비워야 했다. 그리고 이
+     * 구조에서 내비는 주인공이 아니다 — 작고, 조용하고, 구석에 있다가 커서가
+     * 오면 대답하는 것이다.
      *
-     * 제목만 내리면 항목과 겹친다 — 겹친 두 판은 잘린 한 판보다 나쁘다.
+     * 오른쪽 맞춤인 이유는 제목이 왼쪽에서 잘려 들어오기 때문이다. 둘이 같은
+     * 쪽에 몰리면 화면 한쪽만 무거워진다.
      */
-    const ceiling = FRAME.height / 2 - SPACE.md;
-    const over = Math.max(0, titleY + title.height / 2 - ceiling);
-    titleY -= over;
-    const shift = -over;
-
-    this.title.scale.set(title.width * u, title.height * u, 1);
-    this.title.position.set(t.columnX * u, titleY * u, 0);
-    this.title.rotation.y = yaw;
+    const margin = SPACE.xl;
+    const right = FRAME.width / 2 - margin;
+    const bottom = -FRAME.height / 2 + margin;
 
     live.forEach((item, i) => {
-      const y = t.columnY + ((n - 1) / 2 - i) * t.pitch + shift;
-      item.home = { x: t.columnX * u, y: y * u };
+      // 배열의 첫 항목이 **위**에 오도록 아래에서부터 쌓는다.
+      const y = bottom + (n - 1 - i) * t.pitch + t.plateHeight / 2;
+      const x = right - t.plateWidth / 2;
+      item.home = { x: x * u, y: y * u };
       item.mesh.scale.set(w, h, 1);
       item.mesh.rotation.y = yaw;
       item.mesh.position.set(item.home.x, item.home.y, 0);
     });
 
     /**
-     * 아이콘 버튼은 열 **아래**, 열의 오른쪽 끝에 맞춰 오른쪽에서 왼쪽으로.
+     * 아이콘 버튼은 열 **위**, 같은 오른쪽 선에 맞춘다.
      *
-     * 열과 같은 x 중심이 아니라 오른쪽 끝에 맞추는 이유는 이 둘이 열의 항목이
-     * 아니기 때문이다. 가운데 정렬하면 네 번째·다섯 번째 항목으로 보이고, 그것이
-     * 애초에 설정을 열에서 빼낸 이유다.
+     * 아래가 아니라 위인 것은 열이 이미 프레임 바닥에 붙어 있기 때문이다.
      */
     const icon = Math.round(SIZE.buttonIcon.w * this._toolScale());
-    const gap = Math.round(SPACE.sm * this._toolScale());
-    const lastY = t.columnY + ((n - 1) / 2 - (n - 1)) * t.pitch + shift;
-    const toolY = lastY - t.plateHeight / 2 - gap - icon / 2;
-    /**
-     * 오른쪽 끝에 맞추되 **순서는 왼쪽에서 오른쪽**이다.
-     *
-     * 배열의 첫 항목이 왼쪽에 온다 — 부록의 스케치가 `⚙ 🏷` 순이고, 그게 읽는
-     * 순서다. 오른쪽 끝을 기준으로 삼는 것은 정렬이고, 순서는 그것과 별개다.
-     */
-    const rightEdge = t.columnX + t.plateWidth / 2;
+    const gap = Math.round(SPACE.md * this._toolScale());
+    const topY = bottom + (n - 1) * t.pitch + t.plateHeight / 2;
+    const toolY = topY + t.plateHeight / 2 + gap + icon / 2;
     const last = this.tools.length - 1;
     this.tools.forEach((tool, i) => {
-      const x = rightEdge - icon / 2 - (last - i) * (icon + gap);
+      const x = right - icon / 2 - (last - i) * (icon + gap);
       tool.home = { x: x * u, y: toolY * u };
       tool.mesh.scale.set(icon * u, icon * u, 1);
       tool.mesh.rotation.y = yaw;
       tool.mesh.position.set(tool.home.x, tool.home.y, 0);
     });
+
+    /** 마커는 열의 왼쪽 바깥에 선다. 크기는 프레임을 따라 줄어든다. */
+    const md = Math.round(10 * this._toolScale());
+    this._markerX = (right - t.plateWidth - SPACE.sm) * u;
+    this.marker.scale.set(md * u, md * u, 1);
+    this.marker.position.set(this._markerX, this._mark.y, 0);
 
     this._unitsPerPixel = u;
   }
@@ -383,20 +370,44 @@ export class MenuItems {
       // 빈 슬롯. 이 페이지가 안 쓰는 자리이고 `home` 이 없으므로 배치도 없다.
       if (!item.id) continue;
       /**
-       * ── 호버는 아무것도 하지 않는다 ──────────────────────────────────────
-       * 판이 `hoverShift` 만큼 앞으로(그리고 오른쪽으로) 나왔다. 사용자가 상호작용
-       * 효과를 전부 빼 달라고 했고, 이 이동도 그 하나다.
+       * ── 호버가 다시 무언가를 한다. 다만 판이 아니라 **열**이 반응한다 ──────
+       * 예전에 뺀 것은 판이 앞으로 튀어나오는 것이었다 — 판이 물체처럼 굴었고,
+       * 사용자가 그걸 원하지 않았다. 여기 있는 것은 다른 종류다: 판은 그대로
+       * 있고 **가리켜진 것 말고 나머지가 물러난다.** 인쇄물에서 한 줄을 손가락으로
+       * 짚으면 나머지가 뒤로 가는 것과 같고, 판이 물체가 되지 않는다.
        *
-       * `shift` 는 계속 민다. 값을 읽는 곳이 없어졌지만 진행도 자체는 이 열이
-       * 호버를 안다는 사실이고, 되돌리려면 여기 한 줄이면 된다 — `hoverShift` 도
-       * `menuConfig` 에 그대로 있다. 지운 것은 **적용**이지 개념이 아니다.
+       * 짚은 줄만 가장자리 쪽으로 아주 조금 나간다 — 6 프레임픽셀. 그보다 크면
+       * 열이 흔들리는 것으로 보인다.
        */
       item.shift = approach(item.shift, item.hovered ? 1 : 0, dt, MOTION.hover);
-      item.mesh.position.set(item.home.x, item.home.y, 0);
+      const any = this.hovered != null;
+      const dim = any && !item.hovered ? 0.42 : 1;
+      item.dim = approach(item.dim ?? 1, dim, dt, MOTION.hover);
+      item.mesh.position.set(item.home.x + item.shift * 6 * u, item.home.y, 0);
       item.mesh.scale.set(t.plateWidth * u, t.plateHeight * u, 1);
-      item.material.uniforms.uOpacity.value = fade;
+      item.material.uniforms.uOpacity.value = fade * item.dim;
     }
-    this.title.material.uniforms.uOpacity.value = fade;
+
+    /**
+     * 마커. 가리켜진 줄로 미끄러지고, 아무것도 안 가리키면 사라진다.
+     *
+     * 임계 감쇠 스프링을 손으로 적분한다 — `approach` 는 지수 접근이라 목표에
+     * 붙기만 하고 **미끄러지지** 않는다. 열 사이를 건너뛰는 움직임에는 속도가
+     * 필요하고, 속도가 있어야 어디서 왔는지가 보인다.
+     */
+    const m = this._mark;
+    const target = this.hovered && this.hovered.home ? this.hovered.home.y : m.y;
+    const has = !!(this.hovered && this.hovered.home);
+    const spring = (x, v, to, w) => {
+      const f = 1 + 2 * dt * w, oo = w * w, dtoo = dt * oo, det = f + dt * dtoo;
+      const nv = (v + dtoo * (to - x)) / det;
+      return [(f * x + dt * nv + dt * dtoo * to) / det, nv];
+    };
+    [m.y, m.vy] = spring(m.y, m.vy, target, 13);
+    [m.o, m.vo] = spring(m.o, m.vo, has ? 1 : 0, 16);
+    this.marker.position.set(this._markerX ?? 0, m.y, 0);
+    this.marker.material.uniforms.uOpacity.value = fade * Math.max(0, m.o);
+    this.marker.visible = m.o > 0.004;
   }
 
   /**
@@ -437,9 +448,9 @@ export class MenuItems {
   }
 
   dispose() {
-    this.title.geometry.dispose();
-    this.title.material.uniforms.uMap.value.dispose();
-    this.title.material.dispose();
+    this.marker.geometry.dispose();
+    this.marker.material.uniforms.uMap.value?.dispose();
+    this.marker.material.dispose();
     for (const item of [...this.items, ...this.tools]) {
       item.mesh.geometry.dispose();
       item.material.dispose();

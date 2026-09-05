@@ -465,7 +465,14 @@ export function roleButton(ctx, o) {
     labelWidth = w,
     type = TYPE.body,
   } = o;
-  const skin = roleSkin(role, state);
+  /**
+   * 스킨을 밖에서 받을 수 있다. 안 주면 역할에서 뽑는다.
+   *
+   * 이 구멍이 필요한 이유는 배경이 종이가 아닐 수 있기 때문이다 — 메뉴 열은
+   * 이제 물 위에 직접 앉고, 거기서는 어두운 잉크가 어떤 밝기의 물에서도 4.5:1 을
+   * 못 낸다(실측 2.59). 역할은 그대로 두고 색만 뒤집어야 하는 자리다.
+   */
+  const skin = o.skin ?? roleSkin(role, state);
   const effective = selected && state !== 'disabled' ? skinFor('selected', skin.accent) : skin;
   const arrow = skin.arrow;
 

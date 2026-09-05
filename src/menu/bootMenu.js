@@ -2,7 +2,8 @@ import { Color, Group, Mesh, PerspectiveCamera, PlaneGeometry, Scene, Vector3 } 
 import { GlossMaterials } from '../core/GlossMaterial.js';
 import { createEnvironment } from '../core/environment.js';
 import { createLightRig } from '../core/lighting.js';
-import { createSky } from '../core/sky.js';
+import { createWater } from './water.js';
+import { SubmergedTitle } from './SubmergedTitle.js';
 import { setTextureRenderer } from '../core/textures.js';
 import {
   onQualityChange,
@@ -48,7 +49,7 @@ import { MenuAudio } from '../audio/MenuAudio.js';
  *
  * ── the render order, and why it is this one ────────────────────────────────
  *
- *     camera.layers.set(WORLD)         sky, bottle, liquid, fizz
+ *     camera.layers.set(WORLD)         물, 병, 액체, 기포
  *     composer.render()                MSAA target -> bloom -> canvas
  *     camera.layers.set(UI)            the plates, unbloomed
  *     clearDepth(); render(scene)
@@ -176,7 +177,16 @@ export function bootMenu(
    *
    * 메뉴에는 필드가 없으므로 그림자 프러스텀은 병 하나를 덮을 만큼만 준다.
    */
-  const sky = createSky(scene);
+  /**
+   * 배경은 하늘이 아니라 **물**이다.
+   *
+   * 메뉴의 구조가 바뀌었다 — 하늘 돔 아래 병이 뜬 그림에서, 화면 전체가 물이고
+   * 제목이 그 아래 잠긴 그림으로. `core/sky.js` 는 게임 문서와 공유하므로 손대지
+   * 않았다: 거기를 물로 바꾸면 판 위의 하늘까지 물이 된다.
+   *
+   * 인터페이스가 같아서 되돌리는 것은 이 한 줄이다.
+   */
+  const water = createWater(scene);
   const lights = createLightRig(scene);
   lights.setExtents({ x: 26, z: 26 });
 
@@ -335,7 +345,29 @@ export function bootMenu(
   // The shadow and the burst are siblings of the bottle rather than children of
   // it: one is placed by a world position every frame and the other hangs a
   // fixed distance below. Parenting either would add the float to it twice.
-  menuRoot.add(bottle.root, bottle.shadow, bottle.burst, asUiLayer(items.root));
+  /**
+   * 물에 잠긴 제목. 병보다 **뒤**에 그린다.
+   *
+   * `renderOrder -500` 은 물(-1000)과 나머지 사이다. 글자가 병 앞에 오면 병이
+   * 종이에 인쇄된 것이 되고, 이 화면에서 병은 물 속의 물건이다.
+   */
+  const title = new SubmergedTitle({ unitsPerPixel: unitsPerPixel() });
+  /** 지난 프레임의 정규화 포인터. 물을 젓는 것은 그 차이다. */
+  const lastPointerN = { x: 0, y: 0 };
+  /**
+   * 제목은 **월드 레이어**에 둔다. `asUiLayer` 를 씌우지 않는다.
+   *
+   * UI 레이어는 월드가 다 그려진 뒤 별도 패스로 올라간다. 거기 두면 제목이 병
+   * **앞**에 오고, 그러면 병이 글자에 인쇄된 것이 된다 — 이 화면에서 병은 물
+   * 속의 물건이고 글자는 그보다 더 깊은 곳에 있다.
+   *
+   * 월드에 있으므로 **블룸도 받는다.** 그래서 잉크를 순백이 아니라 옅은 파랑으로
+   * 잡았다 — 처음에 흰색으로 두었더니 글자가 통째로 타서 흰 덩어리가 됐다.
+   * UI 레이어가 존재하는 이유는 크기가 아니라 휘도였고, 그 문제는 레이어를
+   * 바꾸는 것이 아니라 값을 임계 아래로 내려서 푼다. `SubmergedTitle` 의
+   * `uTint` 주석에 수치가 있다.
+   */
+  menuRoot.add(title.root, bottle.root, bottle.shadow, bottle.burst, asUiLayer(items.root));
   scene.add(menuRoot);
 
   let settings = null;
@@ -524,6 +556,7 @@ export function bootMenu(
     const u = unitsPerPixel();
     applyArrangement(u);
     items.layout(u);
+    title.layout(u);
     /**
      * 하위 화면들도 다시 배치한다.
      *
@@ -1431,6 +1464,16 @@ export function bootMenu(
       bottleAt.copy(bottle.root.position).project(camera);
       const d = Math.hypot(nx - bottleAt.x, ny + bottleAt.y);
       bottle.setPointer(nx, ny, Math.max(0, 1 - d / 0.9));
+      /**
+       * 물을 젓는 것은 커서의 **속도**다. 위치가 아니다.
+       *
+       * 가만히 올려 둔 커서가 물을 계속 젓고 있으면 그건 물이 아니라 소음이다.
+       * 지난 프레임에서 얼마나 움직였는지를 재서, 움직인 만큼만 넣는다.
+       */
+      const moved = Math.hypot(nx - lastPointerN.x, ny - lastPointerN.y);
+      water.stir(Math.min(0.5, moved * 2.6));
+      lastPointerN.x = nx;
+      lastPointerN.y = ny;
     } else {
       bottle.setPointer(0, 0, 0);
     }
@@ -1439,14 +1482,16 @@ export function bootMenu(
     // unwinds once it is over — see `Bottle.applyLean`. Driven by the STAGE, so
     // it is fully aimed before the cap goes.
     bottle.update(dt, { aim: transition.running ? 1 : 0, camera });
-    // 배경의 광점. 렌더 클럭이고 게임 상태를 읽지도 쓰지도 않는다.
-    sky.update(dt, camera);
+    // 배경의 물. 렌더 클럭이고 게임 상태를 읽지도 쓰지도 않는다.
+    // 젓는 세기를 돌려받아 제목에 그대로 넘긴다 — 둘이 같은 물이어야 한다.
+    const stirred = water.update(dt);
     // The burst is a billboard. The camera is fixed now that the shake is gone,
     // so this could be done once — it is not, because a sprite that is visibly
     // edge-on is the failure and one quaternion copy a frame is not worth the
     // risk of the camera ever moving again.
     bottle.burst.quaternion.copy(camera.quaternion);
 
+    title.update(dt, stirred, current === 'menu' ? 1 : 0);
     items.update(dt, current === 'menu' ? 1 : 0);
     settings?.update(dt);
     // 마크 목록도 호버가 움직인다. 예전에는 `update` 가 빈 함수라 부를 이유가 없었다.
@@ -1511,7 +1556,7 @@ export function bootMenu(
   function render() {
     const r = viewport.renderer;
 
-    // 1. The world — sky, bottle, liquid, fizz — through the bloom chain.
+    // 1. The world — water, bottle, liquid, fizz — through the bloom chain.
     //    This page is almost entirely the glossy surfaces that pass exists for.
     camera.layers.set(WORLD_LAYER);
     composer.render();
@@ -1522,7 +1567,7 @@ export function bootMenu(
     //    optional. A scene with a Colour background forces a colour clear
     //    inside `render()` REGARDLESS of `autoClear` — three sets `forceClear`
     //    when it paints one — so rendering the same scene a second time
-    //    repaints the sky over the bloomed world and the bottle disappears.
+    //    repaints the backdrop over the bloomed world and the bottle disappears.
     //    That is exactly what it did. The match page never hits this because
     //    its overlays are separate scenes with no background of their own.
     camera.layers.set(UI_LAYER);
