@@ -1,4 +1,5 @@
-import { Group, PerspectiveCamera, Scene } from 'three';
+import { Group, PerspectiveCamera, Scene, Vector3 } from 'three';
+import { aimedLaunchDirection, Bottle } from './Bottle.js';
 import { GlossMaterials } from '../core/GlossMaterial.js';
 import { createEnvironment } from '../core/environment.js';
 import { createLightRig } from '../core/lighting.js';
@@ -11,7 +12,7 @@ import { FRAME, MIN_FRAME_ASPECT, frameScale } from '../core/frame.js';
 import { PALETTE, withAlpha } from '../core/palette.js';
 import { registerTextureCache, whenFontsReady } from '../ui/fonts.js';
 import { clearLegacyStorage } from '../core/legacyStorage.js';
-import { CapWipe } from '../core/CapWipe.js';
+import { CapWipe, WIPE_FRAME } from '../core/CapWipe.js';
 import { MenuItems } from './MenuItems.js';
 import { SettingsScene } from './SettingsScene.js';
 import { OpponentScene } from './OpponentScene.js';
@@ -285,6 +286,16 @@ export function bootMenu(
   }
 
   // ── contents ─────────────────────────────────────────────────────────────
+  /**
+   * 재질별 클리핑을 켠다. `Bottle` 의 액면이 클립 평면이다.
+   *
+   * 전역 스위치이고 렌더러는 게임과 공유하는 물건이므로 어디서 켜는지가 중요하다.
+   * 여기가 맞는 자리인 이유: 문서는 메뉴이거나 게임이지 둘 다가 아니고
+   * (`main.js` 가 갈라 놓는다), 이 줄은 메뉴 문서에서만 실행된다.
+   */
+  viewport.renderer.localClippingEnabled = true;
+
+  const bottle = new Bottle({ retro, tuning: cfg.bottle });
   const items = new MenuItems({ retro, tuning: cfg.items });
 
   /**
@@ -337,23 +348,17 @@ export function bootMenu(
   /** 지난 프레임의 정규화 포인터. 물을 젓는 것은 그 차이다. */
   const lastPointerN = { x: 0, y: 0 };
   /**
-   * 제목도 **블룸 밖**이다. 병이 없어지고 잉크가 흰색이 되면서 바뀌었다.
+   * 제목은 **월드 레이어**다. `asUiLayer` 를 씌우지 않는다.
    *
-   * ── 예전에 월드 레이어였던 이유, 그리고 그것이 사라진 이유 ──────────────
-   * 병이 있을 때는 제목이 병보다 **뒤**에 있어야 했다. UI 레이어는 월드가 다
-   * 그려진 뒤 별도 패스로 올라가므로 거기 두면 제목이 병 앞에 오고, 그러면 병이
-   * 글자에 인쇄된 것이 된다. 병이 없으니 그 제약이 없다.
+   * 병보다 뒤에 그려져야 하기 때문이다 — 물 속의 물건은 병이고 이름은 그보다
+   * 더 깊은 곳에 있다. UI 레이어는 월드가 다 그려진 뒤 별도 패스로 올라가므로
+   * 거기 두면 제목이 병 앞에 오고, 그러면 병이 글자에 인쇄된 것이 된다.
    *
-   * 그리고 잉크가 순백이 되면서 월드 레이어가 오히려 문제가 됐다. 거기 있으면
-   * 블룸을 받는데, 흰색의 선형 휘도는 1.0 이고 브라이트패스 임계는 0.72 라
-   * 글자가 통째로 타서 흰 덩어리가 된다 — 예전에 실제로 그렇게 됐고, 그래서
-   * 잉크를 옅은 파랑(선형 0.685)으로 낮춰 두었던 것이다. 이제 색이 지정된
-   * 값이므로 반대로 푼다: 색을 낮추는 대신 글자를 블룸 밖으로 옮긴다.
-   *
-   * 그림은 같다. 물은 불투명하고 제목은 어느 패스에서든 그 위에 합성되므로,
-   * 패스가 바뀌어도 픽셀은 바뀌지 않는다 — 블룸만 빠진다.
+   * 잉크가 순백이라 블룸을 받으면 글자가 통째로 타는데, 그 문제는 레이어가
+   * 아니라 블룸 쪽에서 풀었다 — 메뉴에서 블룸을 받는 것이 제목 하나뿐이고
+   * 그마저 파괴이기 때문이다. 수치는 `menuConfig.view.bloom` 주석에 있다.
    */
-  menuRoot.add(asUiLayer(title.root), asUiLayer(items.root));
+  menuRoot.add(title.root, bottle.root, bottle.burst, asUiLayer(items.root));
   scene.add(menuRoot);
 
   let settings = null;
@@ -442,6 +447,14 @@ export function bootMenu(
   });
 
   const transition = new Transition({ tuning: cfg.transition });
+
+  /** World position -> the overlay's frame pixels. */
+  function toFrame(world) {
+    const p = world.clone().project(camera);
+    return { x: (p.x * WIPE_FRAME.width) / 2, y: (p.y * WIPE_FRAME.height) / 2 };
+  }
+  const mouth = new Vector3();
+  const mouthDir = new Vector3();
 
   /** Whether THIS document plays the cap's exit. Written by `runTransition`. */
   let uncoverRun = true;
@@ -860,8 +873,27 @@ export function bootMenu(
          * 병이 사라졌으니 메뉴도 같은 화면이다. 갈래가 없어졌고, 화면을 덮는 것은
          * 어차피 바(bar)다 — 메울 구멍이 애초에 없다.
          */
+        /**
+         * 병이 있는 화면에서는 뚜껑이 **주둥이에서** 떠난다.
+         *
+         * 다른 화면에는 병이 없으므로 허공에서 나오지 않도록 가운데에서 온다 —
+         * 예전에 그것이 문제로 보고됐고 그때 갈라 둔 갈래다.
+         */
         onPop: () => {
-          wipe.begin({ x: 0, y: 0 }, { x: 0, y: 1 });
+          if (current !== 'menu') {
+            wipe.begin({ x: 0, y: 0 }, aimedLaunchDirection(cfg.bottle));
+            return;
+          }
+          bottle.setCapVisible(false);
+          bottle.popBurst();
+          bottle.mouthWorld(mouth);
+          bottle.mouthDirection(mouthDir);
+          const from = toFrame(mouth);
+          // 방향은 병 자신의 축을 투영한 것이다 — 그때쯤 병은 그 축을 카메라로
+          // 돌려 둔 상태다. 기울어진 병에서 떠난 뚜껑이 화면 위로 곧장 날아가면
+          // 두 개의 상관없는 사건으로 읽힌다.
+          const ahead = toFrame(mouth.clone().addScaledVector(mouthDir, 4));
+          wipe.begin(from, { x: ahead.x - from.x, y: ahead.y - from.y });
         },
         onSwap,
         onDone: () => {
@@ -879,6 +911,8 @@ export function bootMenu(
            */
           if (!uncover) return;
           wipe.end();
+          bottle.setCapVisible(true);
+          bottle.popCap(0);
         },
       },
     );
@@ -1288,6 +1322,7 @@ export function bootMenu(
   // ── debug ────────────────────────────────────────────────────────────────
   const debug = bootMenuDebug({
     config: cfg,
+    bottle,
     wipe,
     items,
     transition,
@@ -1295,6 +1330,8 @@ export function bootMenu(
     composer,
     viewport,
     overlay: wipe.scene,
+    onRebuild: () => bottle.rebuild(),
+    onLean: () => bottle.applyLean(),
     onLayout: () => placeCamera(),
     onPlay: () => run('settings'),
     // ── 내 마크 ──
@@ -1376,6 +1413,8 @@ export function bootMenu(
   // ── loop ─────────────────────────────────────────────────────────────────
   let raf = 0;
   let last = 0;
+  /** 병을 화면 좌표로 투영할 때 쓰는 스크래치. 매 프레임 재사용한다. */
+  const bottleAt = new Vector3();
   function tick(dt) {
 
     const state = transition.update(dt);
@@ -1400,8 +1439,23 @@ export function bootMenu(
       water.stir(Math.min(0.5, moved * 2.6));
       lastPointerN.x = nx;
       lastPointerN.y = ny;
+      /**
+       * 병에 방향과 근접도를 넘긴다. **레이캐스트가 아니다.**
+       *
+       * 히트 테스트는 안/밖이라는 스위치를 만들고 스위치는 켜짐/꺼짐의 스냅을
+       * 만든다. 병은 방향과 거리를 받아 스스로 정한다 — 표류, 기울기, 하이라이트
+       * 이동. 확대는 하지 않는다.
+       */
+      bottleAt.copy(bottle.root.position).project(camera);
+      const d = Math.hypot(nx - bottleAt.x, ny + bottleAt.y);
+      bottle.setPointer(nx, ny, Math.max(0, 1 - d / 0.9));
+    } else {
+      bottle.setPointer(0, 0, 0);
     }
 
+    // 병은 전환이 도는 동안 주둥이를 카메라로 돌리고 끝나면 되돈다.
+    bottle.update(dt, { aim: transition.running ? 1 : 0, camera });
+    bottle.burst.quaternion.copy(camera.quaternion);
     // 배경의 물. 렌더 클럭이고 게임 상태를 읽지도 쓰지도 않는다.
     // 젓는 세기를 돌려받아 제목에 그대로 넘긴다 — 둘이 같은 물이어야 한다.
     water.update(dt, viewport.resolution);
@@ -1465,7 +1519,7 @@ export function bootMenu(
   // The same console handle the match page exposes as `__cap`. The menu had
   // none, which meant every question about its camera or its frame had to be
   // answered by reading source instead of by asking the running page.
-  window.__menu = { viewport, composer, camera, scene, cfg, items, title, placeCamera };
+  window.__menu = { viewport, composer, camera, scene, cfg, items, title, bottle, placeCamera };
 
   function render() {
     const r = viewport.renderer;
@@ -1537,7 +1591,8 @@ export function bootMenu(
   // verifying — the covered frame is three frames long and is not something you
   // can catch by looking.
   window.__menu = {
-    config: cfg, wipe, items, transition, camera, viewport, retro, tick,
+    config: cfg, bottle, wipe, items, transition, camera, viewport, retro, tick,
+    composer, title, lights,
     run, scene,
     // The screens, for the same reason `tick` is here: a sub-screen sits behind
     // a covered frame and a fade, and neither is something you can step through

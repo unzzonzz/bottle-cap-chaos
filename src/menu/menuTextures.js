@@ -1,4 +1,4 @@
-import { CanvasTexture, ClampToEdgeWrapping, LinearFilter, LinearMipmapLinearFilter, SRGBColorSpace } from 'three';
+import { CanvasTexture, ClampToEdgeWrapping, LinearFilter, LinearMipmapLinearFilter, RepeatWrapping, SRGBColorSpace } from 'three';
 import { PALETTE, withAlpha } from '../core/palette.js';
 import { RADIUS, ROLE, SPACE, TYPE } from '../core/tokens.js';
 import { drawIcon } from '../ui/icons.js';
@@ -373,6 +373,361 @@ export function bubbleTexture() {
  * @param {string} label
  * @param {string|{role?: string, state?: string, selected?: boolean}} state
  */
+/**
+ * The glass highlight, baked.
+ *
+ * Two vertical white strips at fixed angles and one dark band opposite them,
+ * over black. Added by the glass shader, so black contributes nothing and only
+ * the strips show — which is why this is a black image rather than a grey one.
+ *
+ * Two strips and not one: a single strip reads as a seam. Two, at different
+ * widths, read as a window and a lamp.
+ *
+ * The u axis is the way round the bottle, so a strip is a fixed angle and stays
+ * put as the bottle floats. The v axis fades them out at the very top and
+ * bottom in HARD STEPS, not a ramp — a smooth falloff here is exactly the
+ * gradient the brief rules out, and it would band anyway.
+ */
+export function glassHighlightTexture() {
+  const { canvas, ctx } = makeCanvas(128, 128);
+  ctx.fillStyle = PALETTE.additiveZero;
+  ctx.fillRect(0, 0, 128, 128);
+
+  /** @param {number} u0  left edge in texels @param {string[]} steps  bottom to top */
+  const strip = (u0, width, steps) => {
+    const band = 128 / steps.length;
+    for (let i = 0; i < steps.length; i++) {
+      ctx.fillStyle = steps[i];
+      ctx.fillRect(u0, Math.round(128 - (i + 1) * band), width, Math.ceil(band));
+    }
+  };
+
+  // ── where the strips sit, and why not in the middle ──────────────────────
+  // u = 0 is +x and the camera is on +z, so the front of the bottle is u =
+  // 0.25 — texel 32. A strip there runs straight down the centre of the
+  // silhouette and reads as a painted stripe rather than as a reflection,
+  // because a reflection you are looking at head-on is the one place a real one
+  // never is. Both are set off to one side of it.
+  //
+  // Narrow, too. Wide is what makes it paint: at three texels the strip is
+  // about two pixels of a 320-wide framebuffer, which is a glint.
+  strip(20, 3, PALETTE.additive.glintKey);
+  // Its companion, dimmer and further round: a window next to the lamp.
+  strip(44, 2, PALETTE.additive.glintMid);
+  // Round the back, catching the same light from the other side. Seen through
+  // two walls of glass, so dimmer again.
+  strip(92, 3, PALETTE.additive.glintFar);
+
+  return toTexture(canvas, { wrapS: RepeatWrapping, wrapT: ClampToEdgeWrapping });
+}
+
+/**
+ * The label.
+ *
+ * ── what this is not ────────────────────────────────────────────────────────
+ * It carries the GAME's name. There is no Spencerian script here, no swash, no
+ * ribbon or wave device of any kind, and the type is a sheared grotesque rather
+ * than a connected hand. What is borrowed is the FORM LANGUAGE that a hundred
+ * soda labels share and nobody owns: a red band round the middle of the bottle,
+ * white type on it, and a rule above and below that curves with the glass.
+ *
+ * ── it is authored at the size it is DISPLAYED at ───────────────────────────
+ * The band is drawn once and wrapped twice round the bottle (see
+ * `buildLabelGeometry`), so this image is one panel, and one panel covers the
+ * whole visible front of the bottle.
+ *
+ * At the 640x480 target and this framing, that front is about ninety
+ * framebuffer pixels across and fifty tall — so 128x64 lands within about a
+ * third of one texel per pixel. That ratio is the whole design constraint here,
+ * not the page size: authored at twice what it is shown at, every texel of
+ * carefully thresholded type gets averaged away on the trip to the screen and
+ * the logo arrives as a red smear with a lighter streak through it. (Measured,
+ * at the 320x240 target, where 128x64 was exactly twice too big.)
+ *
+ * Same rule the menu plates follow, and the same one `cardTexture` follows for
+ * a card in the hand. Bold, three words, nothing thinner than a texel.
+ */
+export function labelTexture() {
+  const w = 512;
+  const h = 768;
+  const { canvas, ctx } = makeCanvas(w, h);
+  // 그려지는 것이지 찍히는 것이 아니라, 이 파일에서 유일하게 스무딩을 켠다.
+  ctx.imageSmoothingEnabled = true;
+  ctx.clearRect(0, 0, w, h);
+
+  /**
+   * 흰 타원 하나, 그 위에 이름 하나.
+   *
+   * ── 한때 인쇄물 흉내를 냈고, 그건 과했다 ─────────────────────────────────
+   * 아치형 라틴 문자, 가운데 왕관 뚜껑 일러스트, 한글 제목, 하단 미세 인쇄 밴드까지
+   * 얹혀 있었다. 라벨은 화면에서 세로 200픽셀 남짓이고 그 위에 유리 한 겹과 블룸이
+   * 올라가므로, 요소를 넣을수록 읽히는 게 아니라 지저분해진다. 그래서 전부 걷어내고
+   * 종이 한 장만 남겼다.
+   *
+   * ── 그 판단은 다섯 요소에 대한 것이었고, 하나는 다르다 ──────────────────
+   * 걷어낸 뒤로 라벨은 **빈 스티커**였다. §7 이 1990년대 음료 그래픽을 이 세계의
+   * 목소리로 삼는데, 음료병에서 그 목소리가 사는 자리가 바로 여기다. 그래서 하나만
+   * 돌아온다: 이름, 벡터 획으로.
+   *
+   * 다섯이 실패한 이유가 하나에는 걸리지 않는 근거는 그때의 근거 그 자체다 —
+   * "요소를 넣을수록 지저분해진다" 는 요소 수에 대한 말이었다. 그리고 이건 폰트가
+   * 아니라 획이라 유리와 블룸 아래에서 얇아지지 않는다.
+   *
+   * 타원의 가로 지름은 페이지 폭의 절반이다. 메시가 `bodyRadius` 30mm 병을 160도
+   * 도는 호라서 페이지가 대응하는 호장이 2*pi*30*(160/360) = 83.8mm 이고, 라벨은
+   * `labelOvalWidth` 42mm — 거의 정확히 그 절반이다. 이 비율이 틀어지면 타원의
+   * 이심률이 틀어져서 "늘어난 라벨"로 즉시 읽힌다.
+   */
+  ctx.beginPath();
+  ctx.ellipse(w / 2, h / 2, (w * 0.5) / 2, (h * 0.96) / 2, 0, 0, Math.PI * 2);
+  ctx.fillStyle = PALETTE.label.paper;
+  ctx.fill();
+
+  /**
+   * ── 페이지의 세로축이 병을 **감는다.** 축을 따라가지 않는다 ─────────────
+   * 처음엔 반대로 놓았고 화면에서 이름이 90도 누워 나왔다. 메시는 `bodyRadius`
+   * 30mm 병을 160도 도는 호이고, 페이지의 h 가 그 호를 따라간다 — 타원이 화면에서
+   * 세로로 길어 보이는 것은 **감긴** 결과이지 페이지가 세로라서가 아니다.
+   *
+   * 그래서 텍스트 블록 전체를 90도 돌려서 그린다. 페이지 좌표를 다시 저술하지
+   * 않는 이유는 타원의 이심률 계산(위)이 지금의 w/h 관계에 걸려 있기 때문이다 —
+   * 축을 바꾸면 그 계산도 같이 바꿔야 하고, 회전은 한 줄이다.
+   */
+  ctx.save();
+  ctx.translate(w / 2, h / 2);
+  /**
+   * ── 이름은 병을 **가로지른다.** 병을 따라가지 않는다 ─────────────────────
+   * 여기가 `PI / 2` 였고, 그러면 이름이 병의 축을 따라 세로로 눕는다. 병이 62 도로
+   * 누워 있던 동안에는 그 세로가 화면에서 대각선이라 가로 글자처럼 읽혔다 —
+   * 우연히 맞았던 것이다. 병을 세우자(19 도) 이름이 그대로 세로로 섰다.
+   *
+   * 실제 음료 라벨의 이름은 병의 둘레를 도는 방향으로 앉는다. 그래서 90 도를 더
+   * 돌린다. 데칼이 160 도 호를 덮으므로 짧은 두 덩이는 앞면 안에 들어온다.
+   */
+  ctx.rotate(0);
+  /**
+   * 회전이 0 이 된 뒤의 좌표계: x 가 감기는 방향(둘레), y 가 병의 축.
+   *
+   * 값 셋은 전부 실측으로 다시 잡았다. 90 도 돌아 있던 동안에는 x 가 축이었고,
+   * 축 방향은 라벨이 길었으므로 96 이 들어갔다. 지금 x 는 둘레이고 데칼이 덮는
+   * 호는 그보다 짧다 — 96 그대로 두었더니 두 덩이의 끝이 앞면 밖으로 나갔다.
+   */
+  drawLettering(ctx, '한여름', {
+    x: 0,
+    y: -h * 0.12,
+    size: 74,
+    color: PALETTE.menu.labelInk,
+    tracking: 5,
+    align: 'center',
+  });
+  drawLettering(ctx, '알까기', {
+    x: 0,
+    y: h * 0.02,
+    size: 74,
+    color: PALETTE.menu.labelInk,
+    tracking: 5,
+    align: 'center',
+  });
+  // 아래를 받치는 줄 하나. §20 의 어휘이고, 인쇄물의 규칙선이다.
+  ctx.strokeStyle = PALETTE.menu.labelRule;
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.moveTo(-w * 0.22, h * 0.2);
+  ctx.lineTo(w * 0.22, h * 0.2);
+  ctx.stroke();
+  ctx.restore();
+
+  return toSmoothTexture(canvas);
+}
+
+/**
+ * The shadow under the bottle: one very soft, very faint ellipse.
+ *
+ * Not a rendered shadow, and not because one would be hard — a real one needs a
+ * light, a caster, a receiver and a depth pass to produce a dark blob on the
+ * floor. That IS the blob.
+ *
+ * ── it was four hard steps, and it was a CONTACT shadow ──────────────────
+ * 0.62 in the middle falling to 0.07 at the rim, in four discrete rings. That
+ * darkness is what a shadow looks like where an object meets a surface, and it
+ * was right while the bottle stood on one.
+ *
+ * §6.2 takes the surface away. What is left has one job — saying the bottle is
+ * ABOVE something — and §7 gives it one adjective, "very soft". So it is a
+ * continuous gradient rather than steps, it peaks at a fifth of what it did,
+ * and it reaches zero well inside the quad. A hard-edged shadow under a
+ * floating object is the thing that puts the floor back.
+ *
+ * The resolution went up with it: 64 texels was ample for four flat rings and
+ * is not for a gradient, which bands visibly when it is stretched across the
+ * two-and-a-half-unit quad `shadowScale` asks for.
+ */
+export function shadowTexture() {
+  const size = 128;
+  const { canvas, ctx } = makeCanvas(size, size);
+  ctx.clearRect(0, 0, size, size);
+  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  // The alphas are the falloff's shape and stay here; only the ink is the
+  // palette's. Squared-off in the middle so the core is broad rather than a
+  // point, then gone by 0.9 — the last tenth is what keeps the quad's own edge
+  // from ever being visible.
+  g.addColorStop(0, withAlpha(PALETTE.menu.shadow, 0.13));
+  g.addColorStop(0.35, withAlpha(PALETTE.menu.shadow, 0.1));
+  g.addColorStop(0.7, withAlpha(PALETTE.menu.shadow, 0.035));
+  g.addColorStop(0.9, withAlpha(PALETTE.menu.shadow, 0));
+  g.addColorStop(1, withAlpha(PALETTE.menu.shadow, 0));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+  ctx.fill();
+  return toTexture(canvas);
+}
+
+/**
+ * Foam.
+ *
+ * Cells rather than a froth: hard-edged blobs of three tones on a pale ground,
+ * packed on a jittered grid so no row lines up with the one above it. Tiles in
+ * both directions, because the foam column scrolls this upward as it rises and
+ * a seam crossing the bottle every half second is the one thing that would give
+ * the trick away.
+ *
+ * Cola foam is not white. It is a dirty cream that goes tan where it is thick,
+ * and painting it white is the fastest way to make a bottle of cola look like a
+ * bottle of beer.
+ */
+export function foamTexture() {
+  const size = 64;
+  const { canvas, ctx } = makeCanvas(size, size);
+  // Light enough to survive being seen through a wall of brown glass at 60%
+  // opacity, which is the only place it is ever seen.
+  ctx.fillStyle = PALETTE.menu.foam;
+  ctx.fillRect(0, 0, size, size);
+
+  const tones = PALETTE.menu.foamTones;
+  // A fixed pattern rather than a random one: this is drawn once at boot and
+  // has to look the same every run, and `Math.random` in a texture is how you
+  // get a bug that only reproduces one time in twenty.
+  const cells = [
+    [6, 5, 7], [22, 3, 5], [38, 7, 8], [54, 4, 6], [13, 14, 6], [30, 16, 9],
+    [47, 13, 5], [59, 17, 7], [3, 24, 8], [19, 27, 6], [36, 29, 7], [51, 25, 5],
+    [10, 37, 6], [26, 39, 8], [43, 36, 6], [58, 40, 7], [5, 49, 7], [21, 52, 5],
+    [34, 48, 8], [49, 54, 6], [61, 50, 5], [14, 60, 6], [30, 61, 7], [45, 62, 5],
+  ];
+  cells.forEach(([x, y, r], i) => {
+    ctx.fillStyle = tones[i % tones.length];
+    // Drawn four times, wrapped, so a blob crossing an edge comes back on the
+    // other side and the page tiles seamlessly.
+    for (const dx of [-size, 0, size]) {
+      for (const dy of [-size, 0, size]) {
+        ctx.beginPath();
+        ctx.arc(x + dx, y + dy, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  });
+
+  return toTexture(canvas, { wrapS: RepeatWrapping, wrapT: RepeatWrapping });
+}
+
+/**
+ * 입구에서 터지는 것. 128x64 한 장에 두 프레임.
+ *
+ * ── 각진 삼각 가시에서 뿜어지는 빛으로 ─────────────────────────────────────
+ * 예전 것은 하드 엣지 삼각형 여섯 개와 아홉 개, 그리고 채워진 원이었다. 브리프가
+ * "저해상도 스프라이트 1~2프레임" 을 허용하고 파티클 시스템을 배제한 것이 근거였고,
+ * 프레임 수는 여전히 옳다 — 이 일은 10분의 1초 만에 끝난다.
+ *
+ * 각진 것이 틀렸다. 탄산이 터지는 것은 **액체와 빛**이지 파편이 아니다. 같은 두
+ * 프레임을 부드러운 방사 스프레이로 다시 그린다: 뜨거운 심, 거기서 뻗는 가는
+ * 빛줄기, 그리고 함께 튀어 오르는 작은 방울들.
+ *
+ * 방울이 요점이다. 빛만 있으면 폭발이고, 방울이 섞여야 **탄산**이다 — 병에서
+ * 올라오던 거품과 같은 것이 한꺼번에 터져 나온 것으로 읽힌다.
+ */
+export function burstSheet() {
+  const { canvas, ctx } = makeCanvas(128, 64);
+  ctx.clearRect(0, 0, 128, 64);
+  const B = PALETTE.additive.burst;
+
+  /** 가운데에서 뻗는 빛줄기. 끝으로 갈수록 얇아지고 사라진다. */
+  const rays = (cx, cy, count, r0, r1, width, colour, phase) => {
+    for (let i = 0; i < count; i++) {
+      const a = phase + (i / count) * Math.PI * 2;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(a);
+      const g = ctx.createLinearGradient(r0, 0, r1, 0);
+      g.addColorStop(0, withAlpha(colour, 0.85));
+      g.addColorStop(0.45, withAlpha(colour, 0.4));
+      g.addColorStop(1, withAlpha(colour, 0));
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(r0, -width);
+      ctx.quadraticCurveTo((r0 + r1) / 2, -width * 0.3, r1, 0);
+      ctx.quadraticCurveTo((r0 + r1) / 2, width * 0.3, r0, width);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  };
+
+  /** 뜨거운 심. 빛줄기가 여기서 나오는 것으로 보여야 한다. */
+  const core = (cx, cy, r, colour) => {
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    g.addColorStop(0, withAlpha(colour, 1));
+    g.addColorStop(0.35, withAlpha(colour, 0.62));
+    g.addColorStop(1, withAlpha(colour, 0));
+    ctx.fillStyle = g;
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+  };
+
+  /**
+   * 튀어 오른 방울들.
+   *
+   * ── 속이 빈 테로 그렸다가 되돌렸다 ────────────────────────────────────────
+   * 병 안의 거품과 같은 것이니 같은 방식(테 + 정반사 + 빈 가운데)으로 그렸는데,
+   * 반지름이 2~3 텍셀이라 테가 테로 읽히지 않았다 — 작은 "o" 자국이 흩어진 것처럼
+   * 보였고, 그건 방울이 아니라 지저분함이다.
+   *
+   * 이 크기에서는 **채운다**. 날아가는 방울은 어차피 흐려지고, 눈이 찾는 것은 형태가
+   * 아니라 반짝임이다. 크기도 키웠다: 3 텍셀짜리 방울은 어떤 방식으로 그려도 점이다.
+   */
+  const drops = (cx, cy, list, colour) => {
+    for (const [dx, dy, dr] of list) {
+      const x = cx + dx;
+      const y = cy + dy;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, dr);
+      g.addColorStop(0, withAlpha(PALETTE.additive.bubble.glint, 0.95));
+      g.addColorStop(0.42, withAlpha(colour, 0.6));
+      g.addColorStop(1, withAlpha(colour, 0));
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(x, y, dr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  };
+
+  // 프레임 0: 터지는 순간. 심이 밝고 줄기는 아직 짧다.
+  core(32, 32, 13, B.popCore);
+  rays(32, 32, 7, 5, 27, 4.5, B.popWide, 0);
+  rays(32, 32, 5, 4, 17, 3, B.popTight, Math.PI / 6);
+  drops(32, 32, [[-14, -10, 5.5], [12, -13, 4.6], [5, 15, 4], [-9, 13, 3.4]], B.popWide);
+
+  // 프레임 1: 흩어지는 순간. 심은 식고 줄기는 길고 가늘어졌으며 방울이 멀리 갔다.
+  core(96, 32, 7, B.sprayCore);
+  rays(96, 32, 10, 10, 31, 2.6, B.sprayWide, 0.2);
+  rays(96, 32, 6, 7, 22, 2, B.sprayTight, 0.9);
+  drops(
+    96,
+    32,
+    [[-21, -15, 4.4], [18, -18, 3.8], [8, 22, 3.4], [-15, 19, 3], [25, 7, 2.6]],
+    B.sprayWide,
+  );
+
+  return toTexture(canvas);
+}
+
 export function menuPlateTexture(label, state, { width = 256, height = 52, scale = 1, onWater = false } = {}) {
   /**
    * `scale` 는 텍셀 배수다. 좌표는 프레임 픽셀 그대로 두고 캔버스만 키운다.
