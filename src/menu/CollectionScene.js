@@ -1,9 +1,8 @@
 import { Group, Mesh, PlaneGeometry, Raycaster, Vector2 } from 'three';
 import { CARDS } from '../game/cards/cardCatalog.js';
-import { cardFaceTexture } from '../render/cardTexture.js';
 import { ROLE, SIZE, SPACE } from '../core/tokens.js';
 import { createSpriteMaterial } from './menuMaterials.js';
-import { menuPlateTexture, panelTexture } from './menuTextures.js';
+import { collectionCardTexture, menuPlateTexture, panelTexture } from './menuTextures.js';
 import { anchorTopLeft, solvePanel } from './panelLayout.js';
 
 /**
@@ -156,7 +155,19 @@ export class CollectionScene {
          * 폭을 요청하는 쪽이 이미 버려진 GL 텍스처를 받는다. 창을 끌면 폭이
          * 계속 바뀌므로 이 코드는 자주 돈다.
          */
-        entry.map = cardFaceTexture(entry.card, cellW);
+        /**
+         * 게임의 `cardFaceTexture` 가 아니라 메뉴 전용으로 굽는다.
+         *
+         * 그건 흰 유리판이고 판 위에서는 그게 맞다. 컬렉션은 판이 아니라 물
+         * 속이고, 이 화면에서 흰 종이는 유일하게 남은 다른 재료였다.
+         * 바뀌는 것은 재료뿐이다 — 이름·강조색·무늬·아이콘은 게임의 것을
+         * 그대로 부른다. 자세한 것은 `collectionCardTexture` 머리말.
+         *
+         * `locked` 는 아직 false 고정이다 — 이 화면에는 소유 개념이 없다.
+         * 카탈로그의 여섯 장이 전부 보이고, 잠금은 카드 자신의 설명이 말한다.
+         * 인자를 미리 둔 것은 그 개념이 생겼을 때 여기 한 줄이면 되게 하려는 것이다.
+         */
+        entry.map = collectionCardTexture(entry.card, cellW, { locked: false });
         entry.width = cellW;
         entry.mesh.material.uniforms.uMap.value = entry.map;
       }

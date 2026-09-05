@@ -86,7 +86,11 @@ export function accentOf(card) {
  * @param {string} id     카탈로그의 카드 id
  * @param {{x:number,y:number,w:number,h:number,accent:string}} panel
  */
-function drawArtMotif(ctx, id, { x, y, w, h, accent }) {
+/**
+ * 카드마다 다른 절차적 무늬. 메뉴의 컬렉션도 이것을 쓴다 — 판에서 집는 카드와
+ * 컬렉션의 카드가 같은 그림이어야 "그 카드" 로 알아본다.
+ */
+export function drawArtMotif(ctx, id, { x, y, w, h, accent }) {
   const cx = x + w / 2;
   const cy = y + h / 2;
   ctx.save();
