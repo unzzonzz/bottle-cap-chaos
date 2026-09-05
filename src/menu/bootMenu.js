@@ -1404,9 +1404,9 @@ export function bootMenu(
 
     // 배경의 물. 렌더 클럭이고 게임 상태를 읽지도 쓰지도 않는다.
     // 젓는 세기를 돌려받아 제목에 그대로 넘긴다 — 둘이 같은 물이어야 한다.
-    const stirred = water.update(dt, viewport.resolution);
+    water.update(dt, viewport.resolution);
 
-    title.update(dt, stirred, current === 'menu' ? 1 : 0);
+    title.update(dt, current === 'menu' ? 1 : 0);
     items.update(dt, current === 'menu' ? 1 : 0);
     settings?.update(dt);
     // 마크 목록도 호버가 움직인다. 예전에는 `update` 가 빈 함수라 부를 이유가 없었다.

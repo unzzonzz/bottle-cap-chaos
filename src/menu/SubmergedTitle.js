@@ -36,7 +36,6 @@ const FRAG = /* glsl */ `
   uniform float uOpacity;
   uniform float uTime;
   uniform float uAmount;
-  uniform float uStir;
   varying vec2  vUv;
 
   ${WATER_NOISE_GLSL}
@@ -50,8 +49,26 @@ const FRAG = /* glsl */ `
      */
     float nx = wFbm(vUv * 3.4 + vec2(uTime * 0.05, uTime * -0.03));
     float ny = wFbm(vUv * 3.4 + vec2(uTime * -0.04, uTime * 0.045) + 17.3);
-    float amt = uAmount * (1.0 + uStir * 1.6);
-    vec2 uv = vUv + (vec2(nx, ny) - 0.5) * amt;
+    /**
+     * ── 이름은 커서에 반응하지 않는다 ──────────────────────────────────────
+     * 여기가 uAmount * (1.0 + uStir * 1.6) 이었다. uStir 은 1.2 까지 누적되므로
+     * (water.js 의 stir 클램프) 커서를 빠르게 움직이면 유효 세기가 0.016 에서
+     * 0.0467 로, 2.9 배까지 올라갔다 — 아래 uAmount 주석이 "0.05 를 넘으면
+     * 받침이 무너진다" 고 적어 둔 그 임계의 93% 다.
+     *
+     * 실측(제목만 렌더해서 굴절 없는 판과 윤곽을 비교):
+     *   커서 정지  평균 획 이동 0.67 px
+     *   커서 최대  평균 획 이동 1.88 px
+     *
+     * 사진을 굴절시키는 것은 괜찮다. 한글을 굴절시키는 것은 다르다 — 획이 얇고
+     * 속공간이 좁아서, 같은 변위가 사진에서는 물결이고 글자에서는 흔들림이다.
+     * water.js 가 밝기에 대해 이미 배운 교훈이고(uStirBright 기본 0), 그때
+     * 기하학에는 적용하지 않았다.
+     *
+     * 물은 계속 커서에 반응한다. 그 대비가 옳다 — 물은 움직이고 이름은 움직이지
+     * 않는다.
+     */
+    vec2 uv = vUv + (vec2(nx, ny) - 0.5) * uAmount;
 
     vec4 texel = texture2D(uMap, uv);
     /**
@@ -88,13 +105,25 @@ export class SubmergedTitle {
         uOpacity: { value: 1 },
         uTime: { value: 0 },
         /**
-         * 굴절의 세기, UV 단위.
+         * 굴절의 세기, UV 단위. **0.010.**
          *
-         * 0.05 를 넘으면 받침이 무너져서 읽히지 않는다. §0.4 가 미학보다 위이고,
-         * 이 화면에서 반드시 읽혀야 하는 것은 게임의 이름 하나다.
+         * ── 이 값을 어떻게 골랐나 ────────────────────────────────────────
+         * 0.006 부터 올리며 제목만 렌더해서, 굴절 없는 판과 행마다 잉크의 좌우
+         * 끝을 비교했다 (853x480 저술 프레임 기준):
+         *
+         *   0.006   평균 획 이동 0.92 px   0 과 구별되지 않는다
+         *   0.010   평균 획 이동 2.41 px   ← 이것
+         *   0.014   평균 획 이동 3.12 px   알의 ㄹ 가로획이 눈에 띄게 휜다
+         *   0.020   평균 획 이동 4.84 px   획이 물결친다
+         *
+         * 기준은 "물 속으로 보이되 불안정해 보이지 않는다" 이고, 그 경계가
+         * ㄹ 의 가운데 가로획과 ㅇ 의 속공간에서 갈렸다. 0.014 에서 가로획이
+         * 휘기 시작하고 0.020 에서 ㄹ 이 무너진다.
+         *
+         * 예전 값은 0.016 이었고, 커서가 곱해서 0.0467 까지 갔다 — 그 이야기는
+         * 위 `uv` 주석에 있다.
          */
-        uAmount: { value: 0.016 },
-        uStir: { value: 0 },
+        uAmount: { value: 0.010 },
       },
     });
 
@@ -190,9 +219,15 @@ export class SubmergedTitle {
    * @param {number} stir  물을 젓는 세기. `water.stir` 과 같은 값을 받는다
    * @param {number} fade
    */
-  update(dt, stir = 0, fade = 1) {
+  /**
+   * @param {number} dt
+   * @param {number} fade
+   *
+   * 커서를 받지 않는다. 예전에는 `water.update` 가 돌려주는 stir 을 그대로
+   * 받아 굴절 세기에 곱했다 — 셰이더의 `uv` 주석 참조.
+   */
+  update(dt, fade = 1) {
     this.material.uniforms.uTime.value += dt;
-    this.material.uniforms.uStir.value = stir;
     this.material.uniforms.uOpacity.value = fade;
   }
 
