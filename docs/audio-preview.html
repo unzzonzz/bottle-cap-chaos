@@ -1,0 +1,156 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>충돌음 실측 — 한여름 알까기</title>
+<style>
+  :root { color-scheme: light; }
+  body {
+    margin: 0; padding: 28px 24px 64px;
+    font: 15px/1.6 'MSA Sans', system-ui, sans-serif;
+    background: #f4fafe; color: #0d3b8c;
+  }
+  h1 { font-size: 22px; font-weight: 400; margin: 0 0 4px; }
+  p { margin: 0 0 14px; max-width: 74ch; color: #4a6a88; }
+  table { border-collapse: collapse; margin: 8px 0 26px; font-size: 13px; }
+  th, td { padding: 4px 12px 4px 0; text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+  th { font-weight: 400; color: #7c9ab4; border-bottom: 1px solid #bcdcf2; }
+  code { font-family: ui-monospace, monospace; font-size: 12px; }
+  button {
+    font: inherit; color: #0d3b8c; background: none; border: 0;
+    border-bottom: 1px solid #0d3b8c; padding: 0 0 4px; cursor: pointer;
+  }
+  #log { white-space: pre; font-family: ui-monospace, monospace; font-size: 12px; }
+</style>
+<h1>충돌음 실측</h1>
+<p>
+  <code>src/audio/soundBank.js</code> 의 정의를 <code>Mixer</code> 와
+  <code>Synth</code> 로 <b>실제로 렌더해서</b> 잰다 — 오프라인 컨텍스트라 소리는
+  안 나고 숫자만 나온다. 목업이 아니라 게임이 쓰는 바로 그 그래프다.
+</p>
+<p>
+  <b>렌더마다 결과가 조금씩 다르다.</b> 잡음 레이어가 매번 다른 위치에서 읽히고
+  지터가 피치를 흔들기 때문이다. 그래서 모든 값이 <b>N회 평균 ± 반폭</b>이고,
+  반폭보다 작은 차이는 차이가 아니다. 창 길이가 결론을 바꾸므로 각 열의 정의를
+  적어 둔다:
+</p>
+<table>
+  <tr><th>열</th><th style="text-align:left">정의</th></tr>
+  <tr><td>중심</td><td style="text-align:left">스펙트럴 센트로이드, <b>앞 20 ms</b>. 트랜지언트의 밝기</td></tr>
+  <tr><td>꼬리</td><td style="text-align:left">170 ms 이후 에너지 − 전체 에너지 (dB)</td></tr>
+  <tr><td>250ms</td><td style="text-align:left">250–280 ms 구간 − 앞 30 ms (dB). 남아 있는 것</td></tr>
+  <tr><td>연쇄</td><td style="text-align:left">두 번째 타격의 온셋 − 첫 타격이 120 ms 뒤에 내고 있는 것 (dB)</td></tr>
+</table>
+<p>
+  <b>연쇄 열은 연쇄에 끼는 소리에만 뜻이 있다.</b> <code>cap_cap</code> 은 한 번의
+  샷에서 열 번까지 이어지므로 앞 타격의 잔향에 뒤 타격이 묻히면 안 되고, 그 값이
+  이 열이다. <code>goal_post</code> 나 <code>ball_net</code> 은 440 ms 를 울리는
+  일회성 소리라 120 ms 뒤에도 거의 최고점에 있다 — 낮은 값이 결함이 아니라 그
+  소리가 그런 소리라는 뜻이다.
+</p>
+<p><button id="go">측정</button></p>
+<div id="log">누르면 시작한다. 여섯 소리 × 4회, 몇 초 걸린다.</div>
+<script type="module">
+import { Mixer } from '/src/audio/Mixer.js';
+import { Synth } from '/src/audio/Synth.js';
+import { SOUNDS } from '/src/audio/soundBank.js';
+import { CONFIG } from '/src/game/config.js';
+
+const SR = 48000;
+const RUNS = 4;
+/** 충돌음 여섯. §13 이 어휘를 바꾼 것이 정확히 이 집합이다. */
+const IDS = ['cap_cap', 'cap_wall', 'ball_cap', 'ball_wall', 'ball_net', 'goal_post'];
+
+/**
+ * 한 번 렌더한다. `Mixer` 에 오프라인 컨텍스트를 꽂아 `_build()` 를 부르는 것이
+ * 요점 — 리미터도 잔향도 크러셔도 게임과 같은 노드로 서 있어야 숫자가 의미를 갖는다.
+ */
+async function render(def, seconds = 1.2, intensity = 1) {
+  const ctx = new OfflineAudioContext(2, Math.round(SR * seconds), SR);
+  const mixer = new Mixer(CONFIG.audio);
+  mixer.ctx = ctx;
+  mixer._build();
+  new Synth(mixer, CONFIG.audio).play(def, { intensity });
+  const buf = await ctx.startRendering();
+  const L = buf.getChannelData(0), R = buf.getChannelData(1);
+  const m = new Float32Array(L.length);
+  for (let i = 0; i < L.length; i++) m[i] = (L[i] + R[i]) * 0.5;
+  return m;
+}
+
+const rms = (m, t0, t1) => {
+  const a = Math.max(0, Math.round(t0 * SR)), b = Math.min(m.length, Math.round(t1 * SR));
+  let s = 0;
+  for (let i = a; i < b; i++) s += m[i] * m[i];
+  return b > a ? Math.sqrt(s / (b - a)) : 0;
+};
+const db = (x) => (x > 0 ? 20 * Math.log10(x) : -Infinity);
+
+/** 스펙트럴 센트로이드. 해닝 창 + 기수 2 FFT. */
+function centroid(m, t0, t1) {
+  const a = Math.round(t0 * SR), b = Math.round(t1 * SR), w = b - a;
+  let n = 1;
+  while (n < w) n <<= 1;
+  const re = new Float64Array(n), im = new Float64Array(n);
+  for (let i = 0; i < w; i++) re[i] = m[a + i] * (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (w - 1)));
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = (-2 * Math.PI) / len, wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let k = 0; k < len / 2; k++) {
+        const ur = re[i + k], ui = im[i + k];
+        const vr = re[i + k + len / 2] * cr - im[i + k + len / 2] * ci;
+        const vi = re[i + k + len / 2] * ci + im[i + k + len / 2] * cr;
+        re[i + k] = ur + vr; im[i + k] = ui + vi;
+        re[i + k + len / 2] = ur - vr; im[i + k + len / 2] = ui - vi;
+        const nr = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = nr;
+      }
+    }
+  }
+  let num = 0, den = 0;
+  for (let k = 1; k < n / 2; k++) {
+    const mag = Math.hypot(re[k], im[k]);
+    num += ((k * SR) / n) * mag;
+    den += mag;
+  }
+  return den ? num / den : 0;
+}
+
+const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+const half = (a) => (Math.max(...a) - Math.min(...a)) / 2;
+const cell = (a, d = 1) => `${mean(a).toFixed(d)} ±${half(a).toFixed(d)}`;
+
+document.getElementById('go').onclick = async () => {
+  const log = document.getElementById('log');
+  const head = ['소리'.padEnd(11), '보내기', '중심 Hz'.padStart(14), '꼬리 dB'.padStart(14),
+    '250ms dB'.padStart(14), '연쇄 dB'.padStart(14)].join('  ');
+  const lines = [head, '─'.repeat(head.length)];
+  log.textContent = '측정 중…';
+  for (const id of IDS) {
+    const def = SOUNDS[id];
+    const cen = [], tail = [], at250 = [], chain = [];
+    for (let r = 0; r < RUNS; r++) {
+      const m = await render(def);
+      cen.push(centroid(m, 0, 0.02));
+      tail.push(db(rms(m, 0.17, 1.2)) - db(rms(m, 0, 1.2)));
+      at250.push(db(rms(m, 0.25, 0.28)) - db(rms(m, 0, 0.03)));
+      chain.push(db(rms(m, 0, 0.03)) - db(rms(m, 0.12, 0.15)));
+    }
+    lines.push([
+      id.padEnd(11),
+      String(def.send ?? '(cat)').padStart(6),
+      cell(cen, 0).padStart(14),
+      cell(tail).padStart(14),
+      cell(at250).padStart(14),
+      cell(chain).padStart(14),
+    ].join('  '));
+    log.textContent = lines.join('\n');
+  }
+  log.textContent = `${lines.join('\n')}\n\n${RUNS}회 평균. 값이 궁금한 이유는 soundBank.js 의 cap_cap 머리말에 있다.`;
+};
+</script>

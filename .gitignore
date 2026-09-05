@@ -1,0 +1,10 @@
+node_modules
+dist
+.DS_Store
+*.local
+
+
+# determinism harness: build output and reports posted by other devices.
+# The LOGS are committed — they are the fixture both machines must share.
+tools/determinism/build
+tools/determinism/received

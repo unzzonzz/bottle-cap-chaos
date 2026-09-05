@@ -1,0 +1,202 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+
+</head>
+<body>
+<!-- 시안 C "수면" 원본. 아트 디렉션 문서에서 그대로 떼어 왔다.
+     비교 기준이므로 손대지 마라 — 여기 값이 바뀌면 비교가 의미를 잃는다. -->
+
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@800&family=Gowun+Dodum&display=swap">
+<style>
+  body { margin: 0; }
+  a { color: #f4fafe; }
+  .fr { position: relative; width: 853px; height: 480px; overflow: hidden;
+        background: #1f7ecb; font-family: 'Gowun Dodum', system-ui, sans-serif;
+        user-select: none; }
+
+  /* 물. 두 겹의 굴절 무늬가 서로 다른 속도로 흐른다 */
+  .water { position: absolute; inset: -12%;
+           background:
+             radial-gradient(70% 55% at 30% 22%, #7fc4ef 0%, #2f8ed6 42%, #1451b8 88%);
+           will-change: transform; }
+  .caustic { position: absolute; inset: -20%; opacity: .5; mix-blend-mode: screen;
+             will-change: transform; }
+
+  /* 제목은 수면 **아래** 있다. 물이 글자를 일그러뜨린다 */
+  .subWrap { position: absolute; left: -56px; right: -56px; top: 6px; height: 470px;
+             filter: url(#ripple); will-change: transform; }
+  .sub { font-family: 'Nanum Myeongjo', serif; font-weight: 800; color: #f4fafe;
+         font-size: 206px; line-height: .78; letter-spacing: -.035em;
+         transform: rotate(-7deg); padding-left: 30px; }
+  .sub .l2 { padding-left: 176px; }
+
+  /* 수면을 뚫고 나온 병 — 위쪽은 밝고 아래쪽은 물에 잠긴다 */
+  .bottle { position: absolute; right: 62px; top: 42px; width: 112px; height: 314px;
+            z-index: 2; will-change: transform; }
+  .glass { position: absolute; inset: 0; border-radius: 38px 38px 24px 24px / 28px 28px 20px 20px;
+           /* 수면(top 214, 병 기준 172) 위는 밝고 아래는 물에 잠긴다 */
+           background: linear-gradient(180deg, rgba(244,250,254,.72) 0%, rgba(244,250,254,.5) 52%,
+                       rgba(20,81,184,.3) 58%, rgba(13,59,140,.36) 100%);
+           box-shadow: inset 0 0 0 1.4px rgba(244,250,254,.9); }
+  .neck { position: absolute; left: 50%; top: -50px; width: 32px; height: 58px; margin-left: -16px;
+          border-radius: 9px 9px 3px 3px; background: rgba(244,250,254,.7);
+          box-shadow: inset 0 0 0 1.4px rgba(244,250,254,.9); }
+  .cap { position: absolute; left: 50%; top: -62px; width: 38px; height: 16px; margin-left: -19px;
+         border-radius: 4px; background: #f4fafe; will-change: transform; }
+  /* 수면선 — 병을 가로지르는 밝은 띠 */
+  .surface { position: absolute; left: -34px; right: -34px; top: 214px; height: 3px; z-index: 0;
+             background: linear-gradient(90deg, transparent, #f4fafe 22%, #f4fafe 78%, transparent);
+             opacity: .85; will-change: transform; }
+
+  /* 구석의 작은 표식만. 레퍼런스 3 의 절제 */
+  .cn { position: absolute; font-size: 10px; letter-spacing: .22em; color: #dbeefb; }
+  .num { position: absolute; left: 30px; bottom: 26px; font-family: 'Nanum Myeongjo', serif;
+         font-size: 26px; color: #f4fafe; line-height: .92; letter-spacing: .04em; }
+  .num i { display: block; font-style: normal; font-size: 26px; }
+
+  .nav { position: absolute; right: 30px; bottom: 28px; display: flex; gap: 24px; align-items: baseline; }
+  .nav .it { font-size: 12px; letter-spacing: .2em; color: #f4fafe; cursor: pointer;
+             position: relative; will-change: transform; }
+  .nav .it.s { font-size: 10px; color: #cfe6f7; }
+  .nav .it .u { position: absolute; left: 0; bottom: -6px; height: 1px; width: 0; background: currentColor; }
+</style>
+
+<div class="fr">
+  <svg width="0" height="0" style="position:absolute">
+    <filter id="ripple" x="-20%" y="-20%" width="140%" height="140%">
+      <feTurbulence id="turb" type="fractalNoise" baseFrequency="0.012 0.026" numOctaves="2" seed="7" result="n"/>
+      <feDisplacementMap id="disp" in="SourceGraphic" in2="n" scale="12" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <filter id="caus" x="-20%" y="-20%" width="140%" height="140%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.008 0.02" numOctaves="3" seed="3" result="c"/>
+      <feColorMatrix in="c" type="matrix"
+        values="0 0 0 0 0.85  0 0 0 0 0.94  0 0 0 0 1  0 0 0 -1.6 1.05"/>
+    </filter>
+  </svg>
+
+  <div class="water"></div>
+  <svg class="caustic" viewBox="0 0 900 560" preserveAspectRatio="none">
+    <rect width="900" height="560" filter="url(#caus)"/>
+  </svg>
+
+  <div class="subWrap">
+    <div class="sub"><div>한여름</div><div class="l2">알까기</div></div>
+  </div>
+
+  <div class="bottle">
+    <div class="cap"></div><div class="neck"></div><div class="glass"></div>
+  </div>
+  <div class="surface"></div>
+
+  <div class="num"><i>07</i><i>06</i></div>
+
+  <div class="nav">
+    <div class="it">PLAY<span class="u"></span></div>
+    <div class="it s">COLLECTION<span class="u"></span></div>
+    <div class="it s">SETTINGS<span class="u"></span></div>
+  </div>
+</div>
+
+<script data-dc-script>
+/**
+ * 구조 C — 수면.
+ *
+ * 제목이 물 **아래** 있다. `feTurbulence` + `feDisplacementMap` 이 매 프레임 글자를
+ * 실제로 일그러뜨리므로, 이 화면은 가만히 있어도 절대 정지하지 않는다 — 레퍼런스 3
+ * 이 인쇄물로 보여 준 것을 움직이는 매체에서 하면 이렇게 된다.
+ *
+ * 병은 수면을 뚫고 서 있다. 수면선 위는 밝고 아래는 파랑에 잠긴다. 커서는 물을
+ * 미는 것이지 물건을 미는 것이 아니라서, 굴절의 세기가 커서 속도를 따라간다.
+ */
+class Component extends DCLogic {
+  componentDidMount() {
+    var root = document.querySelector('.fr');
+    if (!root || root.dataset.w) return;
+    root.dataset.w = '1';
+    var q = function (s) { return root.querySelector(s); };
+    var turb = root.querySelector('#turb'), disp = root.querySelector('#disp');
+    var water = q('.water'), caus = q('.caustic'), sub = q('.subWrap'),
+        bottle = q('.bottle'), cap = q('.cap'), surf = q('.surface');
+
+    var S = function (w) { return { v: 0, x: 0, t: 0, w: w }; };
+    var st = function (s, dt) {
+      var f = 1 + 2 * dt * s.w, oo = s.w * s.w, dtoo = dt * oo, det = f + dt * dtoo;
+      s.v = (s.v + dtoo * (s.t - s.x)) / det;
+      s.x = (f * s.x + dt * s.v + dt * dtoo * s.t) / det;
+    };
+    var wx = S(4.0), wy = S(4.0), tx = S(5.5), ty = S(5.5), bx = S(6.5), by = S(6.5),
+        stir = S(1.8), ent = S(2.0);
+    var mx = 0, my = 0, on = false, lastX = 0, lastY = 0;
+
+    root.addEventListener('pointermove', function (e) {
+      var r = root.getBoundingClientRect();
+      var nx = ((e.clientX - r.left) / r.width) * 2 - 1;
+      var ny = ((e.clientY - r.top) / r.height) * 2 - 1;
+      // 물을 젓는 세기는 커서의 **속도**다
+      stir.v += Math.min(60, (Math.abs(nx - lastX) + Math.abs(ny - lastY)) * 900);
+      lastX = nx; lastY = ny; mx = nx; my = ny; on = true;
+    });
+    root.addEventListener('pointerleave', function () { on = false; mx = 0; my = 0; });
+    root.addEventListener('pointerdown', function () { stir.v += 130; });
+
+    [].slice.call(root.querySelectorAll('.nav .it')).forEach(function (it) {
+      var u = it.querySelector('.u'), w = S(11), t2 = S(9);
+      it.__s = { w: w, t2: t2, u: u };
+      it.addEventListener('pointerenter', function () { w.t = it.getBoundingClientRect().width; t2.t = -2; });
+      it.addEventListener('pointerleave', function () { w.t = 0; t2.t = 0; });
+    });
+    var its = [].slice.call(root.querySelectorAll('.nav .it'));
+
+    ent.t = 1;
+    var mounted = performance.now(), last = mounted;
+    var loop = function (now) {
+      var dt = Math.min(.05, (now - last) / 1000); last = now;
+      var t = now / 1000;
+      if (ent.x < .02 && now - mounted > 1000) { ent.x = 1; ent.v = 0; }
+
+      wx.t = on ? mx * 16 : 0; wy.t = on ? my * 10 : 0;
+      tx.t = on ? -mx * 9 : 0; ty.t = on ? -my * 6 : 0;
+      bx.t = on ? mx * 6 : 0;  by.t = on ? my * 4 : 0;
+      stir.t = 0;
+      [wx, wy, tx, ty, bx, by, stir, ent].forEach(function (s) { st(s, dt); });
+      var E = ent.x;
+
+      // 굴절 — 늘 흐르고, 저으면 세진다
+      var base = 0.0115 + Math.sin(t * .21) * 0.0022;
+      turb.setAttribute('baseFrequency', base.toFixed(5) + ' ' + (base * 2.2).toFixed(5));
+      disp.setAttribute('scale', (9 + Math.sin(t * .8) * 3.5 + Math.min(34, Math.abs(stir.x) * .5)).toFixed(2));
+
+      water.style.transform = 'translate(' + (wx.x * .4).toFixed(2) + 'px,' + (wy.x * .4).toFixed(2) + 'px)';
+      caus.style.transform = 'translate(' + (Math.sin(t * .17) * 26 + wx.x).toFixed(2) + 'px,' +
+        (Math.cos(t * .13) * 18 + wy.x).toFixed(2) + 'px)';
+      sub.style.transform = 'translate(' + tx.x.toFixed(2) + 'px,' +
+        (ty.x + (1 - E) * 34).toFixed(2) + 'px)';
+      sub.style.opacity = E.toFixed(3);
+      bottle.style.transform = 'translate(' + bx.x.toFixed(2) + 'px,' +
+        (by.x + Math.sin(t * .44) * 4 + (1 - E) * 26).toFixed(2) + 'px)';
+      bottle.style.opacity = E.toFixed(3);
+      cap.style.transform = 'rotate(' + (Math.sin(t * .6) * 1.6).toFixed(2) + 'deg)';
+      surf.style.transform = 'translate(' + (bx.x * .6).toFixed(2) + 'px,' +
+        (by.x * .6 + Math.sin(t * .9) * 2.2).toFixed(2) + 'px) scaleX(' + Math.max(0, Math.min(1, E * 1.2)).toFixed(3) + ')';
+
+      its.forEach(function (it, i) {
+        var s = it.__s; st(s.w, dt); st(s.t2, dt);
+        s.u.style.width = Math.max(0, s.w.x).toFixed(1) + 'px';
+        var e1 = Math.max(0, Math.min(1, (E - .58 - i * .08) / .36));
+        it.style.opacity = e1.toFixed(3);
+        it.style.transform = 'translateY(' + (s.t2.x + (1 - e1) * 8).toFixed(2) + 'px)';
+      });
+
+      this._r = requestAnimationFrame(loop);
+    }.bind(this);
+    this._r = requestAnimationFrame(loop);
+  }
+  componentWillUnmount() { if (this._r) cancelAnimationFrame(this._r); }
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

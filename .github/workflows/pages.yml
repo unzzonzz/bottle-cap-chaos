@@ -1,0 +1,62 @@
+# Build the site and publish it to GitHub Pages.
+#
+# ── why this exists at all ───────────────────────────────────────────────────
+# Pages was serving this branch's files directly, which meant it was serving the
+# SOURCE: `index.html` asked the browser for `/src/main.js`, which is both the
+# wrong path under a project site and a module full of bare specifiers that no
+# browser can resolve without a bundler. The page loaded and nothing ran.
+#
+# So the branch stays source-only — `dist` is still gitignored — and the build
+# happens here.
+name: Pages
+
+on:
+  push:
+    branches: [cap-viewer]
+  # So a broken deploy can be retried without an empty commit.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time, and a superseded one is abandoned rather than queued:
+# the newer commit is the one anybody wants to see.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build
+        env:
+          # Derived from the repository rather than written out, so a rename or
+          # a fork carries it. See the note on `base` in `vite.config.js`.
+          MSA_BASE: /${{ github.event.repository.name }}/
+        run: npm run build:pages
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,116 @@
+# Third-party notices
+
+## MSA Sans (src/ui/fonts/)
+
+The UI typeface is a subset of **Gowun Dodum** (고운돋움) by Yanghee Ryu (류양희),
+licensed under the SIL Open Font License 1.1. The full licence text is in
+`src/ui/fonts/OFL.txt`, and the copyright and licence records are preserved
+inside the font binary itself.
+
+- Upstream: https://github.com/yangheeryu/Gowun-Dodum
+- Distributed via: https://github.com/google/fonts/tree/main/ofl/gowundodum
+- Version subsetted: 2.000
+- Presented as "MSA Sans". Gowun Dodum declares **no** Reserved Font Name, so
+  OFL 1.1 §3 does not require the rename; it is a project convention, so that a
+  packaged build and a machine with the font already installed resolve to the
+  same metrics under the same family name. The copyright (name ID 0), licence
+  (13) and licence URL (14) records are carried through unchanged, and the
+  unique-ID record names what this file actually is.
+
+## MSA Display (src/ui/fonts/)
+
+The display typeface is a subset of **NanumMyeongjo ExtraBold** (나눔명조) by NHN
+Corporation, designed by FONTRIX, licensed under the SIL Open Font License 1.1.
+The full licence text is in `src/ui/fonts/OFL-NanumMyeongjo.txt`.
+
+- Upstream: https://github.com/google/fonts/tree/main/ofl/nanummyeongjo
+- Version subsetted: 2.032
+
+**The rename is required, not a convention.** Nanum declares Reserved Font Names
+— "Nanum", "NanumMyeongjo" and others — and OFL 1.1 §3 forbids a Modified
+Version from using them. A subset is a Modified Version, so this file may not be
+called Nanum anything. It is presented as "MSA Display". The copyright (name ID
+0) is carried through unchanged and the licence records (13, 14) say what this
+file is and where the licence lives.
+
+### Why a second face at all
+
+`MSA Sans` is a text face with no ambition to be a headline, and that was the
+right half of §5's brief. The other half — the expressive display voice — was
+being drawn as vector strokes (`src/ui/lettering.js`). Strokes of a constant
+width make a geometric letter; the references this direction is built on are
+high-contrast **serif** Korean, and stroke contrast is not something a stroke
+renderer can fake. So the display half became a face.
+
+`lettering.js` did not go away and must not: it composes any Hangul syllable from
+jamo, so anywhere user input can reach — nicknames — still belongs to it. This
+face is for **authored strings only**, which is what lets the subset be tiny.
+
+### What was kept
+
+| range | why |
+|---|---|
+| `한 여 름 알 까 기` | The game's name, set as the home screen's display type. |
+| `0-9` | The date stamp, and any large numeral set in the display voice. |
+
+**That is the whole subset — 17 glyphs, 3 KB.** It is safe because nothing user-
+supplied is ever set in this face. **If you set a new authored string in
+`MSA Display`, add its syllables here and re-subset**, or it renders as tofu with
+no error. The subset command is in this file's history; `pyftsubset --text=...`
+with `--name-IDs` is the whole of it.
+
+### Weight
+
+One static face, declared `font-weight: 400`. The source is ExtraBold, but it is
+the only weight in this family, so declaring it 400 is what stops a browser
+synthesising a bolder one on top of an already-heavy face. Same reasoning as
+`FONT_WEIGHTS` for the text face, below.
+
+---
+
+## MSA Sans (src/ui/fonts/) — continued
+
+### It was Pretendard, and why it is not
+
+The previous typeface was a subset of Pretendard by Kil Hyung-jin (길형진), also
+OFL 1.1, in two weights. That choice was made for the art direction before this
+one: a Korean-first humanist sans with a wide weight axis, as the nearest voice
+to the Frutiger family the aero look is usually described with.
+
+The current direction asks for the opposite of a wide axis — the display voice
+is DRAWN (`src/ui/lettering.js`) and the face is left with the quiet, small,
+precise half of the work. Gowun Dodum is a single weight with open counters and
+slightly modulated strokes, which is that half.
+
+### What was kept
+
+| range | why |
+|---|---|
+| `U+AC00–D7A3` | Every precomposed Hangul syllable, all 11172 — verified present in the source and in the subset. Non-negotiable: nicknames are user input and `NICKNAME_RE` admits the whole block, so a narrower subset renders somebody's name as tofu — a bug that surfaces for one user on one device. |
+| `U+3130–318F` | Hangul compatibility jamo. 94 of the 96 are present; the two absent are archaic letters the source font does not have either. Every letter an IME actually emits (`U+3131–3163`) is there. |
+| `U+0020–007E`, `U+00A0–00FF` | Latin and Latin-1, complete. |
+| `U+2010–2027`, `U+2030–205E` | Punctuation — dashes, ellipsis, the middle dot the UI uses as a separator. |
+| `U+2190–2193` | Arrows. |
+
+`U+1100–11FF` (conjoining jamo) is **absent from the source font** — Gowun Dodum
+2.000 carries 0 of those 256 codepoints, exactly as Pretendard did. Asking for it
+would be a silent no-op. Korean IME composition on the platforms this ships to
+produces compatibility jamo and precomposed syllables, both of which are covered.
+
+### What was dropped
+
+Vietnamese and Latin Extended beyond Latin-1, and the punctuation outside the two
+ranges above. The source is a 7.2 MB TTF whose weight is almost entirely the
+Hangul, so the subset is 387 KB rather than the tenfold cut the previous font's
+notice describes — there was much less to remove.
+
+### Weights
+
+**One static face, 400.** Not two, and not a variable font.
+
+`src/core/tokens.js` exports `FONT_WEIGHTS = [400]` and throws at module load if
+any `TYPE` entry names a weight that is not in it. `src/ui/styles.css` declares
+exactly one `@font-face`. Both are deliberate: a `font-weight: 700` that the
+browser cannot resolve is not a slightly-off weight, it is a SYNTHESISED one —
+the outlines are smeared, canvas 2D bakes that smear into a texture where it
+cannot be undone, and different engines smear by different amounts.

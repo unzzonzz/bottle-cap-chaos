@@ -1,0 +1,365 @@
+/* ── the UI typeface ─────────────────────────────────────────────────────────
+   ONE static face, subset from Gowun Dodum and renamed — see NOTICE at the
+   repository root and src/ui/fonts/OFL.txt.
+
+   There were two, 400 and 700, subset from Pretendard. The 700 is gone with the
+   direction that wanted it: hierarchy here comes from size, colour and space,
+   and the two things that used weight to shout — the title and the score — are
+   vector letterforms now (src/ui/lettering.js). Not declaring a bold is what
+   makes that a decision rather than a hope; a `font-weight: 700` anywhere would
+   otherwise be silently synthesised from these outlines.
+
+   Bundled rather than fetched: a CDN link is a UI that loses its typeface on a
+   flaky connection, and it is a third-party request on every cold load for a
+   file that is already in the bundle.
+
+   `font-display: swap` is deliberate and is NOT the whole answer. The DOM text
+   it governs is one nickname input; every other glyph in this game is baked
+   into a canvas texture and cached, and a texture baked before the face arrives
+   stays wrong forever because nothing invalidates it. `src/ui/fonts.js` is what
+   handles that — it waits for the face and then drops every registered texture
+   cache. */
+@font-face {
+  font-family: 'MSA Sans';
+  src: url('./fonts/msa-sans-400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/**
+ * 디스플레이 서체. 나눔명조 ExtraBold 의 서브셋이고, 이름이 바뀐 것은 규칙이
+ * 아니라 **요구**다 — 나눔은 OFL 의 Reserved Font Name 을 걸어 두었고 §3 이
+ * 수정본의 그 이름 사용을 금지한다. 서브셋은 수정본이다. 자세한 것은 NOTICE.
+ *
+ * 웨이트를 400 으로 선언하는 것은 파일이 하나뿐이기 때문이다. 원본은 ExtraBold
+ * 이지만 브라우저에는 이 패밀리의 유일한 굵기이므로, 400 으로 두어야 합성 볼드가
+ * 끼어들 여지가 없다. `FONT_WEIGHTS` 의 규칙과 같은 이유다.
+ */
+@font-face {
+  font-family: 'MSA Display';
+  src: url('./fonts/msa-display.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  /* The void. Everything outside the 4:3 frame is this.
+     Every colour in this file comes from src/ui/cssPalette.js, which writes the
+     palette into these custom properties at boot. A hex literal here is a bug —
+     with the two exceptions this rule has, and this is the second of them.
+
+     ── the fallback is load-bearing, and the letterbox is why ────────────────
+     `cssPalette.js` runs from a module script, so for the frame or two before it
+     executes `var(--msa-void)` resolves to its initial value — transparent, i.e.
+     the browser's own white. That was survivable while both sides of the gap
+     were near-white and that file says so at length.
+
+     It stopped being survivable once the two documents had to hand over on a
+     single flat colour. The menu covers the screen with the cap's own colour and
+     the game document opens on the same one; a white frame in between is exactly
+     the flash the covered frame exists to remove, and it is the more visible for
+     being white-to-blue rather than white-to-white.
+
+     So the value is written twice, here and in `cssPalette.js`, and this file
+     joins the list in `docs/palette.md` of places a palette change has to be
+     carried by hand. It is `PALETTE.menu.capBrand` — the cobalt §7.3 names.
+     `--msa-fade-ms` below has a fallback for the same kind of reason and states
+     it the same way. */
+  background: var(--msa-void, #1451b8);
+  color: var(--msa-text);
+  font-family: 'MSA Sans', 'Gowun Dodum', Pretendard, -apple-system, 'Segoe UI', system-ui, sans-serif;
+  overscroll-behavior: none;
+
+  /* ── the browser's own gestures, all of them, off ─────────────────────────
+     `#view` below already says `touch-action: none`, and that was enough while
+     the only thing anyone could touch was the canvas. It is not enough for the
+     document: the canvas is letterboxed to 4:3, so a window that is not 4:3 has
+     bars of BODY on two sides of it, and a drag that starts on a bar is a drag
+     on the document — a rubber-band scroll, or a two-finger zoom, depending on
+     how it started. Saying it here covers the bars, the fade veil and anything
+     else that ever lands on the page.
+
+     The bars are `--msa-void`, which is the transition's cobalt rather than the
+     black they were named for when this note was written.
+
+     `touch-action: none` is what kills double-tap zoom as well; `manipulation`
+     would keep panning alive and is the wrong half of the pair here. */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  /* The long-press "선택 / 복사 / 조회" callout. It fires on a canvas too, and a
+     bow drawn slowly enough looks exactly like a long press. */
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  overflow: hidden;
+  /* Pinned rather than merely clipped. `overflow: hidden` stops the document
+     scrolling; it does not stop iOS treating a drag as an overscroll and moving
+     the whole page under your finger. A fixed body has nothing to rubber-band. */
+  position: fixed;
+  inset: 0;
+  width: 100%;
+}
+
+/* The one exception to the selection ban.
+   `ModalLayer` mounts a real `<input>` for the nickname because Hangul IME
+   composition needs a focusable field, and a field you cannot put a caret in is
+   not a field. Everything else on the page stays unselectable. */
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+/* ── 닉네임 필드 ─────────────────────────────────────────────────────────────
+   테두리도 배경도 없다. 필드를 둘러싼 상자는 캔버스에 그려진 유리 홈이고
+   (`hudTextures.slotTexture`), 이 요소는 그 위에 놓인 캐럿과 IME 조합 글자일 뿐이다.
+   나머지 인라인 스타일은 `ModalLayer._mountInput` 에 있다 — 위치와 크기는 프레임에서
+   계산되므로 CSS 로 적을 수 없고, 여기 있는 것은 프레임과 무관한 것들이다.
+
+   플레이스홀더가 여기 있는 이유는 인라인으로 쓸 수 없기 때문이다. 의사 요소다. */
+input::placeholder {
+  color: var(--msa-text-muted);
+  opacity: 1; /* Firefox 는 기본으로 0.54 를 곱한다. 팔레트가 이미 흐린 색이다. */
+}
+
+/* The canvas is letterboxed to a fixed 4:3 by Viewport, so it is centred rather
+   than stretched to the window. */
+#app {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#view {
+  display: block;
+
+  /* ── `image-rendering: pixelated` 가 여기 있었다 ──────────────────────────
+     근거는 "드로잉 버퍼가 CSS 픽셀 크기(pixelRatio = 1)이고 장면이 320x240 타겟에
+     먼저 그려지므로 셰이더가 확대를 소유한다. 컴포지터가 HiDPI 에서 그것을 다시
+     부드럽게 만드는 것을 막는다" 였다.
+
+     세 전제가 모두 사실이 아니게 됐다. PHASE 1 이 저해상도 타겟을 없앴고,
+     `Viewport` 는 pixelRatio 를 2 까지 올려 잡으며, 확대를 소유하는 셰이더가 없다.
+     남은 것은 정반대의 효과다: 버퍼가 CSS 크기보다 크므로 컴포지터가 **축소**를
+     하는데, `pixelated` 는 그 축소를 nearest 로 만든다 — 레티나에서 픽셀 행을
+     통째로 버리는 것이고, `core/textures.js` 가 텍스처에 대해 길게 설명한 바로
+     그 결함을 화면 전체에 적용하는 셈이다.
+
+     기본값(auto)이 맞다. 그래서 아무것도 적지 않는다. */
+
+  /* The pointer router needs the raw stream: no scrolling, no pinch-to-zoom
+     handed to the browser, no double-tap gestures. */
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+
+  /* The default press moves the camera, so the default cursor says so. The
+     three states below are the other half of "지금 누르면 발사인지 카메라인지
+     미리 알 수 있어야 한다" — the ring the overlay draws is the half that
+     survives on a touch screen, where there is no hover at all. */
+  cursor: grab;
+}
+
+/* Over one of your own caps: this press draws a shot. */
+#view.is-over-cap {
+  cursor: crosshair;
+}
+
+#view.is-dragging {
+  cursor: grabbing;
+}
+
+/* The cards are meshes inside the canvas now, so the cursor is the one piece of
+   feedback they cannot provide for themselves — the element under the pointer
+   is the same canvas wherever it is. It wins over `.is-over-cap` because the
+   press does: cards are tested first. */
+#view.is-over-card,
+#view.is-over-card.is-over-cap {
+  cursor: grab;
+}
+
+#view.is-dragging-card,
+#view.is-dragging-card.is-over-card {
+  cursor: grabbing;
+}
+
+/* The menu's plates are meshes inside the canvas, so the cursor is the one
+   piece of feedback they cannot give themselves — the element under the
+   pointer is the same canvas wherever it is. */
+#view.is-over-item {
+  cursor: pointer;
+}
+
+#view.is-aiming,
+#view.is-aiming.is-over-cap {
+  cursor: crosshair;
+}
+
+/* The HUD is meshes inside the canvas now, so like the cards it cannot provide
+   its own cursor — the element under the pointer is the same canvas wherever it
+   is. It wins over `.is-over-cap` because the press does: the HUD is tested
+   before the caps. */
+#view.is-over-ui,
+#view.is-over-ui.is-over-cap {
+  cursor: pointer;
+}
+
+/* ── the menu page, where `grab` is a lie ───────────────────────────────────
+   The rule at the top of this file says `grab` because on the GAME page the
+   default press moves the camera. The menu shares this stylesheet and the same
+   `#view` canvas, and nothing on it is draggable: the main menu, 설정 and 내 마크
+   all run entirely on presses, and the one drag in the whole page is the mark
+   editor's turntable. So the base said "you can drag this" over four screens
+   where you cannot, and since the plates cover very little of the frame, most of
+   the menu was a grab cursor over dead space.
+
+   `.is-menu` goes on once at boot and turns the default back to an arrow;
+   the three below are opt-INS, set one at a time by `refreshHover`. Each is one
+   class more specific than the base, so which one applies never depends on the
+   order they appear in here. */
+#view.is-menu {
+  cursor: default;
+}
+
+/* The editor's turntable: press and drag to roll the cap. The only drag here. */
+#view.is-menu.is-turntable {
+  cursor: grab;
+}
+
+#view.is-menu.is-dragging {
+  cursor: grabbing;
+}
+
+/* The cap in draw mode is a drawing surface, so it gets the brush's cursor —
+   the same crosshair aiming a shot uses on the game page, for the same reason:
+   the press lands on a point and the point needs to be visible. */
+#view.is-menu.is-over-cap {
+  cursor: crosshair;
+}
+
+#view.is-menu.is-over-item {
+  cursor: pointer;
+}
+
+.lil-gui {
+  --width: 310px;
+  z-index: 10;
+}
+
+/* Leaving a match for the menu. The brief asks for a short fade rather than the
+   cap wipe on the way BACK — see the note on the button in HudLayer.js. Over
+   everything, letterbox included, because the whole page is going away. */
+.page-fade {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: var(--msa-fade);
+  opacity: 0;
+  pointer-events: none;
+  /* `--msa-fade-ms` 는 `cssPalette.js` 가 `MOTION.screen` 의 절반으로 채운다.
+     폴백이 있는 유일한 `var()` 인 이유는, 이 규칙이 그 스크립트가 도는 것보다
+     먼저 필요할 수 있기 때문이다 — 페이지에 도착한 문서가 첫 프레임에 페이드인을
+     시작한다. 폴백 값과 토큰이 어긋나면 그 한 번만 어긋나고 이후로는 맞는다. */
+  transition: opacity var(--msa-fade-ms, 180ms) linear;
+}
+
+.page-fade.is-on {
+  opacity: 1;
+}
+
+
+/* ── the measurement panel ───────────────────────────────────────────────────
+   Top LEFT, because lil-gui autoplaces itself top-right at z-index 1001 and a
+   right-hand panel would be buried under it whenever `?debug=1` is on.
+
+   `pointer-events: none` on the container is load-bearing. `PointerRouter` binds
+   pointerdown/move/up on the canvas, so any DOM box laid over the game silently
+   swallows shots. Only the badge opts back in. */
+.metrics-hud {
+  position: fixed;
+  /* BOTTOM-left, not top-left. Top-left is where the turn plate lives. The
+     bottom-left corner is clear: the card fan is centred, and a window wider
+     than 4:3 leaves bare document down there in any case. */
+  bottom: 6px;
+  left: 6px;
+  z-index: 25; /* over .boot-error (20), under the modal input and .page-fade (40) */
+  display: flex;
+  /* Reversed, so the badge stays nearest the corner and the body grows upward
+     away from it — the same reading order the top-left version had. */
+  flex-direction: column-reverse;
+  align-items: flex-start;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.metrics-hud__badge {
+  pointer-events: auto;
+  /* 44 CSS px is the Apple minimum and the panel is the one control on screen
+     that a finger has to find without a label telling it where to look. */
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 8px;
+  margin: 0;
+  border: 1px solid var(--msa-debug-edge);
+  border-radius: 8px;
+  background: var(--msa-debug-bg);
+  color: var(--msa-debug-accent);
+  font: 600 15px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Dropped frames or a saturated step drain. The one bit worth seeing from
+   across the room, and the only state the badge shows when the body is down. */
+.metrics-hud__badge[data-warn='1'] {
+  color: var(--msa-debug-warn-ink);
+  border-color: var(--msa-debug-warn-edge);
+}
+
+.metrics-hud__body {
+  margin: 0;
+  padding: 5px 7px;
+  background: var(--msa-debug-bg);
+  border: 1px solid var(--msa-debug-edge);
+  border-radius: 8px;
+  color: var(--msa-debug-ink);
+  font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre;
+}
+
+.metrics-hud__body[hidden] {
+  display: none;
+}
+
+/* The WASM either loads or it does not, and a black canvas says neither. */
+.boot-error {
+  position: fixed;
+  inset: 24px;
+  z-index: 20;
+  margin: 0;
+  padding: 18px;
+  overflow: auto;
+  background: var(--msa-error-bg);
+  border: 1px solid var(--msa-error-edge);
+  border-radius: 10px;
+  color: var(--msa-error-ink);
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+}

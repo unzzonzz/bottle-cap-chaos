@@ -1,0 +1,223 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>이펙트 스프라이트 — 한여름 알까기</title>
+<style>
+  :root { color-scheme: light; }
+  body {
+    margin: 0; padding: 28px 24px 64px;
+    font: 15px/1.6 'MSA Sans', system-ui, sans-serif;
+    background: #f4fafe; color: #0d3b8c;
+  }
+  h1 { font-size: 22px; font-weight: 400; margin: 0 0 4px; }
+  p.lede { margin: 0 0 28px; max-width: 62ch; color: #4a6a88; }
+  h2 { font-size: 15px; font-weight: 400; margin: 32px 0 2px; }
+  h2 b { font-weight: 400; color: #1451b8; }
+  p.why { margin: 0 0 10px; font-size: 13px; color: #4a6a88; max-width: 62ch; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-start; }
+  figure { margin: 0; }
+  figcaption { font-size: 10px; color: #7c9ab4; margin-top: 3px; letter-spacing: .04em; }
+  canvas { display: block; border-radius: 8px; }
+  hr { border: 0; border-top: 1px solid #bcdcf2; margin: 34px 0 0; }
+  code { font-family: ui-monospace, monospace; font-size: 12px; }
+</style>
+<h1>이펙트 스프라이트</h1>
+<p class="lede">
+  <code>src/render/fxTextures.js</code> 가 굽는 것 그대로를, 세 필드의 바닥색 위에
+  가산으로 올린 것이다. 목업이 아니다 — 이 페이지가 부르는 함수가 게임이 부르는
+  함수다. 크기는 <code>CONFIG.cardFx</code> 의 월드 크기를 뚜껑 지름으로 나눈
+  비율이고, 점선 원이 뚜껑이다. <b>타이밍은 여기서 안 보인다</b> — 그건
+  <code>CardFx</code> 의 것이고 게임에서 확인한다. 게임에는 블룸도 걸리므로 판 위의
+  실제 밝기는 여기보다 높다.
+</p>
+<div id="out"></div>
+<script type="module">
+import { PALETTE } from '/src/core/palette.js';
+import { CONFIG } from '/src/game/config.js';
+import {
+  auraTexture, braceTexture, dashTexture, frameTexture,
+  lockTexture, ringTexture, scanTexture, stunSheet,
+} from '/src/render/fxTextures.js';
+
+/**
+ * 뚜껑 지름. 설정이 아니라 **지오메트리**에서 나오는 값이라 여기서는 눈금으로만
+ * 쓴다 — `npm run det:node` 의 첫 줄이 `capDims: r=1.6` 을 찍는다. 이 페이지가
+ * 이 값으로 하는 일은 스프라이트를 뚜껑에 대해 몇 배로 그릴지 정하는 것뿐이다.
+ */
+const CAP_D = 1.6 * 2;
+const GROUNDS = [
+  ['서바이벌 / 목재', PALETTE.board.wood],
+  ['축구 / 잔디', PALETTE.pitch.grassA],
+  ['컬링 / 판', PALETTE.curling.table],
+];
+const PX = 132;
+
+/** 가산 합성 한 번. `uTint` 는 곱셈이고 `uOpacity` 는 알파다 — 셰이더와 같은 순서. */
+function additive(ctx, img, x, y, w, h, tint, alpha) {
+  const t = document.createElement('canvas');
+  t.width = Math.max(1, Math.round(w));
+  t.height = Math.max(1, Math.round(h));
+  const tc = t.getContext('2d');
+  tc.drawImage(img, 0, 0, t.width, t.height);
+  if (tint) {
+    tc.globalCompositeOperation = 'multiply';
+    tc.fillStyle = tint;
+    tc.fillRect(0, 0, t.width, t.height);
+    tc.globalCompositeOperation = 'destination-in';
+    tc.drawImage(img, 0, 0, t.width, t.height);
+  }
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(t, x, y, w, h);
+  ctx.restore();
+}
+
+function cell(ground, draw) {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = PX * devicePixelRatio;
+  cv.style.width = cv.style.height = `${PX}px`;
+  const ctx = cv.getContext('2d');
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+  ctx.fillStyle = ground;
+  ctx.fillRect(0, 0, PX, PX);
+  // 뚜껑. 점선 원 하나로, 스프라이트가 뚜껑을 지우는지 보이게.
+  ctx.save();
+  ctx.strokeStyle = 'rgba(13,59,140,0.45)';
+  ctx.setLineDash([3, 3]);
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(PX / 2, PX / 2, (PX * 0.34) / 2, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+  draw(ctx, PX);
+  return cv;
+}
+
+/** 뚜껑 지름이 화면의 34% 라고 놓고, 월드 크기를 화면 픽셀로. */
+const px = (world) => (world / CAP_D) * PX * 0.34;
+
+function centred(img, world, tint, alpha) {
+  return (ctx) => {
+    const w = px(world);
+    additive(ctx, img, (PX - w) / 2, (PX - w) / 2, w, w, tint, alpha);
+  };
+}
+
+const rgb = (v) => `rgb(${v.map((c) => Math.round(c * 255)).join(',')})`;
+
+function section(title, why, draw) {
+  const out = document.getElementById('out');
+  const h = document.createElement('h2');
+  h.innerHTML = title;
+  const p = document.createElement('p');
+  p.className = 'why';
+  p.textContent = why;
+  const row = document.createElement('div');
+  row.className = 'row';
+  for (const [name, ground] of GROUNDS) {
+    const fig = document.createElement('figure');
+    fig.append(cell(ground, draw), Object.assign(document.createElement('figcaption'), { textContent: name }));
+    row.append(fig);
+  }
+  out.append(h, p, row);
+}
+
+const cfg = CONFIG.cardFx;
+
+// 혼란 — 궤도를 도는 물방울. 시트의 한 프레임을 궤도 위치에 놓는다.
+const sheet = stunSheet(cfg.stunFrames, cfg.stunTexels);
+const sheetImg = sheet.image;
+const frame = document.createElement('canvas');
+frame.width = frame.height = cfg.stunTexels;
+frame.getContext('2d').drawImage(sheetImg, -3 * cfg.stunTexels, 0);
+section('<b>혼란</b> — 궤도를 도는 물방울', '파스텔. 색은 스프라이트가 아니라 CHAOS_PALETTE 에 있다.', (ctx) => {
+  const a = (3 / cfg.stunFrames) * Math.PI * 2;
+  const w = px(cfg.stunSize);
+  const r = px(cfg.stunOrbitRadius);
+  additive(ctx, frame, PX / 2 + Math.cos(a) * r - w / 2, PX / 2 + Math.sin(a) * r - w / 2, w, w, '#b8dcff', 1);
+});
+
+section('<b>강타</b> — 물결 세 겹 (유지되는 동안)', '잉걸불이었다. 링 세 겹이라는 모양은 그대로고 램프만 흰색 가까이로 갔다.',
+  centred(auraTexture(cfg.ringTexels).image, cfg.smashAuraSize, rgb([1.0, 0.97, 0.93]), cfg.smashAuraStrength));
+
+section('<b>강타</b> — 닫히는 링 (착지 순간)', '퍼지지 않고 모인다. 그것이 원모어와 갈리는 지점이다.',
+  centred(ringTexture(cfg.ringTexels).image, cfg.smashRingStart * 0.55, rgb([1.0, 0.97, 0.93]), 0.9));
+
+section('<b>원모어</b> — 물결 두 번', '첫 물결이 퍼지는 중에 둘째가 태어난다. 아래는 둘이 겹친 순간.', (ctx) => {
+  const T = [1.0, 0.92, 0.72];
+  for (const [k, amp] of [[0.62, 1], [0.14, 0.62]]) {
+    const w = px(cfg.ringSize * (0.42 + k * 1.15));
+    additive(ctx, ringTexture(cfg.ringTexels).image, (PX - w) / 2, (PX - w) / 2, w, w, rgb(T), (1 - k) ** 2 * amp);
+  }
+});
+
+section('<b>철벽</b> — 각진 링', '물결이 아니라 정지다. 이 파일에서 유일하게 가장자리가 단단한 스프라이트.',
+  centred(braceTexture(cfg.resistRingSides, cfg.ringTexels).image, cfg.resistRingSize, rgb([0.70, 0.84, 0.96]), cfg.resistRingStrength));
+
+// 궤적과 원모어 가장자리는 판이 아니라 프레임에 일어난다.
+{
+  const out = document.getElementById('out');
+  out.append(document.createElement('hr'));
+  const h = document.createElement('h2');
+  h.innerHTML = '<b>궤적</b> · <b>원모어 가장자리</b> — 판이 아니라 프레임';
+  const p = document.createElement('p');
+  p.className = 'why';
+  p.textContent = '앞의 둘은 640x480 프레임을 3분의 1 로 줄인 것이다. 궤적의 띠는 쿼드가 40픽셀이고, 그 안에서 빛이 위 3분의 1 만 쓴다. 침묵은 판 위에 아무것도 더하지 않는다 — 자물쇠는 봉인된 손패에 찍히므로 종이 위에, 가산이 아니라 알파로 그렸다.';
+  const row = document.createElement('div');
+  row.className = 'row';
+  const W = 213, H = 160;
+  for (const [name, tex, drawIt] of [
+    ['궤적 (scanHeight 40)', scanTexture(cfg.scanTexels), (ctx, img) => {
+      const h = (cfg.scanHeight / 480) * H;
+      additive(ctx, img, 0, H * 0.42, W, h, '#ffffff', 1);
+    }],
+    ['원모어 가장자리', frameTexture(), (ctx, img) => additive(ctx, img, 0, 0, W, H, rgb([1.0, 0.92, 0.72]), 1)],
+    ['대시 (스왑의 선)', dashTexture(cfg.dashLength), (ctx, img) => {
+      for (let i = 0; i < 6; i++) additive(ctx, img, 8, H / 2 - 12 + i * 5, W - 16, 3, '#ffffff', 1);
+    }],
+    ['침묵 (손패 위, 알파)', lockTexture(cfg.sealLockTexels), (ctx, img) => {
+      ctx.fillStyle = PALETTE.ui.surface;
+      ctx.fillRect(0, 0, W, H);
+      const d = cfg.sealIconSize * 2.6;
+      ctx.drawImage(img, (W - d) / 2, (H - d) / 2, d, d);
+    }],
+  ]) {
+    const cv = document.createElement('canvas');
+    cv.width = W * devicePixelRatio; cv.height = H * devicePixelRatio;
+    cv.style.width = `${W}px`; cv.style.height = `${H}px`;
+    const ctx = cv.getContext('2d');
+    ctx.scale(devicePixelRatio, devicePixelRatio);
+    ctx.fillStyle = PALETTE.board.wood;
+    ctx.fillRect(0, 0, W, H);
+    drawIt(ctx, tex.image);
+    const fig = document.createElement('figure');
+    fig.append(cv, Object.assign(document.createElement('figcaption'), { textContent: name }));
+    row.append(fig);
+  }
+  out.append(h, p, row);
+}
+
+// 시트 전체. 물방울의 머리가 한 바퀴 도는 것이 보여야 한다.
+{
+  const out = document.getElementById('out');
+  out.append(document.createElement('hr'));
+  const h = document.createElement('h2');
+  h.innerHTML = '<b>혼란</b> 시트 — 한 바퀴 전체';
+  const p = document.createElement('p');
+  p.className = 'why';
+  p.textContent = `${cfg.stunFrames}장. 별이었을 때는 사분원만 담았다 — 네 겹 대칭이었으니까. 물방울에는 대칭이 없으므로 한 바퀴를 담고, 그 한 바퀴가 CardFx 의 궤도 각과 같은 수에서 나온다.`;
+  const cv = document.createElement('canvas');
+  const S = 52;
+  cv.width = S * cfg.stunFrames * devicePixelRatio;
+  cv.height = S * devicePixelRatio;
+  cv.style.width = `${S * cfg.stunFrames}px`;
+  cv.style.height = `${S}px`;
+  const ctx = cv.getContext('2d');
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+  ctx.fillStyle = PALETTE.board.wood;
+  ctx.fillRect(0, 0, S * cfg.stunFrames, S);
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.drawImage(sheetImg, 0, 0, S * cfg.stunFrames, S);
+  out.append(h, p, cv);
+}
+</script>

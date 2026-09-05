@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>PHASE 0 — 한여름 알까기 디자인 토큰 스펙 시트</title>
+    <link rel="stylesheet" href="/src/ui/styles.css" />
+    <style>
+      /* styles.css pins the document for the GAME — fixed body, 100% height,
+         overflow hidden — and this page is a long sheet that has to scroll.
+         The link stays because the @font-face lives there and this sheet has to
+         be rendered in the real face. */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        position: static;
+        overflow: visible;
+        height: auto;
+        background: #e4f0f9;
+        user-select: auto;
+        -webkit-user-select: auto;
+      }
+      #sheet {
+        display: block;
+        margin: 0 auto;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="sheet"></canvas>
+    <script type="module">
+      /**
+       * PHASE 0 승인 게이트용 스펙 시트.
+       *
+       * 실제 UI 가 쓸 코드 그대로 그린다 — `palette.js` / `tokens.js` / `paper.js` /
+       * `marks.js` / `lettering.js` / `icons.js` 를 import 해서 렌더하므로, 여기
+       * 보이는 것과 게임에 나올 것이 다를 수 없다. 목업이 아니다.
+       *
+       * 프레임 픽셀 그대로 그린다. 화면에서는 2배로 보이는데, 그것이 640 폭
+       * 프레임이 실제 데스크톱 창에서 갖는 배율(약 1.97)과 거의 같다 — 즉 여기
+       * 보이는 크기가 게임에서 보일 크기다.
+       */
+      import { PALETTE, withAlpha } from '/src/core/palette.js';
+      import { CTA, RADIUS, ROLE, RULE, SIZE, SPACE, TYPE } from '/src/core/tokens.js';
+      import {
+        applyTracking,
+        fontSpec,
+        panel,
+        plate,
+        roleButton,
+      } from '/src/ui/paper.js';
+      import { asterisk, dot, hairline, halftone, ring, ripple, sparkle, wave } from '/src/ui/marks.js';
+      import { drawLettering, drawNumber, drawTitle, letteringWidth } from '/src/ui/lettering.js';
+      import { drawIcon } from '/src/ui/icons.js';
+      import { whenFontsReady } from '/src/ui/fonts.js';
+
+      const W = 940;
+      const H = 1320;
+      const S = Math.min(3, (window.devicePixelRatio || 1) * 2);
+
+      const cv = document.getElementById('sheet');
+      cv.width = W * S;
+      cv.height = H * S;
+      cv.style.width = W + 'px';
+      cv.style.height = H + 'px';
+      const ctx = cv.getContext('2d');
+
+      const heading = (text, x, y) => {
+        ctx.font = fontSpec(TYPE.micro);
+        applyTracking(ctx, TYPE.micro.tracking + 1);
+        ctx.fillStyle = PALETTE.ui.textMuted;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(text.toUpperCase(), x, y);
+        applyTracking(ctx, 0);
+      };
+      const note = (text, x, y, color = PALETTE.ui.textFaint) => {
+        ctx.font = fontSpec(TYPE.micro);
+        applyTracking(ctx, TYPE.micro.tracking);
+        ctx.fillStyle = color;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(text, x, y);
+        applyTracking(ctx, 0);
+      };
+      const body = (text, x, y, type = TYPE.body, color = PALETTE.ui.text) => {
+        ctx.font = fontSpec(type);
+        applyTracking(ctx, type.tracking);
+        ctx.fillStyle = color;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(text, x, y);
+        applyTracking(ctx, 0);
+      };
+
+      function draw() {
+        ctx.setTransform(S, 0, 0, S, 0, 0);
+        ctx.fillStyle = PALETTE.ui.surface;
+        ctx.fillRect(0, 0, W, H);
+
+        const M = SPACE.screenMargin;
+        let y = 0;
+
+        /* ── 1. 제목. 벡터 레터링 ─────────────────────────────────────── */
+        ctx.fillStyle = PALETTE.bg.skyTop;
+        ctx.fillRect(0, 0, W, 190);
+        drawTitle(ctx, { x: W / 2, y: 58, size: 62, color: PALETTE.whiteCool });
+        ctx.font = fontSpec(TYPE.label);
+        applyTracking(ctx, TYPE.label.tracking);
+        ctx.fillStyle = withAlpha(PALETTE.whiteCool, 0.8);
+        ctx.textAlign = 'center';
+        ctx.fillText('PHASE 0 · 코발트와 차가운 흰색 · Gowun Dodum 400', W / 2, 156);
+        applyTracking(ctx, 0);
+        ctx.textAlign = 'left';
+        y = 190;
+
+        /* ── 2. 팔레트 ────────────────────────────────────────────────── */
+        y += 40;
+        heading('the four names, and the ink', M, y);
+        y += 16;
+        const swatches = [
+          ['cobaltInk', PALETTE.cobaltInk],
+          ['cobalt', PALETTE.cobalt],
+          ['blueClear', PALETTE.blueClear],
+          ['bluePale', PALETTE.bluePale],
+          ['whiteCool', PALETTE.whiteCool],
+          ['wood', PALETTE.board.wood],
+        ];
+        const sw = 132;
+        swatches.forEach(([name, hex], i) => {
+          const x = M + i * (sw + SPACE.sm);
+          ctx.fillStyle = hex;
+          ctx.fillRect(x, y, sw, 56);
+          hairline(ctx, x, y, x + sw, y, PALETTE.ui.edge, RULE.hair);
+          hairline(ctx, x, y + 56, x + sw, y + 56, PALETTE.ui.edge, RULE.hair);
+          note(name, x, y + 74, PALETTE.ui.textMuted);
+          note(hex, x, y + 88);
+        });
+        y += 112;
+
+        heading('card accents — seven, told apart by hue', M, y);
+        y += 16;
+        const cards = Object.entries(PALETTE.card);
+        const cw = (W - M * 2 - SPACE.sm * 6) / 7;
+        cards.forEach(([id, hex], i) => {
+          const x = M + i * (cw + SPACE.sm);
+          ctx.fillStyle = hex;
+          ctx.fillRect(x, y, cw, 34);
+          note(id, x, y + 50, PALETTE.ui.textMuted);
+        });
+        y += 74;
+
+        /* ── 3. 타입 ──────────────────────────────────────────────────── */
+        y += 24;
+        heading('type — one weight, four steps', M, y);
+        y += 26;
+        const typeRows = [
+          ['body 15', TYPE.body, '판이 없어졌으므로 여백이 그룹을 만든다'],
+          ['label 13', TYPE.label, '설정 · 내 마크 · 온라인 대전'],
+          ['caption 12', TYPE.caption, '남은 뚜껑 · 라운드 3/5 · 선공 P1'],
+          ['micro 10', TYPE.micro, '서버 연결됨 · 관측 60fps · 뚫린 자국'],
+        ];
+        for (const [name, t, sample] of typeRows) {
+          note(name, M, y + t.size * 0.35, PALETTE.ui.textFaint);
+          body(sample, M + 90, y + t.size * 0.35, t);
+          hairline(ctx, M, y + 18, W - M, y + 18, PALETTE.ui.edge, RULE.hair);
+          y += 34;
+        }
+        note('11172 한글 코드포인트 전부 커버 · 뷁 쀍 뜷 꿱 쒏 홹 앐 뫯 긆 쥃', M, y + 12, PALETTE.ui.textMuted);
+        y += 32;
+
+        /* ── 4. 컨트롤 ────────────────────────────────────────────────── */
+        y += 20;
+        heading('a control is text with a rule under it', M, y);
+        y += 22;
+        const roles = [
+          [ROLE.CHOICE, '서바이벌', false],
+          [ROLE.CHOICE, '축구', true],
+          [ROLE.COMMIT, '시작', false],
+          [ROLE.RETREAT, '뒤로', false],
+          [ROLE.DESTRUCTIVE, '삭제', false],
+        ];
+        let cx = M;
+        for (const [role, label, selected] of roles) {
+          const w = 150;
+          roleButton(ctx, { x: cx, y, w, h: 40, label, role, selected });
+          // 히트 영역. 실제로는 보이지 않는다 — `config.victory.showHitAreas` 용.
+          ctx.save();
+          ctx.strokeStyle = withAlpha(PALETTE.accent.terracotta, 0.35);
+          ctx.setLineDash([2, 3]);
+          ctx.lineWidth = RULE.hair;
+          ctx.strokeRect(cx, y - CTA.hitPadY + 8, w, 40 + CTA.hitPadY * 2 - 16);
+          ctx.restore();
+          cx += w + SPACE.sm;
+        }
+        note('점선 = 보이지 않는 히트 영역 (CTA.hitPadX/Y)', M, y + 62, PALETTE.ui.textFaint);
+        y += 84;
+
+        // disabled 와 dimmed
+        cx = M;
+        for (const [state, caption] of [['disabled', 'disabled'], ['dimmed', 'dimmed'], ['idle', 'idle']]) {
+          roleButton(ctx, { x: cx, y, w: 150, h: 36, label: '카드 사용', role: ROLE.CHOICE, state });
+          note(caption, cx, y + 52, PALETTE.ui.textFaint);
+          cx += 150 + SPACE.sm;
+        }
+        y += 78;
+
+        /* ── 5. 표면 ──────────────────────────────────────────────────── */
+        heading('surfaces — paper and a hairline', M, y);
+        y += 18;
+        panel(ctx, { x: M, y, w: 240, h: 90, radius: RADIUS.panel });
+        body('panel', M + SPACE.md, y + 26, TYPE.label, PALETTE.ui.textMuted);
+        note('RADIUS.panel 10 · RULE.thin', M + SPACE.md, y + 46);
+        note('그림자 없음 (§19 · §24)', M + SPACE.md, y + 62);
+
+        plate(ctx, { x: M + 264, y, w: 150, h: 42, label: '칩', radius: RADIUS.chip });
+        plate(ctx, { x: M + 264, y: y + 50, w: 150, h: 40, label: '선택됨', state: 'selected', radius: RADIUS.chip });
+        note('plate', M + 264, y + 106, PALETTE.ui.textMuted);
+
+        // 카드 면
+        panel(ctx, { x: M + 434, y, w: 74, h: 106, radius: RADIUS.card });
+        drawIcon(ctx, 'smash', { x: M + 434 + 21, y: y + 12, size: 32, color: PALETTE.card.smash });
+        ctx.textAlign = 'center';
+        ctx.font = fontSpec(TYPE.label);
+        ctx.fillStyle = PALETTE.ui.text;
+        ctx.fillText('강타', M + 434 + 37, y + 64);
+        ctx.font = fontSpec(TYPE.micro);
+        ctx.fillStyle = PALETTE.ui.textMuted;
+        ctx.fillText('세게 친다', M + 434 + 37, y + 80);
+        ctx.fillText('콘이 두 배', M + 434 + 37, y + 92);
+        ctx.textAlign = 'left';
+        note('card face', M + 434, y + 122, PALETTE.ui.textMuted);
+        y += 148;
+
+        /* ── 6. 스코어 ────────────────────────────────────────────────── */
+        heading('the score — vector numerals, no plate behind them', M, y);
+        y += 16;
+        // 필드 위에 그려지는 것이므로 나무 위에 놓고 본다.
+        ctx.fillStyle = PALETTE.board.wood;
+        ctx.fillRect(M, y, 300, SIZE.score.h + 16);
+        const mid = M + 150;
+        drawNumber(ctx, '3', { x: mid - SPACE.md, y: y + 8, size: 32, color: PALETTE.playerInk[0], align: 'right' });
+        drawNumber(ctx, '2', { x: mid + SPACE.md, y: y + 8, size: 32, color: PALETTE.playerInk[1], align: 'left' });
+        drawNumber(ctx, ':', { x: mid, y: y + 14, size: 20, color: PALETTE.ui.textFaint, align: 'center' });
+        ctx.textAlign = 'center';
+        ctx.font = fontSpec(TYPE.caption);
+        ctx.fillStyle = PALETTE.ui.text;
+        ctx.fillText('남은 뚜껑', mid, y + 56);
+        ctx.textAlign = 'left';
+
+        // 같은 숫자를 종이 위에도.
+        drawNumber(ctx, '0123456789', { x: M + 324, y: y + 10, size: 30, color: PALETTE.cobaltInk });
+        note('lettering.drawNumber — 한 획 굵기(0.135em)가 목소리 전체다', M + 324, y + 58, PALETTE.ui.textFaint);
+        y += 96;
+
+        /* ── 7. 마크 ──────────────────────────────────────────────────── */
+        heading('marks — eight, one meaning each', M, y);
+        y += 30;
+        const marks = [
+          ['*', (x) => asterisk(ctx, x, y, 16, PALETTE.cobalt), '조건이 붙는다'],
+          ['✦', (x) => sparkle(ctx, x, y, 18, PALETTE.accent.amber), '새로 얻었다'],
+          ['·', (x) => dot(ctx, x, y, 7, PALETTE.cobalt), '지금 여기'],
+          ['○', (x) => ring(ctx, x, y, 9, RULE.thin, PALETTE.player[0]), '플레이어'],
+          ['~', (x) => wave(ctx, x - 14, y, 28, 4, PALETTE.blueClear), '물 · 움직임'],
+          ['ripple', (x) => ripple(ctx, x, y, 16, 0.45, PALETTE.cobalt), '도달했다'],
+        ];
+        const mstep = (W - M * 2) / 7;
+        marks.forEach(([name, fn, meaning], i) => {
+          const x = M + 24 + i * mstep;
+          fn(x);
+          note(name, x - 16, y + 30, PALETTE.ui.textMuted);
+          note(meaning, x - 16, y + 44);
+        });
+        // halftone 은 선이 아니라 면이라 스와치로 보여야 한다.
+        const hx = M + 24 + 6 * mstep - 16;
+        halftone(ctx, { x: hx, y: y - 14, w: 84, h: 28 }, 0.85, PALETTE.cobalt, 5);
+        note('halftone', hx, y + 30, PALETTE.ui.textMuted);
+        note('이것은 면이다', hx, y + 44);
+        y += 74;
+
+        /* ── 8. 오차 콘 (§5.2) ────────────────────────────────────────── */
+        heading('the error cone — always visible, and it is an AREA', M, y);
+        y += 14;
+        const coneH = 96;
+        [['board.wood', PALETTE.board.wood], ['pitch.grassA', PALETTE.pitch.grassA], ['curling.table', PALETTE.curling.table]].forEach(
+          ([name, bg], i) => {
+            const x = M + i * 290;
+            ctx.fillStyle = bg;
+            ctx.fillRect(x, y, 270, coneH);
+            for (const [half, alpha] of [[26, 0.12], [52, 0.09]]) {
+              // 넓어질수록 알파를 낮춘다 — §5.2.
+              const g = ctx.createLinearGradient(x + 20, 0, x + 250, 0);
+              g.addColorStop(0, withAlpha(PALETTE.aim.cone, alpha));
+              g.addColorStop(1, withAlpha(PALETTE.aim.cone, 0));
+              ctx.beginPath();
+              ctx.moveTo(x + 20, y + coneH / 2);
+              ctx.lineTo(x + 250, y + coneH / 2 - half);
+              ctx.lineTo(x + 250, y + coneH / 2 + half);
+              ctx.closePath();
+              ctx.fillStyle = g;
+              ctx.fill();
+              ctx.strokeStyle = withAlpha(PALETTE.aim.coneEdge, 0.35);
+              ctx.lineWidth = RULE.thin;
+              ctx.stroke();
+              if (half === 26) break;
+            }
+            // 강타의 두 배 콘, 같은 자리에 겹쳐서.
+            ctx.beginPath();
+            ctx.moveTo(x + 20, y + coneH / 2);
+            ctx.lineTo(x + 250, y + coneH / 2 - 52);
+            ctx.lineTo(x + 250, y + coneH / 2 + 52);
+            ctx.closePath();
+            ctx.strokeStyle = withAlpha(PALETTE.aim.smashCone, 0.3);
+            ctx.setLineDash([3, 3]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            note(name, x, y + coneH + 16, PALETTE.ui.textMuted);
+          },
+        );
+        note('실선 = 평소 · 점선 = 강타(두 배) · 궤적 카드는 이번 턴만 지운다', M, y + coneH + 32, PALETTE.ui.textFaint);
+        y += coneH + 52;
+
+        /* ── 발 ───────────────────────────────────────────────────────── */
+        hairline(ctx, M, y, W - M, y, PALETTE.ui.edge, RULE.hair);
+        note(
+          'src/core/palette.js · src/core/tokens.js · src/ui/paper.js · src/ui/marks.js · src/ui/lettering.js',
+          M,
+          y + 18,
+          PALETTE.ui.textFaint,
+        );
+        window.__sheetReady = true;
+      }
+
+      whenFontsReady().then(draw);
+      draw();
+    </script>
+  </body>
+</html>

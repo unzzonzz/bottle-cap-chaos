@@ -1,0 +1,187 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>물 — 배경 텍스처 실험실</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; padding: 20px 20px 60px; background: #f4fafe; color: #0d3b8c;
+         font: 13px/1.5 'MSA Sans', system-ui, sans-serif; }
+  h1 { font-size: 18px; font-weight: 400; margin: 0 0 4px; }
+  p.lede { margin: 0 0 18px; color: #4a6a88; max-width: 78ch; }
+  .row { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+  figure { margin: 0; }
+  figcaption { font-size: 11px; letter-spacing: .08em; color: #7c9ab4; margin-top: 5px;
+               text-transform: uppercase; }
+  canvas, .ref { display: block; width: 853px; height: 480px; border-radius: 2px; }
+  .ref { position: relative; overflow: hidden; }
+  .panel { margin-top: 20px; display: grid; grid-template-columns: 190px 1fr 62px;
+           gap: 7px 12px; align-items: center; max-width: 760px; }
+  .panel label { font-size: 12px; color: #4a6a88; }
+  .panel input[type=range] { width: 100%; }
+  .panel output { font: 12px/1 ui-monospace, monospace; color: #0d3b8c; text-align: right; }
+  .panel h2 { grid-column: 1 / -1; font-size: 11px; font-weight: 400; letter-spacing: .12em;
+              text-transform: uppercase; color: #7c9ab4; margin: 14px 0 2px; }
+  pre { background: #e4f0f9; border-radius: 6px; padding: 10px 12px; font-size: 11px;
+        overflow: auto; max-width: 760px; }
+  .note { color: #4a6a88; max-width: 78ch; margin: 14px 0 0; }
+</style>
+<h1>물 — 배경 텍스처</h1>
+<p class="lede">
+  왼쪽이 게임이 실제로 쓰는 셰이더(<code>src/menu/water.js</code>)이고, 오른쪽이 C 시안의
+  물을 CSS/SVG 로 그대로 재현한 것이다. <b>같은 화면 크기, 같은 좌표</b>. 두 판에 커서를
+  올려 보라 — 시안의 물은 커서에 <b>밝기가 반응하지 않는다.</b>
+</p>
+
+<div class="row">
+  <figure><canvas id="live" width="1706" height="960"></canvas>
+    <figcaption>지금 게임의 물 (셰이더)</figcaption></figure>
+  <figure>
+    <div class="ref" id="ref">
+      <div id="refBase" style="position:absolute;inset:-12%"></div>
+      <svg id="refCaus" style="position:absolute;inset:-20%;opacity:.5;mix-blend-mode:screen"
+           viewBox="0 0 900 560" preserveAspectRatio="none">
+        <filter id="caus" x="-20%" y="-20%" width="140%" height="140%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.008 0.02" numOctaves="3" seed="3" result="c"/>
+          <feColorMatrix in="c" type="matrix"
+            values="0 0 0 0 0.85  0 0 0 0 0.94  0 0 0 0 1  0 0 0 -1.6 1.05"/>
+        </filter>
+        <rect width="900" height="560" filter="url(#caus)"/>
+      </svg>
+    </div>
+    <figcaption>C 시안의 물 (기준)</figcaption>
+  </figure>
+</div>
+
+<div class="panel" id="panel"></div>
+<pre id="out"></pre>
+<p class="note" id="verdict"></p>
+
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { PALETTE } from '/src/core/palette.js';
+import { createWater } from '/src/menu/water.js';
+
+/* ── 기준: 시안의 물을 CSS 로 그대로 ─────────────────────────────────────── */
+const c = PALETTE.water;
+document.getElementById('refBase').style.background =
+  `radial-gradient(70% 55% at 30% 22%, ${c.crest} 0%, ${c.body} 42%, ${PALETTE.cobalt} 88%)`;
+
+/* ── 실물: 게임이 쓰는 그 셰이더 ─────────────────────────────────────────── */
+const canvas = document.getElementById('live');
+// `preserveDrawingBuffer` — 이 페이지의 존재 이유가 픽셀을 재는 것이라,
+// 렌더 루프 밖에서도 캔버스를 읽을 수 있어야 한다.
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1);
+renderer.setSize(853, 480, false);
+/**
+ * 메뉴와 **같은 체인**이어야 한다. 이 한 가지를 빠뜨렸다가 반나절을 잃었다.
+ *
+ * 물 셰이더는 `gl_FragColor` 에 **선형** 값을 쓴다. 메뉴에서는 그게 맞다 —
+ * 컴포저의 중간 타깃이 `LinearSRGBColorSpace` 이고 맨 끝의 `OutputPass` 가
+ * sRGB 로 바꿔 주기 때문이다. 그런데 이 실험실이 처음엔 캔버스로 직행했다:
+ * `ShaderMaterial` 은 three 가 `<colorspace_fragment>` 를 끼워 주지 않으므로
+ * 변환이 아예 일어나지 않았고, 화면은 감마 하나만큼 어두웠다. 중심 픽셀이
+ * (45,127,211) 로 읽혔는데 이론값 (105,181,232) 을 sRGB→선형으로 굽히면
+ * (46,144,212) 이다. 즉 실험실이 셰이더를 모함하고 있었다.
+ *
+ * 그래서 여기서 흉내를 내지 않고 `Composer.js` 의 체인을 그대로 세운다.
+ * 블룸까지 넣는 이유는 임계값 0.72 를 굴절 마루가 실제로 넘기 때문이다 —
+ * 블룸 없는 판에서 세기를 맞추면 메뉴에서 다시 타 버린다.
+ */
+renderer.toneMapping = THREE.NoToneMapping;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+THREE.ColorManagement.enabled = true;
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(46, 853 / 480, 1, 400);
+camera.position.set(0, 6, 26);
+camera.lookAt(0, 3, 0);
+const water = createWater(scene);
+
+const target = new THREE.WebGLRenderTarget(853, 480, {
+  type: THREE.HalfFloatType,
+  colorSpace: THREE.LinearSRGBColorSpace,
+  samples: 4,
+  minFilter: THREE.LinearFilter,
+  magFilter: THREE.LinearFilter,
+});
+const composer = new EffectComposer(renderer, target);
+composer.addPass(new RenderPass(scene, camera));
+// menuConfig.view.bloom 과 같은 값. 손으로 옮겨 적은 것이 아니라 같은 숫자다.
+composer.addPass(new UnrealBloomPass(new THREE.Vector2(853, 480), 0.45, 0.6, 0.72));
+composer.addPass(new OutputPass());
+
+/* ── 손잡이. 셰이더의 실제 유니폼에 붙는다 ───────────────────────────────── */
+const DIALS = [
+  { g: '굴절 무늬' },
+  { k: 'amount', label: '세기 (실측으로 맞춘 값 — .44)', min: 0, max: 1, step: 0.01, val: 0.44 },
+  { k: 'freq', label: '주기 (작을수록 큰 무늬)', min: 1, max: 14, step: 0.1, val: 6.5 },
+  { k: 'soft', label: '덮는 정도 (알파 상수 — .95)', min: 0.3, max: 1.8, step: 0.01, val: 0.95 },
+  { k: 'speed', label: '흐르는 속도', min: 0, max: 3, step: 0.05, val: 1 },
+  { k: 'aniso', label: '세로 촘촘함 (y/x 비)', min: 1, max: 5, step: 0.05, val: 1.4 },
+  { g: '커서' },
+  { k: 'stirBright', label: '밝기 반응 ← 천둥의 원인', min: 0, max: 1.5, step: 0.05, val: 0 },
+  { k: 'stirMove', label: '이동 반응', min: 0, max: 40, step: 1, val: 0 },
+];
+const state = {};
+const panel = document.getElementById('panel');
+for (const d of DIALS) {
+  if (d.g) { const h = document.createElement('h2'); h.textContent = d.g; panel.append(h); continue; }
+  state[d.k] = d.val;
+  const l = document.createElement('label'); l.textContent = d.label;
+  const i = document.createElement('input');
+  Object.assign(i, { type: 'range', min: d.min, max: d.max, step: d.step, value: d.val });
+  const o = document.createElement('output'); o.textContent = d.val;
+  i.oninput = () => { state[d.k] = +i.value; o.textContent = i.value; dump(); };
+  panel.append(l, i, o);
+}
+
+function dump() {
+  document.getElementById('out').textContent =
+    `amount ${state.amount}   freq ${state.freq}   soft ${state.soft}\n` +
+    `speed ${state.speed}   stirBright ${state.stirBright}   stirMove ${state.stirMove}`;
+  document.getElementById('verdict').textContent =
+    state.stirBright > 0.02
+      ? '밝기 반응이 0 이 아니다 — 커서를 움직이면 무늬가 번쩍인다. 시안의 물은 이 값이 0 이다.'
+      : '밝기 반응 0. 커서는 물의 밝기를 건드리지 않는다 — 시안과 같다.';
+}
+dump();
+
+/* 커서 */
+let mx = 0, my = 0, lx = 0, ly = 0;
+for (const el of [canvas, document.getElementById('ref')]) {
+  el.addEventListener('pointermove', (e) => {
+    const r = el.getBoundingClientRect();
+    mx = ((e.clientX - r.left) / r.width) * 2 - 1;
+    my = ((e.clientY - r.top) / r.height) * 2 - 1;
+    water.stir(Math.min(0.5, (Math.abs(mx - lx) + Math.abs(my - ly)) * 2.6));
+    lx = mx; ly = my;
+  });
+}
+
+const u = water.mesh.material.uniforms;
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const stir = water.update(dt, { x: 853, y: 480 });
+  // 손잡이를 유니폼에 얹는다. 셰이더는 그대로 두고 값만 바꾼다.
+  u.uAmount && (u.uAmount.value = state.amount);
+  u.uFreq && (u.uFreq.value = state.freq);
+  u.uSoft && (u.uSoft.value = state.soft);
+  u.uSpeed && (u.uSpeed.value = state.speed);
+  u.uAniso && (u.uAniso.value = state.aniso);
+  u.uStirBright && (u.uStirBright.value = state.stirBright);
+  // 기준 판은 커서를 따라 **움직이기만** 한다
+  const m = state.stirMove;
+  document.getElementById('refCaus').style.transform =
+    `translate(${(mx * m + Math.sin(now / 6000) * 26).toFixed(1)}px, ${(my * m + Math.cos(now / 7600) * 18).toFixed(1)}px)`;
+  composer.render();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// 재기 위한 손잡이. 이 페이지의 목적이 측정이라 안을 열어 둔다.
+window.__lab = { renderer, composer, target, scene, camera, water, state, THREE };
+</script>
