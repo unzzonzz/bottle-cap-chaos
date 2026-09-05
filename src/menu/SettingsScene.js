@@ -4,7 +4,7 @@ import { menuPlateTexture, panelTexture, titleTexture } from './menuTextures.js'
 import { toMarkTexture } from '../marks/markTextures.js';
 import { PALETTE, withAlpha } from '../core/palette.js';
 import { RADIUS, ROLE, RULE } from '../core/tokens.js';
-import { anchorTopLeft, solvePanel } from './panelLayout.js';
+import { anchorHead, anchorTopLeft, solvePanel } from './panelLayout.js';
 import { TIER_COUNT, TIER_NAMES } from '../core/quality.js';
 import { plate, roundRectPath } from '../ui/paper.js';
 import { dot, hairline } from '../ui/marks.js';
@@ -342,7 +342,7 @@ export class SettingsScene {
     const at = (id) => box.rows.find((r) => r.id === id);
 
     this.panel.scale.set(box.panel.w * u, box.panel.texH * u, 1);
-    this.panel.position.set(0, 0, 0);
+    // 난외 표제의 자리는 아래 `anchorHead` 가 정한다 — 프레임의 여백에 직접 붙는다.
 
     for (const item of this.items) {
       const row = at(item.id);
@@ -371,7 +371,14 @@ export class SettingsScene {
       if (!row) continue;
       const cw = Math.max(3, Math.round(def.width * kc));
       const used = def.steps * cw + (def.steps - 1) * cg;
-      const size = { width: cw, height: Math.min(row.h, L.chip.height * kc), gap: cg };
+      /**
+       * 두 줄의 칸 **높이가 같다.**
+       *
+       * `Math.min(row.h, ...)` 이라 줄 높이가 다르면 칸 높이도 달라졌다 —
+       * 볼륨의 눈금과 그래픽의 눈금이 같은 재료(선 하나)가 된 지금, 높이가
+       * 다르면 두 줄의 선이 다른 굵기로 보인다. 같은 것은 같아 보여야 한다.
+       */
+      const size = { width: cw, height: Math.round(L.chip.height * kc), gap: cg };
       this._chipSize.set(def.id, size);
       let i = 0;
       for (const chip of this.chips) {
@@ -444,6 +451,7 @@ export class SettingsScene {
     }
 
     anchorTopLeft(this.root, box, u);
+    anchorHead(this.panel, box, this.root, u);
 
     this.refresh();
   }

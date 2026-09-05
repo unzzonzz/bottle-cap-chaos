@@ -5,7 +5,7 @@ import { MarkTextures } from '../marks/markTextures.js';
 import { PLAYER_COLORS } from '../render/playerColors.js';
 import { PALETTE } from '../core/palette.js';
 import { ROLE } from '../core/tokens.js';
-import { anchorTopLeft, solvePanel } from './panelLayout.js';
+import { anchorHead, anchorTopLeft, solvePanel } from './panelLayout.js';
 
 /**
  * 상대 선택 — two caps facing each other, and who is behind the far one.
@@ -215,7 +215,7 @@ export class OpponentScene {
     const at = (id) => box.rows.find((r) => r.id === id);
 
     this.panel.scale.set(box.panel.w * u, box.panel.texH * u, 1);
-    this.panel.position.set(0, 0, 0);
+    // 난외 표제의 자리는 아래 `anchorHead` 가 정한다 — 프레임의 여백에 직접 붙는다.
 
     const caps = at('#caps');
     /**
@@ -305,6 +305,7 @@ export class OpponentScene {
     this.refresh();
   
     anchorTopLeft(this.root, box, u);
+    anchorHead(this.panel, box, this.root, u);
   }
 
   /**

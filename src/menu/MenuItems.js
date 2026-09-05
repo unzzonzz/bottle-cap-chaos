@@ -3,9 +3,7 @@ import { PALETTE } from '../core/palette.js';
 import { createSpriteMaterial } from './menuMaterials.js';
 import { dateStampTexture, navLabelTexture, ruleTexture } from './menuTextures.js';
 import { FRAME, frameScale, texelScale } from '../core/frame.js';
-import { MOTION, ROLE, RULE } from '../core/tokens.js';
-
-import { approach } from '../ui/motion.js';
+import { ROLE, RULE } from '../core/tokens.js';
 
 /**
  * The four items, as flat plates standing in the scene.
@@ -415,22 +413,23 @@ export class MenuItems {
        * 종류다: 가리킨 것 말고 나머지가 물러나고, 가리킨 것 아래로 밑줄이
        * 왼쪽부터 뻗는다. 판은 여전히 아무 데도 안 간다.
        */
-      item.dim = approach(item.dim ?? 1, any && !item.hovered ? 0.45 : 1, dt, MOTION.hover);
-      spring(item.grow, item.hovered ? 1 : 0, 12);
-
       /**
-       * ── 항목은 **움직이지 않는다** ──────────────────────────────────────
-       * 가리킨 항목이 오른쪽으로 2px, 위로 1.5px 흘렀다. 방향을 알린다는 근거로
-       * 넣은 것이었는데, 밑줄이 이미 왼쪽부터 오른쪽으로 자라며 같은 말을 하고
-       * 있다. 두 장치가 같은 말을 하면 하나는 소음이고, 소음인 쪽은 글자를
-       * 움직이는 쪽이다 — 자간이 넓은 작은 활자가 몇 픽셀 흔들리면 읽는 중에
-       * 줄이 미끄러진 것처럼 보인다.
+       * ── 호버에 **애니메이션이 없다** ────────────────────────────────────
        *
-       * 호버가 말하는 것은 이제 둘이다: 밑줄이 자라고, 나머지가 흐려진다.
-       * 둘 다 자리를 건드리지 않는다.
+       * 세 가지가 있었다: 항목이 2px 흐르고, 나머지가 0.45 로 흐려지고, 밑줄이
+       * 스프링으로 자랐다. 첫째는 이미 뺐고, 남은 둘도 뺀다.
+       *
+       * 흐려지는 쪽이 특히 나빴다. 커서를 목록 위로 지나가기만 해도 세 줄이
+       * 매번 어두워졌다 밝아지는데, 읽는 동안 글자의 밝기가 변하면 그건 반응이
+       * 아니라 깜빡임이다. 밑줄의 스프링도 마찬가지로, 빠르게 훑으면 밑줄 세
+       * 개가 서로 다른 길이로 남아 어느 것을 가리키고 있는지 오히려 흐려진다.
+       *
+       * 남은 것은 밑줄 하나이고 즉시 켜지고 꺼진다. 가리킨 것에 선이 있다 —
+       * 그게 전부이고, 그 이상은 이 화면에서 소음이다.
        */
-      item.mesh.position.set(item.home.x, item.home.y, 0);
-      item.material.uniforms.uOpacity.value = fade * item.dim;
+      item.grow.x = item.hovered ? 1 : 0;
+      item.grow.v = 0;
+      item.material.uniforms.uOpacity.value = fade;
 
       // 밑줄: 왼쪽 끝을 고정하고 폭만 자란다
       const w = Math.max(0, item.grow.x) * (item.inkW ?? 0);

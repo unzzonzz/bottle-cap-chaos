@@ -5,7 +5,7 @@ import { OnlineSession, SESSION_PHASE } from '../net/OnlineSession.js';
 import { defaultServerUrl } from '../net/Transport.js';
 import { ERR, isValidCode, normaliseCode } from '../net/protocol.js';
 import { ROLE } from '../core/tokens.js';
-import { solvePanel } from './panelLayout.js';
+import { anchorHead, anchorTopLeft, solvePanel } from './panelLayout.js';
 
 /**
  * Finding somebody to play.
@@ -168,7 +168,7 @@ export class OnlineScene {
     const at = (id) => box.rows.find((r) => r.id === id);
 
     this.panel.scale.set(box.panel.w * u, box.panel.texH * u, 1);
-    this.panel.position.set(0, 0, 0);
+    // 난외 표제의 자리는 아래 `anchorHead` 가 정한다 — 프레임의 여백에 직접 붙는다.
 
     for (const item of this.items) {
       const row = at(item.id);
@@ -204,6 +204,9 @@ export class OnlineScene {
       old?.dispose();
     }
     this.refresh();
+  
+    anchorTopLeft(this.root, box, u);
+    anchorHead(this.panel, box, this.root, u);
   }
 
   // ── the session ──────────────────────────────────────────────────────────

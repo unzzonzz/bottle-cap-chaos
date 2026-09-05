@@ -849,6 +849,32 @@ export function submergedTitleTexture({ scale = 1 } = {}) {
   const base1 = padY + half + ascent;
 
   ctx.fillText('한여름', PAD_L, base1);
+
+  /**
+   * ── 둘째 줄은 뒤를 **가린다** ───────────────────────────────────────────
+   *
+   * 글자 둘레에 물빛으로 굵은 테를 두르고 그 위에 흰 획을 얹는다. 이 테가
+   * 불투명하므로, 제목 아래를 지나는 것이 무엇이든 그 자리에서 끊긴다 —
+   * 획과 획 사이의 좁은 틈까지 포함해서.
+   *
+   * 왜 둘째 줄만인가: 첫 줄은 프레임의 위쪽에 있어 지나갈 것이 없고, 둘째 줄은
+   * 들여쓰기 때문에 화면 가운데로 들어와 무엇과든 만난다. 두 줄 다 두르면 제목
+   * 전체가 스티커처럼 오려 붙인 것이 되고, 한 줄만 두르면 그 줄이 앞으로
+   * 나온다 — 이름이 물 속에서 **한 겹 위로** 떠오르는 것으로 읽힌다.
+   *
+   * 테 두께가 자간을 먹지 않는 이유는 `lineJoin='round'` 로 바깥으로만 자라기
+   * 때문이다. `miter` 면 획이 만나는 뾰족한 곳에서 테가 길게 튀어나온다.
+   *
+   * 이 텍스처가 알파만이 아니라 **색**을 갖게 되는 것이 여기서부터다.
+   * `SubmergedTitle` 의 셰이더가 `uTint` 대신 텍셀의 rgb 를 쓰는 이유다.
+   */
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = PALETTE.water.deep;
+  ctx.lineWidth = SIZE * 0.16;
+  ctx.strokeText('알까기', PAD_L + INDENT, base1 + LINE);
+  ctx.restore();
   ctx.fillText('알까기', PAD_L + INDENT, base1 + LINE);
 
   const tex = toTexture(canvas);

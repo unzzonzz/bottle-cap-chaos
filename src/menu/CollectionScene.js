@@ -3,7 +3,7 @@ import { CARDS } from '../game/cards/cardCatalog.js';
 import { ROLE } from '../core/tokens.js';
 import { createSpriteMaterial } from './menuMaterials.js';
 import { collectionRowTexture, menuPlateTexture, panelTexture } from './menuTextures.js';
-import { anchorTopLeft, solvePanel } from './panelLayout.js';
+import { anchorHead, anchorTopLeft, solvePanel } from './panelLayout.js';
 
 /**
  * 컬렉션 — 카드 일곱 장의 카탈로그.
@@ -119,7 +119,7 @@ export class CollectionScene {
       });
     }
     this.panel.scale.set(box.panel.w * u, box.panel.texH * u, 1);
-    this.panel.position.set(0, (box.panel.tabHeight / 2) * u, 0);
+    // 난외 표제의 자리는 아래 `anchorHead` 가 정한다 — 프레임의 여백에 직접 붙는다.
 
     this.cards.forEach((entry, i) => {
       const row = box.rows[i];
@@ -150,6 +150,7 @@ export class CollectionScene {
     this.back.position.set((-box.plate.width / 2 + fb.w / 2) * u, box.footer.y * u, 0);
   
     anchorTopLeft(this.root, box, u);
+    anchorHead(this.panel, box, this.root, u);
   }
 
   /**

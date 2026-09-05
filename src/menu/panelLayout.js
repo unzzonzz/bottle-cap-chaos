@@ -215,3 +215,33 @@ export function anchorTopLeft(root, box, unitsPerPixel, topPx = 52) {
   const first = box.rows?.length ? box.rows[0].y + box.rows[0].h / 2 : 0;
   root.position.y = (FRAME.height / 2 - topPx * k - first) * unitsPerPixel;
 }
+
+/**
+ * 난외 표제를 프레임의 **왼쪽 위 여백**에 정확히 붙인다.
+ *
+ * ── 왜 필요한가 ─────────────────────────────────────────────────────────────
+ * `panelTexture` 는 화면 이름을 캔버스의 왼쪽 위 모서리에 그린다. 그 캔버스를
+ * 입은 쿼드는 판이 있던 시절 화면 한가운데에 놓였고, 그래서 이름도 판의 위쪽
+ * 모서리에 따라갔다. 판을 걷어낸 지금 그 쿼드는 여전히 판 크기이고 여전히
+ * `anchorTopLeft` 가 옮긴 루트를 따라 움직이므로, 이름이 프레임 위로 밀려나
+ * 잘리거나 여백 밖에 선다 — 화면마다 다른 자리에서.
+ *
+ * 쿼드의 **왼쪽 위 모서리**가 여백에 오도록 직접 놓는다. 루트가 이미 옮겨져
+ * 있으므로 그만큼 빼야 한다 — 이 함수가 루트 위치를 받는 이유가 그것이다.
+ *
+ * 여백은 왼쪽 30, 위 22 다. 왼쪽은 목록·내비·날짜 도장과 같은 값이고, 위가
+ * 그보다 작은 것은 이것이 제목이 아니라 난외 표제이기 때문이다 — 페이지의
+ * 맨 위에 붙어 있어야 머리글로 읽힌다.
+ *
+ * @param {import('three').Object3D} panel  `panelTexture` 를 입은 쿼드
+ * @param {{panel: {w: number, texH: number}}} box
+ * @param {import('three').Object3D} root   `anchorTopLeft` 가 옮긴 루트
+ * @param {number} unitsPerPixel
+ */
+export function anchorHead(panel, box, root, unitsPerPixel) {
+  const k = frameScale();
+  const u = unitsPerPixel;
+  const wantX = (-FRAME.width / 2 + 30 * k + box.panel.w / 2) * u;
+  const wantY = (FRAME.height / 2 - 22 * k - box.panel.texH / 2) * u;
+  panel.position.set(wantX - root.position.x, wantY - root.position.y, 0);
+}
