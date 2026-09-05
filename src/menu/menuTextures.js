@@ -3,6 +3,7 @@ import { PALETTE, withAlpha } from '../core/palette.js';
 import { RADIUS, ROLE, RULE, SPACE, TYPE } from '../core/tokens.js';
 import { drawIcon } from '../ui/icons.js';
 import { drawLettering, letteringWidth } from '../ui/lettering.js';
+import { DISPLAY_FAMILY, FONT_FAMILY } from '../ui/fonts.js';
 import {
   applyTracking,
   dialogPanel,
@@ -1000,65 +1001,151 @@ export function iconPlateTexture(icon, state = 'idle', { size = 64, scale = 1, o
 
 
 /**
- * 내비의 표식. 지금 가리키는 항목 옆에 서는 작은 고리.
+ * 좌하단의 두 줄 숫자. C 시안의 `07 / 06`.
  *
- * §20 의 어휘에서 `○` 하나를 골라 쓴다. 이것이 스프라이트인 이유는 항목 사이를
- * **미끄러져야** 하기 때문이다 — 텍스처에 그려 넣으면 항목마다 굽고 지워야 하고,
- * 그러면 움직일 수 없다. 움직이는 것은 지오메트리여야 한다.
+ * 무엇을 가리키는 숫자가 아니라 **구도의 추**다 — 제목이 왼쪽 위에서 잘려 들어오고
+ * 내비가 오른쪽 아래에 앉으면 왼쪽 아래가 빈다. 레퍼런스 3 이 같은 자리에 절기
+ * 날짜를 놓았고, 여기서는 그것이 오늘 날짜다. 디스플레이 서체를 쓰는 두 번째
+ * 자리이고, 그래서 서브셋에 숫자가 들어 있다.
+ *
+ * 시안 값: 26px, 행간 0.92, 자간 0.04em, 왼쪽 30 / 아래 26.
  */
-export function navMarkerTexture({ size = 12, scale = 2 } = {}) {
-  const px = Math.round(size * scale);
-  const { canvas, ctx } = makeCanvas(px, px);
+export function dateStampTexture({ text = ['07', '06'], scale = 2 } = {}) {
+  const SIZE = 26;
+  const LINE = SIZE * 0.92;
+  const TRACK = SIZE * 0.04;
+  const probe = makeCanvas(8, 8);
+  probe.ctx.font = `400 ${SIZE}px ${DISPLAY_FAMILY}`;
+  applyTracking(probe.ctx, TRACK);
+  const inkW = Math.max(...text.map((t) => probe.ctx.measureText(t).width - TRACK));
+  const pad = Math.round(SIZE * 0.25);
+  const width = Math.round(inkW + pad * 2);
+  const height = Math.round(LINE * text.length + pad * 2);
+
+  const { canvas, ctx } = makeCanvas(Math.round(width * scale), Math.round(height * scale));
   ctx.scale(scale, scale);
-  ring(ctx, size / 2, size / 2, size / 2 - RULE.thin, RULE.thin, PALETTE.ui.textOnAccent);
+  ctx.font = `400 ${SIZE}px ${DISPLAY_FAMILY}`;
+  applyTracking(ctx, TRACK);
+  ctx.fillStyle = PALETTE.ui.textOnAccent;
+  ctx.textBaseline = 'alphabetic';
+  const m = ctx.measureText('0');
+  const ascent = m.fontBoundingBoxAscent || SIZE * 0.8;
+  text.forEach((t, i) => {
+    ctx.fillText(t, pad, pad + (LINE - SIZE) / 2 + ascent + i * LINE);
+  });
+
   const tex = toTexture(canvas);
-  tex.userData = { width: size, height: size };
+  tex.userData = { width, height, inkW, pad };
   return tex;
 }
 
+/** 1x1 흰 텍셀. 밑줄 쿼드가 쓴다 — 색은 `uTint` 가 준다. */
+export function ruleTexture() {
+  const { canvas, ctx } = makeCanvas(2, 2);
+  ctx.fillStyle = PALETTE.fx.white;
+  ctx.fillRect(0, 0, 2, 2);
+  return toTexture(canvas);
+}
+
 /**
- * 물에 잠기는 제목. 두 줄로 쌓고, 프레임에 잘리도록 크게 굽는다.
+ * 내비 한 항목. **글자만** 굽는다.
  *
- * ── 없어진 `homeTitleTexture` 를 대신한다 ──────────────────────────────────
- * 저쪽은 한 줄이었고 열의 머리글로 판 안에 **들어가도록** em 을 줄였다. 이 구조
- * 에서 제목은 열의 일부가 아니라 화면을 가로지르는 오브제이고, 프레임에 잘리는
- * 것이 구조다 — 들어가야 한다는 전제가 사라졌으므로 그 함수도 같이 없앴다.
+ * ── 왜 `menuPlateTexture` 가 아닌가 ────────────────────────────────────────
+ * 저쪽은 `roleButton` 이 밑줄까지 그려 넣는다. C 시안의 밑줄은 호버에서 왼쪽부터
+ * 자라나므로 그림이 아니라 **지오메트리**여야 한다 — 텍스처에 구우면 두 상태
+ * 사이에 아무 일도 일어나지 않는다. 그래서 여기서는 글자만 굽고 밑줄은
+ * `MenuItems` 가 쿼드로 그린다.
  *
- * 잉크가 흰색인 것은 이 화면에서 파랑이 지면이기 때문이다. 종이에 잉크가 아니라
- * 물에 빛이다. 화면에 나갈 때의 실제 색은 `SubmergedTitle` 의 셰이더가 정한다 —
- * 여기서 굽는 것은 **모양**뿐이고 셰이더는 알파만 읽는다.
- *
- * 둘째 줄을 들여쓰는 것은 레퍼런스의 계단식 배치다. 두 줄을 왼쪽으로 맞추면
- * 블록이 되고, 어긋내면 흐름이 생긴다.
+ * 상자를 글자에 맞춰 재서 `userData` 로 돌려준다. 가로줄로 늘어놓으려면 각
+ * 항목의 실제 폭이 필요하고, 고정 폭 판으로는 자간이 제멋대로가 된다.
  */
-export function submergedTitleTexture({ size = 120, scale = 1 } = {}) {
+export function navLabelTexture(label, { size = 12, color = PALETTE.ui.textOnAccent, tracking = 0, scale = 2 } = {}) {
+  const probe = makeCanvas(8, 8);
+  probe.ctx.font = `400 ${size}px ${FONT_FAMILY}`;
+  applyTracking(probe.ctx, tracking);
+  // 마지막 글자 뒤의 자간은 상자에 넣지 않는다. 넣으면 오른쪽 정렬이 어긋난다.
+  const inkW = Math.max(1, probe.ctx.measureText(label).width - tracking);
+  const pad = Math.round(size * 0.5);
+  const width = Math.round(inkW + pad * 2);
+  const height = Math.round(size * 2.2);
+
+  const { canvas, ctx } = makeCanvas(Math.round(width * scale), Math.round(height * scale));
+  ctx.scale(scale, scale);
+  ctx.font = `400 ${size}px ${FONT_FAMILY}`;
+  applyTracking(ctx, tracking);
+  ctx.fillStyle = color;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  ctx.fillText(label, pad, height / 2);
+
+  const tex = toTexture(canvas);
+  tex.userData = { width, height, inkW, pad };
+  return tex;
+}
+
+
+/**
+ * 물에 잠기는 제목. C 시안의 값을 그대로 옮긴 것이다.
+ *
+ * ── 시안이 곧 명세다 ──────────────────────────────────────────────────────
+ * 서체 `MSA Display`(나눔명조 ExtraBold 서브셋), 206px, 행간 0.78, 자간 −0.035em,
+ * 둘째 줄 들여쓰기 176px, 블록 회전 −7도. 프레임 853x480 기준이고 시안의 CSS px 이
+ * 곧 프레임 픽셀이므로 환산이 없다. 배치는 `SubmergedTitle` 이 한다.
+ *
+ * ── 왜 `lettering.js` 가 아닌가 ───────────────────────────────────────────
+ * 벡터 획은 임의의 한글을 합성하지만 획 굵기가 일정한 기하 서체다. 레퍼런스가
+ * 요구하는 것은 획 대비가 큰 명조이고, 그건 획을 그려서 흉내 낼 수 있는 것이
+ * 아니다. 사용자 입력이 섞이는 자리는 계속 `lettering.js` 가 맡는다.
+ *
+ * 잉크는 흰색으로 굽는다. 화면에 나가는 실제 색은 `SubmergedTitle` 의 셰이더가
+ * 정하고, 셰이더는 여기서 알파만 읽는다.
+ */
+export function submergedTitleTexture({ scale = 1 } = {}) {
+  const SIZE = 206;
+  const LINE = SIZE * 0.78;
+  const TRACK = -SIZE * 0.035;
+  const INDENT = 176;
+  const PAD_L = 30;
+  /** `.subWrap` 의 폭: 프레임 853 에 좌우로 56 씩. 시안 그대로. */
+  const width = 853 + 56 * 2;
   /**
-   * 상자를 **글자에서** 잰다. 받지 않는다.
+   * 행 상자 두 개가 **내용** 높이이고, 캔버스는 그보다 위아래로 더 크다.
    *
-   * 폭을 밖에서 주면 글자가 그 안 어디에 앉는지를 부르는 쪽이 알 수 없고,
-   * 실측으로 그것 때문에 블록이 화면 왼쪽으로 통째로 빠졌다. 여기서 재서
-   * `userData` 로 돌려주면 배치하는 쪽은 상자만 놓으면 된다.
+   * 행간이 0.78 이라 글자가 자기 행 상자 위아래로 넘친다 — 그것이 시안의 촘촘한
+   * 두 줄을 만드는 값이다. CSS 는 넘친 것을 그대로 그리지만 캔버스는 잘라내므로,
+   * 실측으로 첫 글자의 윗획이 통째로 없어졌다. 여백을 대칭으로 주면 블록의
+   * 중심이 안 움직이므로 배치 계산은 `contentH` 를 그대로 쓴다.
    */
-  const tracking = -size * 0.03;
-  const indent = size * 0.62;
-  const pad = size * 0.16;
-  const w1 = letteringWidth('한여름', size, tracking);
-  const w2 = indent + letteringWidth('알까기', size, tracking);
-  const width = Math.round(Math.max(w1, w2) + pad * 2);
-  const height = Math.round(size * 1.82 + pad * 2);
+  const contentH = Math.round(LINE * 2);
+  const padY = Math.round(SIZE * 0.3);
+  const height = contentH + padY * 2;
 
   const { canvas, ctx } = makeCanvas(Math.round(width * scale), Math.round(height * scale));
   ctx.scale(scale, scale);
 
-  drawLettering(ctx, '한여름', {
-    x: pad, y: pad, size, color: PALETTE.ui.textOnAccent, tracking, align: 'left',
-  });
-  drawLettering(ctx, '알까기', {
-    x: pad + indent, y: pad + size * 0.82, size, color: PALETTE.ui.textOnAccent, tracking, align: 'left',
-  });
+  ctx.font = `400 ${SIZE}px ${DISPLAY_FAMILY}`;
+  applyTracking(ctx, TRACK);
+  ctx.fillStyle = PALETTE.ui.textOnAccent;
+  ctx.textBaseline = 'alphabetic';
+  ctx.textAlign = 'left';
+
+  /**
+   * 베이스라인. CSS 의 반행간 계산을 그대로 옮긴다.
+   *
+   * 행 상자가 글자보다 작으므로(0.78) 반행간이 음수이고, 글자가 상자 위아래로
+   * 넘친다 — 그것이 시안의 촘촘한 두 줄을 만드는 값이다. 어센트는 실측으로
+   * 0.8em 을 쓴다(`measureText` 의 `fontBoundingBoxAscent` 가 있으면 그것을).
+   */
+  const half = (LINE - SIZE) / 2;
+  const m = ctx.measureText('한');
+  const ascent = m.fontBoundingBoxAscent || SIZE * 0.8;
+  const base1 = padY + half + ascent;
+
+  ctx.fillText('한여름', PAD_L, base1);
+  ctx.fillText('알까기', PAD_L + INDENT, base1 + LINE);
 
   const tex = toTexture(canvas);
-  tex.userData = { width, height };
+  tex.userData = { width, height, contentH, rotation: -7 };
   return tex;
 }
 

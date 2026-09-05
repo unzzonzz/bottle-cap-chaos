@@ -1484,7 +1484,7 @@ export function bootMenu(
     bottle.update(dt, { aim: transition.running ? 1 : 0, camera });
     // 배경의 물. 렌더 클럭이고 게임 상태를 읽지도 쓰지도 않는다.
     // 젓는 세기를 돌려받아 제목에 그대로 넘긴다 — 둘이 같은 물이어야 한다.
-    const stirred = water.update(dt);
+    const stirred = water.update(dt, viewport.resolution);
     // The burst is a billboard. The camera is fixed now that the shake is gone,
     // so this could be done once — it is not, because a sprite that is visibly
     // edge-on is the failure and one quaternion copy a frame is not worth the

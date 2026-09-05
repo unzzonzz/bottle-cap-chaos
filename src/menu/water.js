@@ -1,4 +1,4 @@
-import { BackSide, Color, Mesh, ShaderMaterial, SphereGeometry } from 'three';
+import { BackSide, Color, Mesh, ShaderMaterial, SphereGeometry, Vector2 } from 'three';
 import { PALETTE } from '../core/palette.js';
 
 /**
@@ -66,9 +66,7 @@ export const WATER_NOISE_GLSL = /* glsl */ `
 `;
 
 const VERT = /* glsl */ `
-  varying vec3 vDir;
   void main() {
-    vDir = normalize(position);
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
@@ -78,57 +76,40 @@ const FRAG = /* glsl */ `
   uniform vec3  uBody;
   uniform vec3  uDeep;
   uniform vec3  uCaustic;
+  uniform vec2  uResolution;
   uniform float uTime;
   uniform float uStir;
-  varying vec3  vDir;
 
   ${WATER_NOISE_GLSL}
 
   void main() {
-    // 위를 볼수록 빛에 가깝다. 아래는 빛이 닿지 않는다.
-    float up = clamp(vDir.y * 0.5 + 0.5, 0.0, 1.0);
     /**
-     * 아래로 갈수록 깊다. 경계를 0.06 에서 0.30 으로 올린 것은 가독성 때문이다.
+     * 바탕은 **화면 좌표의 타원**이다. 돔의 방향이 아니라.
      *
-     * 내비가 프레임 오른쪽 **아래**에 앉는데, 실측으로 그 자리의 물이 선형 휘도
-     * 0.27 이었다 — 어두운 잉크에도 밝은 잉크에도 최악인 중간값이다. 아래를
-     * 깊게 만들면 흰 잉크가 살고, 그건 물리적으로도 맞다.
+     * 시안이 radial-gradient(70% 55% at 30% 22%) 였다. 처음에 시선 방향으로 위아래
+     * 그라디언트를 만들었더니 밝은 곳이 화면 위쪽 전체로 퍼졌고, 그래서 오른쪽
+     * 아래에 앉는 내비의 대비가 깨져 비네트를 따로 넣어야 했다. 타원으로 돌리면
+     * 밝은 곳이 왼쪽 위 한 군데에 모이고 오른쪽 아래가 저절로 가장 깊어진다 —
+     * 가독성 장치를 덧붙일 필요가 없다. 구도가 문제를 푼 것이지 보정이 푼 것이
+     * 아니다.
      */
-    vec3 base = mix(uDeep, uBody, smoothstep(0.30, 0.72, up));
-    base = mix(base, uCrest, smoothstep(0.58, 0.96, up));
+    vec2 uv = gl_FragCoord.xy / uResolution;
+    uv.y = 1.0 - uv.y;
+    vec2 d = (uv - vec2(0.30, 0.22)) / vec2(0.70, 0.55);
+    float r = length(d);
 
-    // 무늬는 시선 방향을 평면에 눌러 찍는다. 돔의 극에서 뭉치지 않도록 y 를 섞는다.
-    vec2 p = vec2(vDir.x, vDir.z) / max(0.35, 0.55 + vDir.y * 0.45);
-    // 주기가 낮을수록 무늬가 넓어진다. 3.1 에서는 화면이 그물이 됐다.
-    float c = wCaustic(p * 1.75, uTime);
-    // 아래쪽은 빛이 덜 든다 — 커스틱은 수면 근처에서 가장 밝다.
-    c *= smoothstep(0.02, 0.62, up);
-    // 저으면 세진다. 상한을 두는 것은 §0.4 — 무늬가 화면을 덮으면 안 된다.
+    vec3 base = mix(uCrest, uBody, smoothstep(0.0, 0.42, r));
+    base = mix(base, uDeep, smoothstep(0.42, 0.88, r));
+
+    // 굴절 무늬. 화면 좌표를 그대로 쓰되 세로를 눌러 수면처럼 눕힌다.
+    float c = wCaustic(vec2(uv.x, uv.y * 0.55) * 3.4, uTime);
+    // 밝은 쪽에서 가장 잘 보인다 — 빛이 드는 곳에 굴절이 있다.
+    c *= 1.0 - smoothstep(0.25, 0.95, r);
     c *= 0.55 + min(0.75, uStir);
 
     /**
-     * 오른쪽 아래를 눌러 둔다. 장식이 아니라 **가독성 장치**다.
-     *
-     * 내비가 그 구석에 앉는다. 실측으로 그 자리의 물이 선형 0.242 까지 올라가
-     * 흰 잉크가 3.43:1 밖에 안 됐다 — §11 이 요구하는 4.5:1 을 내려면 배경이
-     * 0.172 이하여야 한다. 카메라가 고정이므로 시선 방향이 곧 화면 위치이고,
-     * +x 이면서 y 가 낮은 쪽이 오른쪽 아래다.
-     *
-     * 깊은 물이 아래에서 어두워지는 것은 물리적으로도 맞으므로, 이 눌림은
-     * 그림에서 이물감이 없다.
-     */
-    // 시작점이 -0.05 였을 때는 내비 왼쪽 끝이 아직 0.215 로 밝았다(3.77:1).
-    // -0.35 로 당겨 오른쪽 절반 전체를 눌러야 열 전체가 임계를 넘는다.
-    float corner = smoothstep(-0.35, 0.38, vDir.x) * smoothstep(0.34, -0.12, vDir.y);
-    base *= mix(1.0, 0.42, corner);
-    c *= mix(1.0, 0.25, corner);
-
-    /**
-     * 0.26 이 상한이다.
-     *
-     * 가산 백색이라 1.0 이면 바탕색이 통째로 날아간다 — 처음에 그렇게 두었더니
-     * 파랑은 사라지고 흰 그물만 남았다. 굴절은 물 **위에 얹히는** 빛이지 물을
-     * 대신하는 것이 아니다.
+     * 0.26 이 상한이다. 가산 백색이라 1.0 이면 바탕색이 통째로 날아간다 —
+     * 처음에 그렇게 두었더니 파랑은 사라지고 흰 그물만 남았다.
      */
     gl_FragColor = vec4(base + uCaustic * c * 0.26, 1.0);
   }
@@ -151,6 +132,7 @@ export function createWater(scene, { radius = 200 } = {}) {
       uCrest: { value: new Color(PALETTE.water.crest) },
       uBody: { value: new Color(PALETTE.water.body) },
       uDeep: { value: new Color(PALETTE.water.deep) },
+      uResolution: { value: new Vector2(1, 1) },
       uCaustic: { value: new Color(PALETTE.water.caustic) },
       uTime: { value: 0 },
       uStir: { value: 0 },
@@ -170,7 +152,12 @@ export function createWater(scene, { radius = 200 } = {}) {
   return {
     mesh,
     /** 시간을 민다. `dt` 는 렌더 클럭이고 게임 상태를 읽지 않는다. */
-    update(dt) {
+    /**
+     * @param {number} dt
+     * @param {{x: number, y: number}} [size]  드로잉 버퍼 크기. 화면 좌표 그라디언트가 쓴다
+     */
+    update(dt, size) {
+      if (size) material.uniforms.uResolution.value.set(size.x || 1, size.y || 1);
       material.uniforms.uTime.value += dt;
       // 지수 감쇠. 스프링이 아닌 이유는 이 값이 0 으로만 돌아가면 되기 때문이다.
       stir *= Math.exp(-dt * 1.6);

@@ -1,8 +1,9 @@
 import { Group, Mesh, PlaneGeometry, Raycaster, Vector2 } from 'three';
+import { PALETTE } from '../core/palette.js';
 import { createSpriteMaterial } from './menuMaterials.js';
-import { iconPlateTexture, menuPlateTexture, navMarkerTexture } from './menuTextures.js';
-import { FRAME } from '../core/frame.js';
-import { MOTION, ROLE, SIZE, SPACE } from '../core/tokens.js';
+import { dateStampTexture, iconPlateTexture, navLabelTexture, ruleTexture } from './menuTextures.js';
+import { FRAME, frameScale } from '../core/frame.js';
+import { MOTION, ROLE, RULE, SIZE, SPACE } from '../core/tokens.js';
 
 /** 저술 기준 판 폭. 아이콘 버튼이 프레임 배수를 되읽는 기준이다. */
 const DEFAULT_PLATE_WIDTH = 256;
@@ -87,6 +88,24 @@ const PAGES = {
  */
 const DEFAULT_TOOLS = [{ id: 'marks', icon: 'marks' }];
 
+/* ── 내비의 값. 전부 C 시안에서 그대로 옮긴 것이다 (프레임 853x480 기준) ──── */
+/** 첫 항목. 이 화면의 주된 행동이라 한 단계 크다. */
+const NAV_LEAD = 12;
+/** 나머지. */
+const NAV_SIZE = 10;
+/** 자간, em 배수. 시안의 `letter-spacing: .2em`. */
+const NAV_TRACKING = 0.2;
+/** 항목 사이. 시안의 `gap: 24px`. */
+const NAV_GAP = 24;
+/** 오른쪽·아래 여백. 시안의 `right: 30; bottom: 28`. */
+const NAV_RIGHT = 30;
+const NAV_BOTTOM = 28;
+/** 밑줄이 글자 아래로 떨어지는 거리. 시안의 `bottom: -6px`. */
+const NAV_RULE_DROP = 6;
+/** 좌하단 숫자. 시안의 `left: 30; bottom: 26`. */
+const STAMP_LEFT = 30;
+const STAMP_BOTTOM = 26;
+
 export class MenuItems {
   /**
    * @param {import('../core/GlossMaterial.js').GlossMaterials} retro
@@ -112,7 +131,14 @@ export class MenuItems {
       const mesh = new Mesh(new PlaneGeometry(1, 1), material);
       mesh.renderOrder = 10;
       this.root.add(mesh);
-      return { id: null, label: '', role: null, mesh, material, maps: null, hovered: false, shift: 0 };
+      const ruleMat = createSpriteMaterial(retro, { map: this._ruleMap, opacity: 0 });
+      const rule = new Mesh(new PlaneGeometry(1, 1), ruleMat);
+      rule.renderOrder = 11;
+      this.root.add(rule);
+      return {
+        id: null, label: '', role: null, mesh, material, map: null,
+        rule, ruleMat, hovered: false, shift: 0, grow: { x: 0, v: 0 },
+      };
     });
 
     /**
@@ -132,20 +158,26 @@ export class MenuItems {
     });
 
     /**
-     * 지금 가리키는 항목 옆에 서는 고리. 항목 사이를 **미끄러진다.**
+     * 항목마다 밑줄 쿼드 하나. C 시안의 상호작용이 이것이다.
      *
-     * 호버를 텍스처 교체로만 표현하면 상태가 두 개인 스위치가 되고, 그 사이에
-     * 아무 일도 일어나지 않는다. 이 하나가 열에 **연속성**을 준다 — 어디서
-     * 어디로 갔는지가 보인다.
+     * 텍스처에 구워 넣지 않는 이유는 **자라야** 하기 때문이다. 호버에서 왼쪽부터
+     * 오른쪽으로 늘어나고, 손을 떼면 같은 방향으로 줄어든다 — 두 상태 사이에
+     * 실제로 무슨 일이 일어나는지가 보여야 상호작용이 된다.
      */
-    this.marker = new Mesh(
+    this._ruleMap = ruleTexture();
+
+    /**
+     * 좌하단의 숫자. 눌리지 않으므로 `_picks` 에 넣지 않는다.
+     *
+     * 구도의 추다 — 제목이 왼쪽 위에서 들어오고 내비가 오른쪽 아래에 앉으면
+     * 왼쪽 아래가 빈다. 자세한 것은 `dateStampTexture`.
+     */
+    this.stamp = new Mesh(
       new PlaneGeometry(1, 1),
-      createSpriteMaterial(retro, { map: navMarkerTexture(), opacity: 0 }),
+      createSpriteMaterial(retro, { map: dateStampTexture() }),
     );
-    this.marker.renderOrder = 11;
-    this.root.add(this.marker);
-    /** 마커의 스프링 상태. 위치와 불투명도가 따로 움직인다. */
-    this._mark = { y: 0, vy: 0, o: 0, vo: 0, has: false };
+    this.stamp.renderOrder = 10;
+    this.root.add(this.stamp);
 
     this._ray = new Raycaster();
     /**
@@ -194,7 +226,9 @@ export class MenuItems {
       item.role = def?.role ?? null;
       item.disabled = def?.disabled ?? false;
       item.hovered = false;
+      item.lead = i === 0;
       item.mesh.visible = !!def;
+      if (item.rule) item.rule.visible = !!def;
     });
     this._plateKey = '';
     this._rebakeIfResized();
@@ -218,23 +252,24 @@ export class MenuItems {
    * 판 크기가 프레임에 따라 변하므로 — `bootMenu.applyArrangement` 를 보라 —
    * 부팅 때 한 번이 아니라 크기가 바뀔 때마다 필요하다. 그래서 함수로 뺐다.
    */
-  _bake(label, role) {
-    const t = this.tuning;
-    const size = {
-      width: Math.round(t.plateWidth),
-      height: Math.round(t.plateHeight),
+  /**
+   * 한 항목의 텍스처. **글자만**, 자기 폭에 맞춰.
+   *
+   * C 시안의 값이다: 첫 항목 12px 차가운 흰색, 나머지 10px 옅은 파랑, 자간
+   * 0.2em. 첫 항목이 큰 것은 그것이 이 화면의 주된 행동이기 때문이고, 그
+   * 위계를 굵기가 아니라 **크기와 색**으로 만드는 것이 단일 웨이트 서체의 규칙이다.
+   *
+   * 상태별 텍스처가 없다. 호버는 밑줄과 불투명도가 맡고, 둘 다 매 프레임 움직이는
+   * 값이라 구울 수 없다.
+   */
+  _bake(label, lead) {
+    const size = lead ? NAV_LEAD : NAV_SIZE;
+    return navLabelTexture(label, {
+      size,
+      color: lead ? PALETTE.ui.textOnAccent : PALETTE.bluePale,
+      tracking: size * NAV_TRACKING,
       scale: PLATE_TEXEL_SCALE,
-      // 이 열은 종이가 아니라 물 위에 앉는다. 잉크가 뒤집힌다.
-      onWater: true,
-    };
-    // `role` is passed through so 뒤로 gets its left arrow. Everything else on
-    // these two pages is a CHOICE and takes the default.
-    const spec = (state) => (role ? { role, state } : state);
-    return {
-      idle: menuPlateTexture(label, spec('idle'), size),
-      hover: menuPlateTexture(label, spec('hover'), size),
-      disabled: menuPlateTexture(label, spec('disabled'), size),
-    };
+    });
   }
 
   /** 아이콘 버튼 한 개의 두 상태. */
@@ -268,94 +303,100 @@ export class MenuItems {
    * 크기가 같으면 아무것도 하지 않는다. `layout()` 은 리사이즈마다 불리므로
    * 이 가드가 없으면 창을 끌 때마다 항목 수 x 3 장을 다시 굽는다.
    */
+  /**
+   * 항목 텍스처를 다시 굽는다.
+   *
+   * 예전에는 판 크기가 프레임에 비례해 바뀌므로 크기를 키로 삼았다. 지금 항목은
+   * 저술 크기(12/10px)로 굽고 배치할 때 `frameScale()` 로 줄이므로, 다시 구울
+   * 이유는 **페이지가 바뀌어 라벨이 달라졌을 때**뿐이다.
+   */
   _rebakeIfResized() {
-    const t = this.tuning;
-    const key = `${Math.round(t.plateWidth)}x${Math.round(t.plateHeight)}`;
+    const key = this.items.map((i) => i.label).join('|');
     if (key === this._plateKey) return;
     this._plateKey = key;
-    for (const item of this.items) {
-      if (item.maps) for (const tex of Object.values(item.maps)) tex.dispose();
+    this.items.forEach((item, i) => {
+      item.map?.dispose();
       if (!item.id) {
-        item.maps = null;
-        continue;
+        item.map = null;
+        return;
       }
-      const next = this._bake(item.label, item.role);
-      item.maps = next;
-      item.material.uniforms.uMap.value = item.disabled
-        ? next.disabled
-        : item.hovered
-          ? next.hover
-          : next.idle;
-    }
+      item.map = this._bake(item.label, i === 0);
+      item.material.uniforms.uMap.value = item.map;
+    });
     for (const tool of this.tools) {
       const next = this._bakeTool(tool.icon);
       for (const tex of Object.values(tool.maps)) tex.dispose();
       tool.maps = next;
       tool.material.uniforms.uMap.value = tool.hovered ? next.hover : next.idle;
     }
-
   }
 
   layout(unitsPerPixel) {
-    const t = this.tuning;
     const u = unitsPerPixel;
-    const yaw = (t.yaw * Math.PI) / 180;
     this._rebakeIfResized();
 
-    const w = t.plateWidth * u;
-    const h = t.plateHeight * u;
     const live = this.items.filter((i) => i.id);
-    const n = live.length;
+    const k = frameScale();
 
     /**
-     * 열은 **오른쪽 아래**에 오른쪽 맞춤으로 선다.
+     * 오른쪽 아래에서 **왼쪽으로** 쌓는 가로줄. C 시안의 배치다.
      *
-     * ── 왜 가운데 열이 아니라 구석인가 ──────────────────────────────────────
-     * 제목이 화면을 가로지르는 오브제가 되면서 가운데를 비워야 했다. 그리고 이
-     * 구조에서 내비는 주인공이 아니다 — 작고, 조용하고, 구석에 있다가 커서가
-     * 오면 대답하는 것이다.
-     *
-     * 오른쪽 맞춤인 이유는 제목이 왼쪽에서 잘려 들어오기 때문이다. 둘이 같은
-     * 쪽에 몰리면 화면 한쪽만 무거워진다.
+     * 마지막 항목의 오른쪽 끝이 프레임 오른쪽에서 30, 글자 밑선이 아래에서 28.
+     * 항목 사이는 24. 전부 시안의 CSS px 이고, 프레임이 작아지면 `frameScale()`
+     * 이 함께 줄인다 — 저술값을 쓰는 이 프로젝트의 모든 것과 같은 규칙이다.
      */
-    const margin = SPACE.xl;
-    const right = FRAME.width / 2 - margin;
-    const bottom = -FRAME.height / 2 + margin;
+    const right = FRAME.width / 2 - NAV_RIGHT * k;
+    const baseline = -FRAME.height / 2 + NAV_BOTTOM * k;
 
-    live.forEach((item, i) => {
-      // 배열의 첫 항목이 **위**에 오도록 아래에서부터 쌓는다.
-      const y = bottom + (n - 1 - i) * t.pitch + t.plateHeight / 2;
-      const x = right - t.plateWidth / 2;
-      item.home = { x: x * u, y: y * u };
-      item.mesh.scale.set(w, h, 1);
-      item.mesh.rotation.y = yaw;
+    /**
+     * 오른쪽에서 왼쪽으로 커서를 옮기며 놓는다.
+     *
+     * 상자에는 좌우로 `pad` 가 있고 글자는 그 안에 가운데로 앉는다. 그래서
+     * **잉크 폭**으로 전진하고 상자는 잉크 중심에 맞춰 씌운다 — 상자 폭으로
+     * 전진하면 여백이 두 번 들어가 간격이 시안의 24 보다 넓어지고, 처음에
+     * 그렇게 짜서 세 항목이 서로 겹쳤다.
+     */
+    let cursor = right;
+    for (let i = live.length - 1; i >= 0; i--) {
+      const item = live[i];
+      const box = item.map?.userData ?? { width: 40, height: 22, inkW: 30, pad: 5 };
+      const ink = box.inkW * k;
+      const cx = cursor - ink / 2;
+      const size = (item.lead ? NAV_LEAD : NAV_SIZE) * k;
+
+      item.home = { x: cx * u, y: (baseline + size * 0.5) * u };
+      item.mesh.scale.set(box.width * k * u, box.height * k * u, 1);
       item.mesh.position.set(item.home.x, item.home.y, 0);
-    });
 
-    /**
-     * 아이콘 버튼은 열 **위**, 같은 오른쪽 선에 맞춘다.
-     *
-     * 아래가 아니라 위인 것은 열이 이미 프레임 바닥에 붙어 있기 때문이다.
-     */
+      item.inkW = ink * u;
+      item.ruleLeft = (cx - ink / 2) * u;
+      item.ruleY = (baseline - NAV_RULE_DROP * k) * u;
+
+      cursor -= ink + NAV_GAP * k;
+    }
+
+    /** 아이콘 버튼은 열 **위**, 같은 오른쪽 선. */
     const icon = Math.round(SIZE.buttonIcon.w * this._toolScale());
     const gap = Math.round(SPACE.md * this._toolScale());
-    const topY = bottom + (n - 1) * t.pitch + t.plateHeight / 2;
-    const toolY = topY + t.plateHeight / 2 + gap + icon / 2;
+    const toolY = baseline + NAV_LEAD * k + gap + icon / 2;
     const last = this.tools.length - 1;
     this.tools.forEach((tool, i) => {
-      const x = right - icon / 2 - (last - i) * (icon + gap);
-      tool.home = { x: x * u, y: toolY * u };
+      const tx = right - icon / 2 - (last - i) * (icon + gap);
+      tool.home = { x: tx * u, y: toolY * u };
       tool.mesh.scale.set(icon * u, icon * u, 1);
-      tool.mesh.rotation.y = yaw;
       tool.mesh.position.set(tool.home.x, tool.home.y, 0);
     });
 
-    /** 마커는 열의 왼쪽 바깥에 선다. 크기는 프레임을 따라 줄어든다. */
-    const md = Math.round(10 * this._toolScale());
-    this._markerX = (right - t.plateWidth - SPACE.sm) * u;
-    this.marker.scale.set(md * u, md * u, 1);
-    this.marker.position.set(this._markerX, this._mark.y, 0);
+    /** 날짜 도장: 왼쪽 30 / 아래 26. 시안 그대로. */
+    const st = this.stamp.material.uniforms.uMap.value.userData;
+    this.stamp.scale.set(st.width * k * u, st.height * k * u, 1);
+    this.stamp.position.set(
+      (-FRAME.width / 2 + STAMP_LEFT * k + st.inkW * k / 2) * u,
+      (-FRAME.height / 2 + STAMP_BOTTOM * k + st.height * k / 2 - st.pad * k) * u,
+      0,
+    );
 
+    this._ruleH = RULE.thin * k * u;
     this._unitsPerPixel = u;
   }
 
@@ -364,50 +405,49 @@ export class MenuItems {
    * @param {number} fade  0 hides the whole column; used while a run plays out
    */
   update(dt, fade = 1) {
-    const t = this.tuning;
-    const u = this._unitsPerPixel ?? 1;
+    const any = this.hovered != null;
+    /** 임계 감쇠. 밑줄이 자라는 것은 붙는 것이 아니라 **뻗는** 것이다. */
+    const spring = (st, to, w) => {
+      const f = 1 + 2 * dt * w, oo = w * w, dtoo = dt * oo, det = f + dt * dtoo;
+      st.v = (st.v + dtoo * (to - st.x)) / det;
+      st.x = (f * st.x + dt * st.v + dt * dtoo * to) / det;
+    };
+
     for (const item of this.items) {
-      // 빈 슬롯. 이 페이지가 안 쓰는 자리이고 `home` 이 없으므로 배치도 없다.
-      if (!item.id) continue;
+      if (!item.id || !item.home) continue;
+
       /**
-       * ── 호버가 다시 무언가를 한다. 다만 판이 아니라 **열**이 반응한다 ──────
-       * 예전에 뺀 것은 판이 앞으로 튀어나오는 것이었다 — 판이 물체처럼 굴었고,
-       * 사용자가 그걸 원하지 않았다. 여기 있는 것은 다른 종류다: 판은 그대로
-       * 있고 **가리켜진 것 말고 나머지가 물러난다.** 인쇄물에서 한 줄을 손가락으로
-       * 짚으면 나머지가 뒤로 가는 것과 같고, 판이 물체가 되지 않는다.
-       *
-       * 짚은 줄만 가장자리 쪽으로 아주 조금 나간다 — 6 프레임픽셀. 그보다 크면
-       * 열이 흔들리는 것으로 보인다.
+       * ── 호버는 판이 아니라 **열**을 움직인다 ────────────────────────────
+       * 예전에 뺀 것은 판이 앞으로 튀어나오는 것이었다. 여기 있는 것은 다른
+       * 종류다: 가리킨 것 말고 나머지가 물러나고, 가리킨 것 아래로 밑줄이
+       * 왼쪽부터 뻗는다. 판은 여전히 아무 데도 안 간다.
        */
       item.shift = approach(item.shift, item.hovered ? 1 : 0, dt, MOTION.hover);
-      const any = this.hovered != null;
-      const dim = any && !item.hovered ? 0.42 : 1;
-      item.dim = approach(item.dim ?? 1, dim, dt, MOTION.hover);
-      item.mesh.position.set(item.home.x + item.shift * 6 * u, item.home.y, 0);
-      item.mesh.scale.set(t.plateWidth * u, t.plateHeight * u, 1);
+      item.dim = approach(item.dim ?? 1, any && !item.hovered ? 0.45 : 1, dt, MOTION.hover);
+      spring(item.grow, item.hovered ? 1 : 0, 12);
+
+      item.mesh.position.set(item.home.x, item.home.y + item.shift * -1.5 * (this._unitsPerPixel ?? 1), 0);
       item.material.uniforms.uOpacity.value = fade * item.dim;
+
+      // 밑줄: 왼쪽 끝을 고정하고 폭만 자란다
+      const w = Math.max(0, item.grow.x) * (item.inkW ?? 0);
+      item.rule.visible = w > 0.0001 && fade > 0.004;
+      if (item.rule.visible) {
+        item.rule.scale.set(w, this._ruleH ?? 1, 1);
+        item.rule.position.set((item.ruleLeft ?? 0) + w / 2, item.ruleY ?? 0, 0);
+        item.ruleMat.uniforms.uTint.value.set(
+          item.lead ? PALETTE.ui.textOnAccent : PALETTE.bluePale,
+        );
+        item.ruleMat.uniforms.uOpacity.value = fade;
+      }
     }
 
-    /**
-     * 마커. 가리켜진 줄로 미끄러지고, 아무것도 안 가리키면 사라진다.
-     *
-     * 임계 감쇠 스프링을 손으로 적분한다 — `approach` 는 지수 접근이라 목표에
-     * 붙기만 하고 **미끄러지지** 않는다. 열 사이를 건너뛰는 움직임에는 속도가
-     * 필요하고, 속도가 있어야 어디서 왔는지가 보인다.
-     */
-    const m = this._mark;
-    const target = this.hovered && this.hovered.home ? this.hovered.home.y : m.y;
-    const has = !!(this.hovered && this.hovered.home);
-    const spring = (x, v, to, w) => {
-      const f = 1 + 2 * dt * w, oo = w * w, dtoo = dt * oo, det = f + dt * dtoo;
-      const nv = (v + dtoo * (to - x)) / det;
-      return [(f * x + dt * nv + dt * dtoo * to) / det, nv];
-    };
-    [m.y, m.vy] = spring(m.y, m.vy, target, 13);
-    [m.o, m.vo] = spring(m.o, m.vo, has ? 1 : 0, 16);
-    this.marker.position.set(this._markerX ?? 0, m.y, 0);
-    this.marker.material.uniforms.uOpacity.value = fade * Math.max(0, m.o);
-    this.marker.visible = m.o > 0.004;
+    for (const tool of this.tools) {
+      tool.dim = approach(tool.dim ?? 1, any && !tool.hovered ? 0.45 : 1, dt, MOTION.hover);
+      tool.material.uniforms.uOpacity.value = fade * tool.dim;
+    }
+    // 숫자는 호버에 반응하지 않는다. 누를 수 있는 것이 아니기 때문이다.
+    this.stamp.material.uniforms.uOpacity.value = fade * 0.85;
   }
 
   /**
@@ -448,13 +488,20 @@ export class MenuItems {
   }
 
   dispose() {
-    this.marker.geometry.dispose();
-    this.marker.material.uniforms.uMap.value?.dispose();
-    this.marker.material.dispose();
+    this._ruleMap?.dispose();
+    this.stamp.geometry.dispose();
+    this.stamp.material.uniforms.uMap.value?.dispose();
+    this.stamp.material.dispose();
+    for (const item of this.items) {
+      item.rule?.geometry.dispose();
+      item.ruleMat?.dispose();
+      item.map?.dispose();
+    }
     for (const item of [...this.items, ...this.tools]) {
       item.mesh.geometry.dispose();
       item.material.dispose();
-      for (const m of Object.values(item.maps)) m.dispose();
+      // 항목은 `map` 하나, 도구는 상태별 `maps` 를 갖는다. 둘이 다르다.
+      if (item.maps) for (const m of Object.values(item.maps)) m.dispose();
     }
     this.root.clear();
   }

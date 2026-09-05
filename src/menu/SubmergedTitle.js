@@ -1,5 +1,5 @@
 import { Color, Mesh, PlaneGeometry, ShaderMaterial } from 'three';
-import { FRAME } from '../core/frame.js';
+import { FRAME, frameScale } from '../core/frame.js';
 import { PALETTE } from '../core/palette.js';
 import { submergedTitleTexture } from './menuTextures.js';
 import { WATER_NOISE_GLSL } from './water.js';
@@ -107,38 +107,40 @@ export class SubmergedTitle {
     const u = unitsPerPixel ?? this._u;
     this._u = u;
 
-    /**
-     * 상자는 `submergedTitleTexture` 가 글자를 재서 정한다. 여기서는 그것을
-     * 프레임 왼쪽에 걸쳐 놓기만 한다 — 잘리는 것이 구조이고, 잘리는 **양**은
-     * 글자 크기에 비례해야 창이 바뀌어도 같은 그림이 된다.
-     */
-    /**
-     * 글자 크기를 **프레임에서** 정한다.
-     *
-     * 0.135 는 실측이다. `lettering.js` 는 획으로 그리므로 em 상자를 거의 꽉
-     * 채운다 — 처음에 0.25 로 잡았더니 글자 하나가 프레임 높이의 절반이었고
-     * 두 줄이 서로를 덮었다. 지금은 글자 하나가 프레임 높이의 약 4분의 1이고,
-     * 두 줄이 겹치지 않으면서 첫 줄의 왼쪽만 잘린다.
-     */
-    const size = Math.round(FRAME.width * 0.135);
-    const key = `${size}`;
-    if (key !== this._key) {
-      this._key = key;
-      this.material.uniforms.uMap.value?.dispose();
-      this.material.uniforms.uMap.value = submergedTitleTexture({ size, scale: 1 });
+    if (!this.material.uniforms.uMap.value) {
+      this.material.uniforms.uMap.value = submergedTitleTexture({ scale: 1 });
     }
-    const box = this.material.uniforms.uMap.value.userData ?? { width: size * 4, height: size * 2 };
+    const box = this.material.uniforms.uMap.value.userData;
 
-    this.mesh.scale.set(box.width * u, box.height * u, 1);
-    // 왼쪽으로 밀고 살짝 위. 기울기는 레퍼런스의 각도다.
     /**
-     * 첫 줄의 왼쪽만 프레임 밖으로. 상자의 왼쪽 끝이 프레임 왼쪽에서 글자
-     * 하나의 5분의 1만큼 더 나가도록 놓는다 — 잘렸다는 것이 보이면서 무엇인지도
-     * 읽히는 지점이다.
+     * 시안의 좌표를 그대로 놓는다.
+     *
+     * `.subWrap` 은 left −56 / top 6 이고 폭이 853+112, 높이가 행 상자 두 개다.
+     * 회전은 그 블록의 **중심**을 축으로 −7 도. 중심을 프레임 좌표로 옮기면
+     * x 는 정확히 프레임 가운데(−56 + 965/2 = 426.5)이고, y 는 6 + 높이/2 다.
+     *
+     * 프레임이 넓어지면(정책 C, 최대 853) 이 값들은 그대로 두고 가운데 정렬만
+     * 따라간다 — 시안이 853 폭에서 그려졌으므로 그것이 기준 폭이다.
      */
-    const left = -FRAME.width / 2 - size * 0.2;
-    this.mesh.position.set((left + box.width / 2) * u, FRAME.height * 0.1 * u, 0);
-    this.mesh.rotation.z = (-6.5 * Math.PI) / 180;
+    /**
+     * 시안의 좌표에 **프레임 배율**을 태운다.
+     *
+     * 시안은 853x480 에서 그려졌고 텍스처도 그 크기로 굽는다. 작은 창에서
+     * 프레임은 그보다 작아지므로(정책 C 에서 높이가 크기 축이다) 그대로 놓으면
+     * 제목만 프레임보다 커진다 — 실측으로 프레임 562 에서 965 폭 제목이 앉아
+     * 첫 줄이 통째로 화면 밖이었다.
+     *
+     * `frameScale()` 은 이 프로젝트의 모든 저술값이 쓰는 그 배율이다. 제목만
+     * 다른 규칙을 쓰면 창을 줄일 때 제목만 어긋난다.
+     */
+    const k = frameScale();
+    const cx = 0;
+    // 중심은 **내용** 높이로 잡는다. 캔버스의 여백은 대칭이라 중심을 옮기지 않는다.
+    const cy = FRAME.height / 2 - (6 + (box.contentH ?? box.height) / 2) * k;
+
+    this.mesh.scale.set(box.width * k * u, box.height * k * u, 1);
+    this.mesh.position.set(cx * u, cy * u, 0);
+    this.mesh.rotation.z = (box.rotation * Math.PI) / 180;
   }
 
   /**

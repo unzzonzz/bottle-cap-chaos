@@ -742,7 +742,7 @@ export const PALETTE = {
   water: {
     crest: '#7fc4ef',
     body: '#2f8ed6',
-    deep: '#12459c',
+    deep: COBALT,
     /**
      * 굴절 무늬가 더하는 빛. **가산으로 얹히므로 밝아야 한다.**
      *

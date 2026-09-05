@@ -27,6 +27,23 @@
   font-display: swap;
 }
 
+/**
+ * 디스플레이 서체. 나눔명조 ExtraBold 의 서브셋이고, 이름이 바뀐 것은 규칙이
+ * 아니라 **요구**다 — 나눔은 OFL 의 Reserved Font Name 을 걸어 두었고 §3 이
+ * 수정본의 그 이름 사용을 금지한다. 서브셋은 수정본이다. 자세한 것은 NOTICE.
+ *
+ * 웨이트를 400 으로 선언하는 것은 파일이 하나뿐이기 때문이다. 원본은 ExtraBold
+ * 이지만 브라우저에는 이 패밀리의 유일한 굵기이므로, 400 으로 두어야 합성 볼드가
+ * 끼어들 여지가 없다. `FONT_WEIGHTS` 의 규칙과 같은 이유다.
+ */
+@font-face {
+  font-family: 'MSA Display';
+  src: url('./fonts/msa-display.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+
 *,
 *::before,
 *::after {

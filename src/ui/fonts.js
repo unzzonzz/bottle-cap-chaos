@@ -53,6 +53,24 @@ export const FONT_FAMILY =
   '"MSA Sans", "Gowun Dodum", "Pretendard", -apple-system, "Segoe UI", system-ui, sans-serif';
 
 /**
+ * 디스플레이 서체. 제목과 큰 숫자.
+ *
+ * ── §5 가 요구하는 대비의 한쪽이다 ────────────────────────────────────────
+ * "표현적 디스플레이 ↔ 정밀한 유틸리티" 의 대비를 만들려면 목소리가 둘이어야
+ * 한다. `MSA Sans`(고운돋움)는 조용한 쪽을 맡고, 이쪽이 말하는 쪽이다 — 획
+ * 대비가 큰 명조. 레퍼런스 셋 중 둘이 이 계열이었다.
+ *
+ * ── 이것이 `lettering.js` 를 대신하는 것은 아니다 ─────────────────────────
+ * 벡터 획은 임의의 한글을 합성할 수 있고 이 서체는 서브셋에 든 글자만 낸다.
+ * 둘은 다른 도구다: 사용자 입력이 섞일 수 있는 자리는 계속 획으로 그리고,
+ * **저술된 문자열**만 이쪽으로 온다. 서브셋을 좁게 잡을 수 있는 이유가 그것이다.
+ *
+ * 새 디스플레이 문자열을 넣으면 그 글자를 서브셋에 추가해야 한다 — 없으면
+ * 조용히 두부가 된다. NOTICE 에 지금 든 글자 목록이 있다.
+ */
+export const DISPLAY_FAMILY = '"MSA Display", "Nanum Myeongjo", serif';
+
+/**
  * The numerals.
  *
  * ── nothing sets numbers in this stack any more ────────────────────────────
@@ -117,6 +135,14 @@ export async function whenFontsReady() {
           document.fonts.load(`${w} 20px ${FONT_FAMILY}`, '가힣AZ09').catch(() => {}),
         ),
       );
+      /**
+       * 디스플레이 서체도 같은 문 안에서 기다린다.
+       *
+       * 제목이 캔버스 텍스처로 구워지므로 본문 서체와 정확히 같은 함정이 있다 —
+       * 늦게 오면 폴백으로 구워진 텍스처가 캐시에 남고 영영 안 바뀐다. 샘플이
+       * 제목의 글자인 것은 서브셋이 그 글자만 갖고 있기 때문이다.
+       */
+      await document.fonts.load(`400 40px ${DISPLAY_FAMILY}`, '한여름알까기09').catch(() => {});
       await document.fonts.ready;
     }
   } catch {
