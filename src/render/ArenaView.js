@@ -15,6 +15,7 @@ import { BOARD_TILE, makeBoardTexture } from './boardTexture.js';
 import { BALL_GROUP, buildBallGeometry } from './ballGeometry.js';
 import { PitchView } from './PitchView.js';
 import { CurlingTableView } from './CurlingTableView.js';
+import { PebbleBodies } from './PebbleBodies.js';
 import { PLAYER_COLORS } from './playerColors.js';
 import { PALETTE } from '../core/palette.js';
 
@@ -211,6 +212,8 @@ export class ArenaView {
     this.ballMaterials[BALL_GROUP.HEXAGON] = retro.create({ color: BALL_LIGHT, preset: 'plastic' });
 
     this.meshes = [];
+    /** 몸통을 자연석으로 그리는 필드에서만 만들어진다. `_buildBodies` 를 보라. */
+    this.bodies = null;
     this.ball = null;
     this._buildBodies(arena);
 
@@ -229,8 +232,35 @@ export class ArenaView {
 
   /** The caps, and the ball if this mode has one. */
   _buildBodies(arena) {
+    /**
+     * 몸통을 무엇으로 그리는가. **필드와 같은 자로 가른다.**
+     *
+     * 바로 아래 `_buildField` 가 "레이아웃이 스스로를 무엇이라 부르는가 — 어느
+     * 모드가 로드됐는지가 아니라" 로 갈린다. 여기도 같은 자를 쓴다: `board` 는
+     * 서바이벌의 판이고 축구와 컬링은 각각 `pitch` 와 `table` 이므로, 이 한 줄이
+     * `CONFIG.mode` 를 읽지 않고 "서바이벌만 조약돌" 을 말한다.
+     *
+     * 그리고 그래야만 문서 **안에서** 모드를 바꾸는 경로 — 패널의 모드 드롭다운이
+     * `rebuildAll` 을 거쳐 `rebuild` 를 부른다 — 가 저절로 맞는다. 부팅 때 한 번
+     * 정해 들고 있는 플래그였다면 축구로 바꾼 뒤에도 공 옆에 돌이 굴러다녔을 것이다.
+     */
+    if (arena.layout.describe().kind === 'board') {
+      /**
+       * 치수는 **뚜껑의 것**을 넘긴다. 돌의 기본값을 다시 적지 않는다.
+       *
+       * 콜라이더는 `capDimensions(capGeometry)` 에서 나왔다. 그 값으로 돌을 구우면
+       * 그려지는 것과 부딪히는 것이 정의상 같은 크기다 — 뚜껑이 지키던 불변을
+       * 돌이 그대로 물려받는 것이고, 물리는 한 줄도 바뀌지 않는다.
+       */
+      const { radius, height } = this.capGeometry.userData;
+      this.bodies = new PebbleBodies({ retro: this.retro, radius, height });
+    }
+
     for (let i = 0; i < arena.capCount; i++) {
-      const mesh = new Mesh(this.capGeometry, this._materials[arena.capOwner[i] % 2]);
+      const owner = arena.capOwner[i] % 2;
+      const mesh = this.bodies
+        ? this.bodies.meshFor(i, owner)
+        : new Mesh(this.capGeometry, this._materials[owner]);
       /**
        * 뚜껑은 그림자를 던지고 또 받는다.
        *
@@ -251,6 +281,10 @@ export class ArenaView {
       this.root.add(mesh);
       this.meshes.push(mesh);
     }
+
+    // 패널의 `tri/cap` 은 화면에 실제로 있는 것을 말해야 한다. 껍질까지 세어도
+    // 뚜껑의 3024 에는 한참 못 미친다.
+    if (this.bodies) this.triangles = this.bodies.triangles;
 
     if (arena.hasBall) {
       // Built at the arena's radius rather than scaled from a unit solid: the
@@ -596,6 +630,8 @@ export class ArenaView {
     // than de-duplicating for a toggle that fires on a click.
     for (const set of this._materials) for (const m of set) (m.wireframe = on);
     for (const m of this.ballMaterials) m.wireframe = on;
+    // 돌은 몸통마다 자기 재질을 갖고, 껍질은 켤 때 숨는다 — `PebbleBodies` 를 보라.
+    this.bodies?.setWireframe(on);
 
     if (this.surface) {
       this.surface.setWireframe(on);
@@ -623,6 +659,16 @@ export class ArenaView {
     this._shadowLast = null;
     for (const m of this.meshes) this.root.remove(m);
     this.meshes.length = 0;
+    /**
+     * 돌은 뚜껑과 달리 **몸통마다 자기 지오메트리와 재질**을 갖는다.
+     *
+     * 위 두 줄이 뚜껑 경로에서 아무것도 버리지 않아도 되는 것은 여섯이 한
+     * 지오메트리와 두 벌의 재질을 공유하기 때문이다. 같은 줄을 돌에 그대로 쓰면
+     * 모드를 바꾸거나 판 크기를 움직일 때마다 여섯 벌이 GPU 에 남는다 —
+     * `_disposeField` 가 필드에 대해 하는 말과 같은 이야기다.
+     */
+    this.bodies?.dispose();
+    this.bodies = null;
     if (this.ball) {
       this.root.remove(this.ball);
       this.ballGeometry.dispose();
