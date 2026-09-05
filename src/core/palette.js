@@ -101,18 +101,27 @@ const SLATE = '#4a6a88';
 /** Tertiary type. Below 4.5:1 on purpose — for text that is not read, only seen. */
 const FAINT = '#7c9ab4';
 
-/* ── the wood ────────────────────────────────────────────────────────────────
- * §6 of the brief wants a wooden table and a wooden game board, and §4.1.2 of
- * the direction wants it pulled cool: a natural timber with grey in it, not
- * honey. The old value was `#dcb27a` — a honey brown at 23% saturation with the
- * red channel 98 above the blue. This is 46 above, which is still wood and is no
- * longer the warm neutral rule 2 bans.
+/* ── the wood, and the one instruction that was taken back ───────────────────
+ * §6 of the brief wants a wooden table and a wooden game board. §4.1.2 of the
+ * direction wanted it pulled cool — a natural timber with grey in it, not honey
+ * — and it was: `#dcb27a` became `#c9b79b`, dropping the red-over-blue gap from
+ * 98 to 46.
  *
- * The curling table used to be a separate cream (`#e8dcc0`). It is this now:
- * the direction unified them, and the cream was the last beige in the file.
+ * **The execution document cancels that instruction by name.** "나무는 따뜻한
+ * 목재 그대로. v3 §4.1.2 의 '차갑게 당겨라' 는 취소." So the honey is back at its
+ * original value, and this is a decision rather than a drift — the cool timber
+ * was a correct reading of a line that no longer stands.
+ *
+ * Rule 2 does not object. It bans warm neutrals where something is being USED as
+ * a neutral (`NEUTRAL_SCOPE` in the audit), and wood is not a neutral — the
+ * audit's own note says so: "나무는 나무다". The paper stays `whiteCool`.
+ *
+ * The curling table used to be a separate cream (`#e8dcc0`). It stays unified
+ * with this: the direction merged them and the document does not un-merge them,
+ * so the curling sheet is honey timber now rather than a beige of its own.
  */
-const WOOD = '#c9b79b';
-const WOOD_DARK = '#a1907a';
+const WOOD = '#dcb27a';
+const WOOD_DARK = '#b98a52';
 
 /* ── accents ─────────────────────────────────────────────────────────────────
  * Mid and deep pairs. The deep ones are for type; the mid ones are for fills and
